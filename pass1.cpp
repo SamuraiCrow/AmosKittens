@@ -11,6 +11,7 @@
 #include "AmosKittens.h"
 #include "errors.h"
 #include "var_helper.h"
+#include "pass1.h"
 
 const char *types[]={"","#","$",""};
 
@@ -28,32 +29,12 @@ char *lastLineAddr;
 
 void addLineAddress( char *_start, char *_end );
 
-#define LAST_TOKEN_(name) ((nested_count>0) && (nested_command[ nested_count -1 ].cmd == nested_ ## name ))
-#define GET_LAST_NEST ((nested_count>0) ? nested_command[ nested_count -1 ].cmd : -1)
-
 int ifCount = 0;
 int endIfCount = 0;
 int currentLine = 0;
 
 bool pass1_inside_proc = false;
 int procCount = 0;
-
-enum
-{
-	nested_if,
-	nested_then,
-	nested_then_else,
-	nested_then_else_if,
-	nested_else,
-	nested_else_if,
-	nested_while,
-	nested_repeat,
-	nested_do,
-	nested_for,
-	nested_proc,
-	nested_defFn,
-	nested_data
-};
 
 const char *nest_names[] =
 {
@@ -71,21 +52,8 @@ const char *nest_names[] =
 	"nested_data"
 };
 
-
-struct nested
-{
-	int cmd;
-	char *ptr;
-};
-
-struct nested nested_command[ 1000 ];
+struct nested nested_command[ max_nested_commands ];
 int nested_count = 0;
-
-#define addNest( enum_cmd ) \
-	nested_command[ nested_count ].cmd = enum_cmd; \
-	nested_command[ nested_count ].ptr = ptr; \
-	nested_count++;
-
 
 void dump_nest()
 {
@@ -370,7 +338,7 @@ char *pass1DefFn( char *ptr )
 }
 
 
-struct kittyData * pass1var(char *ptr, bool is_proc )
+struct kittyData * pass1var(char *ptr, bool is_proc_call, bool is_procedure )
 {
 	char *tmp;
 	int found = 0;
@@ -383,7 +351,7 @@ struct kittyData * pass1var(char *ptr, bool is_proc )
 	{
 		int type = ref -> flags & 7;
 
-		if (is_proc)
+		if (is_proc_call | is_procedure)
 		{
 			type = type_proc;
 		}
@@ -393,12 +361,12 @@ struct kittyData * pass1var(char *ptr, bool is_proc )
 			if  (*((unsigned short *) next_ptr)  == 0x0074) type |= type_array;
 		}
 
-		found = findVar(tmp, type , is_proc ? 0 : (pass1_inside_proc ? procCount : 0) );
+		found = findVar(tmp, type , ( is_proc_call | is_procedure )  ? 0 : (pass1_inside_proc ? procCount : 0) );
 		if (found)
 		{
 			ref -> ref = found;
 
-			if (is_proc)
+			if (is_procedure)
 			{
 				struct globalVar *_old = &globalVars[found-1];
 				_old -> var.type = type_proc;
@@ -409,7 +377,7 @@ struct kittyData * pass1var(char *ptr, bool is_proc )
 		}
 		else
 		{
-			if (is_proc)
+			if (is_procedure)
 			{
 				if (struct globalVar *_new = add_var_from_ref( ref, &tmp, type_proc ))
 				{
@@ -442,9 +410,11 @@ char *pass1_procedure( char *ptr )
 	short token = *((short *) ptr);
 	if (token == 0x0006)
 	{
-		current_proc = pass1var( ptr +2, true );
+		current_proc = pass1var( ptr +2, false, true );
 
-//		getchar();
+		printf("current_proc %08x\n", current_proc);
+
+		getchar();
 
 		pass1_inside_proc = true;
 		// we like to skip the variable, so its not added as a local variable.
@@ -832,7 +802,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							lastLineAddr = ptr;
 							break;
 
-				case 0x0006:	pass1var( ptr, false );
+				case 0x0006:	pass1var( ptr, false, false );
 							ret += ReferenceByteLength(ptr);
 							break;
 
@@ -849,7 +819,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							ret += ReferenceByteLength(ptr);
 							break;
 
-				case 0x0012:	pass1var( ptr, true );
+				case 0x0012:	pass1var( ptr, true, false );
 							ret += ReferenceByteLength(ptr);
 							break;
 
@@ -865,7 +835,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				// loop
-				case 0x0286:	if LAST_TOKEN_(do)
+				case 0x0286:	if IS_LAST_NEST_TOKEN(do)
 								fix_token_short( nested_do, ptr+2 );
 							else
 								setError( 28, ptr );
@@ -875,7 +845,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				// next
-				case 0x0246:	if LAST_TOKEN_(for)
+				case 0x0246:	if IS_LAST_NEST_TOKEN(for)
 								fix_token_short( nested_for, ptr+2 );
 							else
 								setError( 34,ptr );
@@ -885,7 +855,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				// until
-				case 0x025C:	if LAST_TOKEN_(repeat)
+				case 0x025C:	if IS_LAST_NEST_TOKEN(repeat)
 								fix_token_short( nested_repeat, ptr+2 );
 							else
 								setError( 32,ptr );
@@ -894,7 +864,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 				case 0x0268:	addNest( nested_while );
 							break;
 				// Wend
-				case 0x0274:	if LAST_TOKEN_(while)
+				case 0x0274:	if IS_LAST_NEST_TOKEN(while)
 								fix_token_short( nested_while, ptr+2 );
 							else
 								setError( 30,ptr );
@@ -905,24 +875,24 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				case 0x02C6:	// THEN
-							if LAST_TOKEN_(if)
+							if IS_LAST_NEST_TOKEN(if)
 								nested_command[ nested_count -1 ].cmd = nested_then;
 							else
 								setError( 23,ptr );
 							break;
 
 				case 0x25A4:	// ELSE IF
-							if LAST_TOKEN_(if)
+							if IS_LAST_NEST_TOKEN(if)
 							{
 								pass1_if_or_else(ptr);
 								addNest( nested_else_if );
 							}
-							else if LAST_TOKEN_(else_if)
+							else if IS_LAST_NEST_TOKEN(else_if)
 							{
 								pass1_if_or_else(ptr);
 								addNest( nested_else_if );
 							}
-							else if LAST_TOKEN_(then)
+							else if IS_LAST_NEST_TOKEN(then)
 							{
 								pass1_if_or_else(ptr);
 								addNest( nested_then_else_if );
@@ -936,22 +906,22 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				case 0x02D0:	// ELSE
-							if LAST_TOKEN_(if)
+							if IS_LAST_NEST_TOKEN(if)
 							{
 								pass1_if_or_else(ptr);
 								addNest( nested_else );
 							}
-							else if LAST_TOKEN_(else_if)
+							else if IS_LAST_NEST_TOKEN(else_if)
 							{
 								pass1_if_or_else(ptr);
 								addNest( nested_else );
 							}
-							else if LAST_TOKEN_(then)
+							else if IS_LAST_NEST_TOKEN(then)
 							{
 								pass1_if_or_else(ptr);
 								addNest( nested_then_else );
 							}
-							else if LAST_TOKEN_(then_else_if)
+							else if IS_LAST_NEST_TOKEN(then_else_if)
 							{
 								pass1_if_or_else(ptr);
 								addNest( nested_then_else );
@@ -965,7 +935,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 
 							endIfCount ++;
 
-							if ( LAST_TOKEN_(if) || LAST_TOKEN_(else_if) || LAST_TOKEN_(else) )
+							if ( IS_LAST_NEST_TOKEN(if) || IS_LAST_NEST_TOKEN(else_if) || IS_LAST_NEST_TOKEN(else) )
 							{
 								pass1_if_or_else( ptr );
 							}
@@ -974,6 +944,9 @@ char *nextToken_pass1( char *ptr, unsigned short token )
  							break;
 
 				case 0x0376: // Procedure
+
+							printf("last token: %d\n", last_tokens[parenthesis_count] );
+
 							procCount ++;
 							procStackCount++;
 							addNest( nested_proc );
@@ -985,7 +958,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							procStackCount--;
 							current_proc = NULL;
 
-							if LAST_TOKEN_(proc)
+							if IS_LAST_NEST_TOKEN(proc)
 							{
 								pass1_proc_end( ptr );
 							}

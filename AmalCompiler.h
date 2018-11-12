@@ -3,11 +3,18 @@ struct kittyChannel;
 
 namespace amal
 {
-	enum flags
+	enum Flags
 	{
 		flag_none,
-		flag_cmd,
-		flag_para
+		flag_cmd = 1,
+		flag_para = 2,
+		flag_parenthses =4
+	};
+
+	enum Class
+	{
+		class_cmd_arg,
+		class_cmd_normal
 	};
 };
 
@@ -26,11 +33,14 @@ struct amalWriterData
 	const char *at_script;
 	unsigned int command_len;
 	unsigned int arg_len;
+	amal::Class lastClass;
 };
 
 struct amalTab
 {
 	const char *name;
+
+	amal::Class Class;
 
 	unsigned int (*write) (
 				struct kittyChannel *channel,
@@ -43,7 +53,7 @@ struct amalTab
 	void *(*call) API_AMAL_CALL_ARGS;
 };
 
-extern void pushBackAmalCmd( amal::flags flags, void **code, struct kittyChannel *channel, void *(*cmd)  (struct kittyChannel *self, struct amalCallBack *cb)  ) ;
+extern void pushBackAmalCmd( amal::Flags flags, void **code, struct kittyChannel *channel, void *(*cmd)  (struct kittyChannel *self, struct amalCallBack *cb)  ) ;
 extern void dumpAmalStack( struct kittyChannel *channel );
 extern bool asc_to_amal_tokens( struct kittyChannel  *channel );
 extern void amal_run_one_cycle( struct kittyChannel  *channel );

@@ -267,6 +267,7 @@ char *do_to_channel( struct nativeCommand *cmd, char *tokenbuffer )
 		case 0x1A94:	// Channel x To Sprite y
 		case 0x1B9E: 	// Channel x To Bob y
 		case 0x0A18:	// Channel x To Display y
+		case 0x0DDC:  // Channel x to Rainbow y
 
 					stack ++;
 					setStackNum( token );
@@ -298,14 +299,11 @@ void channel_amal( struct kittyChannel *channel )
 {
 	Printf("%s:%s:%ld\n",__FILE__,__FUNCTION__,__LINE__);
 
-	Printf("channel -> status = %ld\n", channel -> status );
-	Printf("channel -> amalProgCounter = %08lx\n",channel -> amalProgCounter);
-
-	// channel status can change while AMAL program runs.
-	if ( ( channel -> status == channel_status::active ) && ( *channel -> amalProgCounter ) )
+	// check if program is ready to run, and it has program.
+	if ( ( channel -> status == channel_status::active ) && ( channel -> amalProgCounter ) )
 	{
-		amal_run_one_cycle(channel);
-		Printf("In the loop\n");
+		// Check that program has not ended.
+		if ( *channel -> amalProgCounter )	amal_run_one_cycle(channel);
 	}
 }
 
@@ -675,8 +673,6 @@ char *amalAmalFreeze(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-
-
 // we are in a engine lock in channel_do_object, do not try to lock again!
 void channel_do_object( struct kittyChannel *self )
 {
@@ -925,3 +921,9 @@ char *amalMoveOn(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+char *amalAmalErr(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	setStackNum(0);	// should return error pos in string.
+	return tokenBuffer;
+}

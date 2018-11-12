@@ -1381,6 +1381,8 @@ char *_gfxFade( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool done = false;
 
+#if 0
+
 //	proc_names_
 printf("%s:%d\n",__FUNCTION__,__LINE__);
 
@@ -1438,6 +1440,8 @@ printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 		screens[current_screen] -> fade_speed = getStackNum( data -> stack );
 	}
+
+#endif
 
 	popStack( stack - data->stack );
 
@@ -1798,6 +1802,32 @@ char *gfxSetLine(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	// some thing to do with drawing, not sure.
 	stackCmdNormal( _gfxSetLine, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_gfxRainbowDel( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	printf("args: %d\n",args);
+
+	switch (args)
+	{
+		case 1:
+			break;
+		default:
+			setError(22,data->tokenBuffer);
+	}
+
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *gfxRainbowDel(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	// some thing to do with drawing, not sure.
+	stackCmdNormal( _gfxRainbowDel, tokenBuffer );
 	return tokenBuffer;
 }
 

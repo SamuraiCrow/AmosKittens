@@ -9,9 +9,12 @@
 #include "AmalCompiler.h"
 #include "channel.h"
 #include "AmalCommands.h"
+#include "pass1.h"
+#include "AmosKittens.h"
 
 int nest = 0;
 char last_reg[1000] ;
+
 
 struct AmalLabelRef
 {
@@ -35,6 +38,11 @@ void *amalAllocBuffer( int size )
 #define amalFreeBuffer( ptr ) { FreeVec( ptr ); ptr = NULL; }
 
 #ifdef test_app
+
+struct nested nested_command[ max_nested_commands ];
+int nested_count = 0;
+
+int parenthesis_count;
 int amreg[26];
 
 void print_code( void **adr );
@@ -63,6 +71,16 @@ void dumpAmalStack( struct kittyChannel *channel )
 	{
 		Printf("stack %ld: value %ld\n",s, channel -> argStack[s] );
 	}
+
+	if (channel -> argStackCount>50)
+	{
+		Printf("Amal sick puppy :-(, stack is growing too quickly... \n");
+
+		if (channel -> amal_script)
+		{
+			Printf("script '%s'\n", channel -> amal_script);
+		}
+	}
 }
 
 void dumpAmalProgStack( struct kittyChannel *channel )
@@ -71,18 +89,18 @@ void dumpAmalProgStack( struct kittyChannel *channel )
 	printf("Amal Stack\n");
 	for (s=0;s<=channel -> progStackCount;s++) 
 	{
-		Printf("stack %ld: flags %lx\n",s, channel -> progStack[s].flags );
+		Printf("stack %ld: flags %lx\n",s, channel -> progStack[s].Flags );
 	}
 }
 
-void pushBackAmalCmd( amal::flags flags, void **code, struct kittyChannel *channel, void *(*cmd)  (struct kittyChannel *self, struct amalCallBack *cb)  ) 
+void pushBackAmalCmd( amal::Flags flags, void **code, struct kittyChannel *channel, void *(*cmd)  (struct kittyChannel *self, struct amalCallBack *cb)  ) 
 {
 	if (channel -> progStack)
 	{
 		struct amalCallBack *CallBack = &channel -> progStack[ channel -> progStackCount ];
 		if (CallBack)
 		{
-			CallBack -> flags = flags;
+			CallBack -> Flags = flags;
 			CallBack -> cmd = cmd;
 			CallBack -> argStackCount = channel -> argStackCount;
 			CallBack -> progStackCount = channel -> progStackCount;
@@ -94,14 +112,49 @@ void pushBackAmalCmd( amal::flags flags, void **code, struct kittyChannel *chann
 	}
 }
 
-unsigned int numAmalWriter (	struct kittyChannel *channel, struct amalTab *self, 
+unsigned int AmalWriterIf (	struct kittyChannel *channel, struct amalTab *self, 
 				void *(**call_array) ( struct kittyChannel *self, void **code, unsigned int opt ), 
 				struct amalWriterData *data,
 				unsigned int num)
 {
 	call_array[0] = self -> call;
 
-	printf("Writing %-8d to %08x - num\n",num, &call_array[1]);
+	printf("Writing %-8d to %08x/%08x - If\n",num, &call_array[0], &call_array[1]);
+
+	*((int *) &call_array[1]) = 0;
+
+	addNestAmal( if, &call_array[1] );
+
+	return 2;
+}
+
+// DO NOT ADD TO TABLE.
+unsigned int AmalWriterCondition (	struct kittyChannel *channel, struct amalTab *self, 
+				void *(**call_array) ( struct kittyChannel *self, void **code, unsigned int opt ), 
+				struct amalWriterData *data,
+				unsigned int num)
+{
+	call_array[0] = self -> call;
+
+	printf("Writing %-8d to %08x/%08x - Condition\n",0, &call_array[0], &call_array[1]);
+
+	*((int *) &call_array[1]) = 0;
+
+	// modify the nest.
+	nested_command[ nested_count -1 ].cmd = num;
+	nested_command[ nested_count -1 ].ptr = (char *) &call_array[1];
+
+	return 2;
+}
+
+unsigned int AmalWriterNum (	struct kittyChannel *channel, struct amalTab *self, 
+				void *(**call_array) ( struct kittyChannel *self, void **code, unsigned int opt ), 
+				struct amalWriterData *data,
+				unsigned int num)
+{
+	call_array[0] = self -> call;
+
+	printf("Writing %-8d to %08x/%08x - num\n",num, &call_array[0], &call_array[1]);
 
 	*((int *) &call_array[1]) = num;
 	return 2;
@@ -140,12 +193,13 @@ unsigned int stdAmalWriterScript (	struct kittyChannel *channel, struct amalTab 
 	int anim_script_len;
 	int size;
 	int le;
+	unsigned int offset;
 
 	call_array[0] = self -> call;
 
 	struct amalBuf *amalProg = &channel -> amalProg;
 
-	printf("Writing %-8d to %08x - script\n",num, &call_array[1]);
+	printf("Writing %-8d to %08x/%08x - script\n",num, &call_array[0],&call_array[1]);
 
 // find script find the size
 
@@ -167,9 +221,10 @@ unsigned int stdAmalWriterScript (	struct kittyChannel *channel, struct amalTab 
 
 	le = writeAmalStringToBuffer( s, (char *) (&call_array[2]) );
 	data -> arg_len = le ? le+1 : 0;
-	*((int *) &call_array[1]) = ((le + sizeof(void *)) / sizeof(void *) ) ;
 
-	return 2 + ((le + sizeof(void *)) / sizeof(void *) );
+	offset = ((le + sizeof(void *)) / sizeof(void *) );
+	*((int *) &call_array[1]) = offset ;
+	return 2 + offset;
 }
 
 void amal_clean_up_labels( )
@@ -291,13 +346,34 @@ unsigned int stdAmalWriterExit_Or_X ( struct kittyChannel *channel, struct amalT
 	return 1;
 }
 
+
+void fix_condition_branch( void *adr )
+{
+	void **ptr = (void **) nested_command[ nested_count-1 ].ptr;
+	*ptr = adr;
+}
+
 unsigned int stdAmalWriterNextCmd ( struct kittyChannel *channel, struct amalTab *self, 
 				void *(**call_array) ( struct kittyChannel *self, void **code, unsigned int opt ), 
 				struct amalWriterData *data,
 				unsigned int num)
 {
 	printf("writing %08x to %08x - ;\n", self -> call, &call_array[0]);
+
+	// this command doubles as "end if"
+
+	switch (GET_LAST_NEST)
+	{
+		case nested_if:
+		case nested_then:
+		case nested_else:
+			fix_condition_branch( (void *) &call_array[0] );
+			nested_count --;
+			break;
+	}
+
 	call_array[0] = self -> call;
+	amal_cmd_equal = NULL;
 	let = false;
 	return 1;
 }
@@ -307,7 +383,7 @@ unsigned int stdAmalWriter ( struct kittyChannel *channel, struct amalTab *self,
 				struct amalWriterData *data,
 				unsigned int num)
 {
-	printf("writing %08x to %08x\n", self -> call, &call_array[0]);
+	printf("writing %08x to %08x - %s\n", self -> call, &call_array[0], self->name);
 	call_array[0] = self -> call;
 	return 1;
 }
@@ -319,14 +395,14 @@ unsigned int stdAmalWriterEqual ( struct kittyChannel *channel, struct amalTab *
 {
 	if (amal_cmd_equal)
 	{
-		printf("writing [code block] to %08x ==\n", &call_array[0]);
+		printf("writing %08x to %08x ==\n", amal_cmd_equal, &call_array[0]);
 		call_array[0] = amal_cmd_equal;
-		amal_cmd_equal = NULL;
 	}
 	else
 	{
 		printf("writing %08x to %08x =\n", self -> call, &call_array[0]);
 		call_array[0] = self -> call;
+		amal_cmd_equal = amal_call_equal;
 	}
 
 	return 1;
@@ -437,98 +513,98 @@ unsigned int stdAmalWriterReg (  struct kittyChannel *channel,struct amalTab *se
 
 struct amalTab amalSymbols[] =
 {
-	{";",stdAmalWriterNextCmd,amal_call_next_cmd },
-	{"(",stdAmalWriter,amal_call_parenthses_start },
-	{")",stdAmalWriter,amal_call_parenthses_end },
-	{",",stdAmalWriter,amal_call_nextArg },
-	{"+",stdAmalWriter,amal_call_add},		// +
-	{"-",stdAmalWriter,amal_call_sub},			// -
-	{"*",stdAmalWriter,amal_call_mul},		// *
-	{"/",stdAmalWriter,amal_call_div},			// /
-	{"&",stdAmalWriter,amal_call_and},		// &
-	{"<>",stdAmalWriter,amal_call_not_equal},	// <>
-	{"<",stdAmalWriter,amal_call_less},		// <
-	{">",stdAmalWriter,amal_call_more},		// >
-	{"=",stdAmalWriterEqual,amal_call_set},	// =
-	{NULL, NULL,NULL }
+	{";",amal::class_cmd_normal,stdAmalWriterNextCmd,amal_call_next_cmd },
+	{"(",amal::class_cmd_arg,stdAmalWriter,amal_call_parenthses_start },
+	{")",amal::class_cmd_arg,stdAmalWriter,amal_call_parenthses_end },
+	{",",amal::class_cmd_arg,stdAmalWriter,amal_call_nextArg },
+	{"+",amal::class_cmd_arg,stdAmalWriter,amal_call_add},			// +
+	{"-",amal::class_cmd_arg,stdAmalWriter,amal_call_sub},			// -
+	{"*",amal::class_cmd_arg,stdAmalWriter,amal_call_mul},			// *
+	{"/",amal::class_cmd_arg,stdAmalWriter,amal_call_div},			// /
+	{"&",amal::class_cmd_arg,stdAmalWriter,amal_call_and},			// &
+	{"<>",amal::class_cmd_arg,stdAmalWriter,amal_call_not_equal},	// <>
+	{"<",amal::class_cmd_arg,stdAmalWriter,amal_call_less},			// <
+	{">",amal::class_cmd_arg,stdAmalWriter,amal_call_more},			// >
+	{"=",amal::class_cmd_arg,stdAmalWriterEqual,amal_call_set},		// =
+	{NULL, amal::class_cmd_arg,NULL,NULL }
 };
 
 struct amalTab amalCmds[] =
 {
-	{"@{never used}",stdAmalWriter,NULL},
-	{"@{number}",numAmalWriter,amal_set_num},	//number token, reserved.
-	{"O",stdAmalWriter,amal_call_on},	// On
-	{"D",stdAmalWriter,NULL},	// Direct
-	{"W",stdAmalWriter,NULL},	// Wait
-	{"I",stdAmalWriter,NULL},	 // If
-	{"X",stdAmalWriterExit_Or_X,NULL},	// eXit
-	{"Y",stdAmalWriter,amal_call_y},	// eXit
-	{"L",stdAmalWriterLet,NULL},	// Let
-	{"AU",stdAmalWriter,NULL},	// AUtotest
-	{"A",stdAmalWriterScript,amal_call_anim},	// Anim
-	{"M",stdAmalWriter,amal_call_move},	// Move
-	{"P",stdAmalWriter,amal_call_pause},	// Pause
-	{"R0",stdAmalWriterReg,NULL },	// R0
-	{"R1",stdAmalWriterReg,NULL },	// R0
-	{"R2",stdAmalWriterReg,NULL },	// R0
-	{"R3",stdAmalWriterReg,NULL },	// R0
-	{"R4",stdAmalWriterReg,NULL },	// R0
-	{"R5",stdAmalWriterReg,NULL },	// R0
-	{"R6",stdAmalWriterReg,NULL },	// R0
-	{"R7",stdAmalWriterReg,NULL },	// R0
-	{"R8",stdAmalWriterReg,NULL },	// R0
-	{"R9",stdAmalWriterReg,NULL },	// R0
-	{"RA",stdAmalWriterReg,NULL },	// R0
-	{"RB",stdAmalWriterReg,NULL },	// R0
-	{"RC",stdAmalWriterReg,NULL },	// R0
-	{"RD",stdAmalWriterReg,NULL },	// R0
-	{"RE",stdAmalWriterReg,NULL },	// R0
-	{"RF",stdAmalWriterReg,NULL },	// R0
-	{"RG",stdAmalWriterReg,NULL },	// R0
-	{"RH",stdAmalWriterReg,NULL },	// R0
-	{"RI",stdAmalWriterReg,NULL },	// R0
-	{"RJ",stdAmalWriterReg,NULL },	// R0
-	{"RK",stdAmalWriterReg,NULL },	// R0
-	{"RL",stdAmalWriterReg,NULL },	// R0
-	{"RM",stdAmalWriterReg,NULL },	// R0
-	{"RN",stdAmalWriterReg,NULL },	// R0
-	{"RO",stdAmalWriterReg,NULL },	// R0
-	{"RP",stdAmalWriterReg,NULL },	// R0
-	{"RQ",stdAmalWriterReg,NULL },	// R0
-	{"RR",stdAmalWriterReg,NULL },	// R0
-	{"RS",stdAmalWriterReg,NULL },	// R0
-	{"RT",stdAmalWriterReg,NULL },	// R0
-	{"RU",stdAmalWriterReg,NULL },	// R0
-	{"RV",stdAmalWriterReg,NULL },	// R0
-	{"RW",stdAmalWriterReg,NULL },	// R0
-	{"RX",stdAmalWriterReg,NULL },	// R0
-	{"RY",stdAmalWriterReg,NULL },	// R0
-	{"RZ",stdAmalWriterReg,NULL },	// R0
-	{"F",stdAmalWriterFor,NULL},				// For
-	{"T",stdAmalWriterTo,amal_call_nextArg},	// To
-	{"N",stdAmalWriterWend,amal_call_wend},	// Next
-	{"PL",stdAmalWriter,NULL},	// Play
-	{"E",stdAmalWriter,NULL},	// End
-	{"XM",stdAmalWriter,amal_call_xm},	// XM
-	{"YM",stdAmalWriter,amal_call_ym},	// YM
-	{"K1",stdAmalWriter,NULL},	// k1		mouse key 1
-	{"K2",stdAmalWriter,NULL},	// k2		mouse key 2
-	{"J0",stdAmalWriter,amal_call_j0},			// j0		joy0
-	{"J1",stdAmalWriter,amal_call_j1},			// J1		Joy1
-	{"J",stdAmalWriterJump,amal_call_jump},	// Jump
-	{"Z",stdAmalWriter,amal_call_z},			// Z(n)	random number
-	{"XH",stdAmalWriter,amal_call_xh},		// x hardware
-	{"YH",stdAmalWriter,amal_call_yh},		// y hardware
-	{"XS",stdAmalWriter,amal_call_sx},		// screen x
-	{"YS",stdAmalWriter,amal_call_sy},		// screen y
-	{"BC",stdAmalWriter,amal_call_bobCol},	// Bob Col(n,s,e)	// only with Synchro
-	{"SC",stdAmalWriter,amal_call_spriteCol},	// Sprite Col(m,s,e)	// only with Synchro
-	{"C",stdAmalWriter,amal_call_col},			// Col
-	{"V",stdAmalWriter,NULL},	// Vumeter
-	{"@while",stdAmalWriter,amal_call_while },
-	{"@set",stdAmalWriter,amal_call_set },
-	{"@reg",stdAmalWriter,amal_call_reg },
-	{NULL, NULL,NULL }
+	{"@{never used}",amal::class_cmd_arg,stdAmalWriter,NULL},
+	{"@{number}",amal::class_cmd_arg,AmalWriterNum,amal_set_num},	//number token, reserved.
+	{"O",amal::class_cmd_normal,stdAmalWriter,amal_call_on},		// On
+	{"D",amal::class_cmd_normal,stdAmalWriter,NULL},				// Direct
+	{"W",amal::class_cmd_normal,stdAmalWriter,NULL},				// Wait
+	{"I",amal::class_cmd_normal,AmalWriterIf,amal_call_if},			 // If
+	{"X",amal::class_cmd_normal,stdAmalWriterExit_Or_X,NULL},		// X
+	{"Y",amal::class_cmd_normal,stdAmalWriter,amal_call_y},			// Y
+	{"L",amal::class_cmd_normal,stdAmalWriterLet,NULL},			// Let
+	{"AU",amal::class_cmd_normal,stdAmalWriter,NULL},				// AUtotest
+	{"A",amal::class_cmd_normal,stdAmalWriterScript,amal_call_anim},	// Anim
+	{"M",amal::class_cmd_normal,stdAmalWriter,amal_call_move},		// Move
+	{"P",amal::class_cmd_normal,stdAmalWriter,amal_call_pause},		// Pause
+	{"R0",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R0
+	{"R1",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R1
+	{"R2",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R2
+	{"R3",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R3
+	{"R4",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R4
+	{"R5",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R5
+	{"R6",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R6
+	{"R7",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R7
+	{"R8",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R8
+	{"R9",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// R9
+	{"RA",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RA
+	{"RB",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RB
+	{"RC",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RC
+	{"RD",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RD
+	{"RE",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RE
+	{"RF",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RF
+	{"RG",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RG
+	{"RH",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RH
+	{"RI",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RI
+	{"RJ",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RJ
+	{"RK",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RK
+	{"RL",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RL
+	{"RM",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RM
+	{"RN",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RN
+	{"RO",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RO
+	{"RP",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RP
+	{"RQ",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RQ
+	{"RR",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RR
+	{"RS",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RS
+	{"RT",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RT
+	{"RU",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RU
+	{"RV",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RV
+	{"RW",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RW
+	{"RX",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RX
+	{"RY",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RY
+	{"RZ",amal::class_cmd_arg,stdAmalWriterReg,NULL },	// RZ
+	{"F",amal::class_cmd_normal,stdAmalWriterFor,NULL},			// For (should be null)
+	{"T",amal::class_cmd_arg,stdAmalWriterTo,amal_call_nextArg},		// To
+	{"N",amal::class_cmd_normal,stdAmalWriterWend,amal_call_wend},	// Next (should be null)
+	{"PL",amal::class_cmd_normal,stdAmalWriter,NULL},				// Play
+	{"E",amal::class_cmd_normal,stdAmalWriter,NULL},				// End
+	{"XM",amal::class_cmd_arg,stdAmalWriter,amal_call_xm},			// XM
+	{"YM",amal::class_cmd_arg,stdAmalWriter,amal_call_ym},			// YM
+	{"K1",amal::class_cmd_arg,stdAmalWriter,NULL},					// k1		mouse key 1
+	{"K2",amal::class_cmd_arg,stdAmalWriter,NULL},					// k2		mouse key 2
+	{"J0",amal::class_cmd_arg,stdAmalWriter,amal_call_j0},			// j0		joy0
+	{"J1",amal::class_cmd_arg,stdAmalWriter,amal_call_j1},			// J1		Joy1
+	{"J",amal::class_cmd_normal,stdAmalWriterJump,amal_call_jump},	// Jump
+	{"Z",amal::class_cmd_arg,stdAmalWriter,amal_call_z},				// Z(n)	random number
+	{"XH",amal::class_cmd_arg,stdAmalWriter,amal_call_xh},			// x hardware
+	{"YH",amal::class_cmd_arg,stdAmalWriter,amal_call_yh},			// y hardware
+	{"XS",amal::class_cmd_arg,stdAmalWriter,amal_call_sx},			// screen x
+	{"YS",amal::class_cmd_arg,stdAmalWriter,amal_call_sy},			// screen y
+	{"BC",amal::class_cmd_arg,stdAmalWriter,amal_call_bobCol},		// Bob Col(n,s,e)	// only with Synchro
+	{"SC",amal::class_cmd_arg,stdAmalWriter,amal_call_spriteCol},		// Sprite Col(m,s,e)	// only with Synchro
+	{"C",amal::class_cmd_arg,stdAmalWriter,amal_call_col},			// Col
+	{"V",amal::class_cmd_normal,stdAmalWriter,NULL},				// Vumeter
+	{"@while",amal::class_cmd_normal,stdAmalWriter,amal_call_while },
+	{"@set",amal::class_cmd_arg,stdAmalWriter,amal_call_set },
+	{"@reg",amal::class_cmd_arg,stdAmalWriter,amal_call_reg },
+	{NULL, amal::class_cmd_arg,NULL,NULL }
 };
 
 void print_code( void **adr )
@@ -609,7 +685,7 @@ void remove_lower_case(char *txt)
 	for (c=txt;*c;c++)
 	{
 		// remove noice.
-		while ((*c>='a')&&(*c<='z'))	{ c++; printf("skip\n"); }
+		while (((*c>='a')&&(*c<='z'))||(*c=='#'))	{ c++;  }
 		
 		space_repeat = false;
 		if (d!=txt) 
@@ -691,12 +767,21 @@ bool asc_to_amal_tokens( struct kittyChannel  *channel )
 {
 	const char *s;
 	struct amalTab *found;
+	struct amalTab write_cmd;
 	char txt[30];
 	const char *script = channel -> amal_script;
 	struct amalBuf *amalProg = &channel -> amalProg;
 	struct amalWriterData data;
 
+	nested_count = 0;
+
+#ifdef test_app
+// 1000 to avoid reallocs.
+// 20 to test reallocs.
+	allocAmalBuf( amalProg, 1000 );	
+#else
 	allocAmalBuf( amalProg, 60 );
+#endif
 
 	printf("script: '%s'\n",script);
 
@@ -715,7 +800,28 @@ bool asc_to_amal_tokens( struct kittyChannel  *channel )
 			data.command_len = strlen(found -> name);
 			data.arg_len = 0;
 
+			if ( found -> Class == amal::class_cmd_normal  )
+			{
+				switch (GET_LAST_NEST)
+				{
+					case nested_if:
+						fix_condition_branch( &amalProg -> call_array[data.pos] );
+						write_cmd.call = amal_call_then; 
+						data.pos += AmalWriterCondition( channel, &write_cmd , &amalProg -> call_array[data.pos], &data, nested_then);
+						amal_cmd_equal = NULL;
+						break;
+
+					case nested_then:
+						fix_condition_branch( &amalProg -> call_array[data.pos] + 2 );	// skip over else
+						write_cmd.call = amal_call_else; 
+						data.pos += AmalWriterCondition( channel, &write_cmd , &amalProg -> call_array[data.pos], &data, nested_else);
+						amal_cmd_equal = NULL;
+						break;
+				}
+			}
+
 			data.pos += found -> write( channel, found, &amalProg -> call_array[data.pos], &data, 0 );
+			data.lastClass = found -> Class;
 			s += data.command_len + data.arg_len;
 		}
 		else 	if (*s == ' ') 
@@ -739,6 +845,7 @@ bool asc_to_amal_tokens( struct kittyChannel  *channel )
 			data.arg_len = 0;
 
 			data.pos += found -> write( channel, found, &amalProg -> call_array[data.pos], &data, num );
+			data.lastClass = found -> Class;
 		}
 		else if ((*s >= 'A')&&(*s<='Z'))
 		{
@@ -814,7 +921,6 @@ void amal_run_one_cycle(struct kittyChannel  *channel)
 		ret = (*call) ( channel, (void **) call, 0 );
 		if (ret) 
 		{
-			Printf("code offset set %08lx\n",ret);
 			call = (void* (**)(kittyChannel*, void**, unsigned int)) ret;
 		}
 
@@ -826,14 +932,11 @@ void amal_run_one_cycle(struct kittyChannel  *channel)
 		}
 	}
 
-	Printf("<temp exit loop>\n");
-
 	channel -> amalProgCounter = call;	// save counter.
 	if (*call == NULL) 
 	{
-		Printf("%s - no more data\n",__FUNCTION__);
+		Printf("%s:%s:%ld - amal program ended\n",__FILE__,__FUNCTION__,__LINE__);
 		channel -> status = channel_status::done;
-		getchar();
 	}
 
 }
@@ -900,8 +1003,9 @@ void dump_amal_labels()
 
 #ifdef test_app
 
- unsigned int amiga_joystick_dir[4];
- unsigned int amiga_joystick_button[4];
+unsigned int amiga_joystick_dir[4];
+unsigned int amiga_joystick_button[4];
+struct retroScreen *screens[8];
 
 int obj_x = 100, obj_y = 50, obj_image = 20;
 

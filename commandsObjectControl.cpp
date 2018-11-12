@@ -11,6 +11,7 @@
 #include "stack.h"
 #include "amosKittens.h"
 #include "commandsGfx.h"
+#include "commandsScreens.h"
 #include "errors.h"
 #include "engine.h"
 
@@ -150,9 +151,6 @@ char *ocZoneStr(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-int XScreen_formula( struct retroScreen *screen );
-int YScreen_formula( struct retroScreen *screen );
-
 char *_ocMouseZone( struct glueCommands *data, int nextToken )
 {
 	struct retroScreen *s;
@@ -167,8 +165,8 @@ char *_ocMouseZone( struct glueCommands *data, int nextToken )
 		{
 			if (s = screens[zones[z].screen])
 			{
-				int x = XScreen_formula( s );
-				int y = YScreen_formula( s );
+				int x = XScreen_formula( s, engine_mouse_x );
+				int y = YScreen_formula( s, engine_mouse_y );
 				zz = &zones[z];
 				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	rz = z;
 			}
@@ -480,6 +478,27 @@ char *ocSynchro(struct nativeCommand *cmd, char *tokenBuffer)
 char *ocUpdateOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	return tokenBuffer;
+}
+
+char *_ocUpdateEvery( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	if (args == 1)
+	{
+	}
+	else setError(22,data->tokenBuffer);;
+
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *ocUpdateEvery(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	stackCmdParm( _ocUpdateEvery, tokenBuffer );
 	return tokenBuffer;
 }
 

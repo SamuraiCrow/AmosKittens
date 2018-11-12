@@ -12,7 +12,7 @@ struct amalCallBack
 	unsigned char last_reg;
 	int argStackCount;
 	int progStackCount;
-	amal::flags flags;
+	amal::Flags Flags;
 };
 
 
@@ -83,6 +83,7 @@ struct kittyChannel
 	unsigned int progStackCount;
 	unsigned int loopCount; 
 	unsigned int last_reg;
+	void *(*pushBackFunction)  (struct kittyChannel *self, struct amalCallBack *cb);
 };
 
 

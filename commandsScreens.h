@@ -4,6 +4,11 @@
 #include <proto/exec.h>
 #include "amosKittens.h"
 
+int XScreen_formula( struct retroScreen *screen, int x );
+int YScreen_formula( struct retroScreen *screen, int y );
+int XHard_formula( struct retroScreen *screen, int x );
+int YHard_formula( struct retroScreen *screen, int y );
+
 char *gfxLowres(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxHires(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxScreenOpen(struct nativeCommand *cmd, char *tokenBuffer);
@@ -30,4 +35,6 @@ char *gfxDefault(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxScreenSwap(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxXScreen(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxYScreen(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxXHard(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxYHard(struct nativeCommand *cmd, char *tokenBuffer);
 
