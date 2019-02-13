@@ -1,5 +1,15 @@
 
 #ifndef __amoskittens_h__
+
+#ifdef _MSC_VER
+#define BOOL bool
+#define PACKED
+typedef void * APTR;
+#else
+#define PACKED __attribute__ ((__packed__))
+#endif
+
+
 #define __amoskittens_h__
 
 #define PROC_STACK_SIZE 1000
@@ -65,6 +75,7 @@ enum
 #define cmd_onBreak		256
 #define cmd_never			512
 
+
 enum
 {
 	type_int = 0,
@@ -120,12 +131,18 @@ struct proc
 	int ref;
 };
 
-struct extension 
+struct extension
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	unsigned char ext;
 	unsigned char	__align__;
 	unsigned short token;
-} __attribute__((packed)) ;
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct extension_lib
 {
@@ -192,6 +209,7 @@ struct defFn
 
 struct kittyBank 
 {
+	int id;
 	int type;
 	char *start;
 	char *object_ptr;
@@ -226,7 +244,6 @@ struct zone
 	int x1;
 	int y1;
 };
-
 
 #define stackIfSuccess()					\
 	cmdTmp[cmdStack].cmd = _ifSuccess;		\
@@ -265,6 +282,14 @@ struct zone
 	cmdTmp[cmdStack].stack = stack; \
 	cmdStack++; \
 
+#define stackCmdFlags( fn, buf, flags )				\
+	cmdTmp[cmdStack].cmd = fn;		\
+	cmdTmp[cmdStack].tokenBuffer = buf;	\
+	cmdTmp[cmdStack].flag = flags;	\
+	cmdTmp[cmdStack].lastVar = last_var;	\
+	cmdTmp[cmdStack].stack = stack; \
+	cmdStack++; \
+
 #define stackCmdIndex( fn, buf )	{			\
 	cmdTmp[cmdStack].cmd = fn;		\
 	cmdTmp[cmdStack].tokenBuffer = buf;	\
@@ -281,6 +306,7 @@ struct zone
 	cmdTmp[cmdStack].flag = cmd_para;	\
 	cmdTmp[cmdStack].lastVar = last_var;	\
 	cmdTmp[cmdStack].stack = stack; \
+	cmdTmp[cmdStack].lastToken = last_tokens[parenthesis_count]; \
 	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
 	cmdStack++; \
 
@@ -309,7 +335,6 @@ extern int commandCnt;
 extern struct kittyData kittyStack[];
 extern struct glueCommands cmdTmp[];
 extern struct proc procStack[];
-extern struct kittyBank kittyBanks[];
 
 extern struct extension_lib	kitty_extensions[32];
 
@@ -340,8 +365,10 @@ extern void do_std_next_arg(nativeCommand *cmd, char *ptr);
 extern char *do_to_default( struct nativeCommand *cmd, char *tokenbuffer );
 
 extern void (**do_input) ( struct nativeCommand *cmd, char *tokenBuffer );
+extern char *(**do_to) ( struct nativeCommand *cmd, char *tokenBuffer );
+
 extern void (*do_breakdata) ( struct nativeCommand *cmd, char *tokenBuffer );
-extern char *(*do_to) ( struct nativeCommand *cmd, char *tokenBuffer );
+
 
 extern struct glueCommands input_cmd_context;
 

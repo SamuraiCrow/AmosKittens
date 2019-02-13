@@ -1,8 +1,19 @@
 
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
+
+#ifdef __linux__
+#include <stdint.h>
+#include <limits.h>
+#endif
+
 #include <string>
 #include <iostream>
 
@@ -23,7 +34,6 @@ extern struct retroScreen *screens[8] ;
 
 extern void setStackStr( char *str );
 extern void setStackStrDup( const char *str );
-extern bool engine_started ;
 
 using namespace std;
 
@@ -64,7 +74,8 @@ char *_mid( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1;
 	char *str;
 	char *tmp = NULL;
-	int _start, _len;
+	int _slen=0;
+	int _start=0, _len = 0;
 
 	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
 
@@ -72,26 +83,43 @@ char *_mid( struct glueCommands *data, int nextToken )
 	{
 		case 2:
 			str = getStackString( stack - 1 );
-			_start = getStackNum( stack ) -1;
+			_start = getStackNum( stack ) ;	
 
-			if (_start<0) _start = 0;
-			if (_start>strlen(str)-1) _start = strlen(str)-1;
-			tmp = strdup(str + _start );
+			if (_start == 0 ) _start = 1;	// 0 is allowed, even if string starts at 1.
+			if (_start>0)
+			{
+				_start--;
+				_slen = strlen(str);
+				if (_start>_slen-1) _start = _slen-1;
+				if (_start<0) _start=0;
+				tmp = strdup(str + _start );
+			}
 			break;
 
 		case 3:
 			str = getStackString( stack - 2 );
-			_start = getStackNum( stack -1 ) -1;
+			_start = getStackNum( stack -1 ) ;
 			_len = getStackNum( stack );
 
-			if (_start<0) _start = 0;
-			if (_start>strlen(str)-1) _start = strlen(str)-1;
-			tmp = strndup(str + _start, _len );
+			if (_start == 0 ) _start = 1;
+			if (_start>0)
+			{
+				_start--;
+				_slen = strlen(str);
+				if (_start>_slen-1) _start = _slen-1;
+				if (_start<0) _start=0;
+				tmp = strndup(str + _start, _len );
+			}	
 			break;
+
 		default:
 			setError(22,data->tokenBuffer);
-	}	
+	}
 
+	if ((_start<0)||(_len<0)) 
+	{
+		setError(23,data->tokenBuffer);
+	}
 	popStack(stack - data->stack);
 
 	if (tmp) setStackStr(tmp);
@@ -103,7 +131,7 @@ char *_right( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	char *str;
 	char *tmp = NULL;
-	int _start, _len;
+	int _len;
 
 	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
 
@@ -111,7 +139,7 @@ char *_right( struct glueCommands *data, int nextToken )
 	{
 		str = getStackString( stack - 1 );
 		_len = getStackNum( stack  );
-		if (_len>strlen(str)) _start = strlen(str);
+		if (_len>(int) strlen(str)) _len = strlen(str);
 
 		tmp = strdup(str + strlen(str) - _len );
 	}	
@@ -126,18 +154,41 @@ char *_right( struct glueCommands *data, int nextToken )
 char *_instr( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack + 1 ;
-	char *str,*find, *ret;
-	char *tmp = NULL;
+	char *_str,*_find, *ret;
 	int  _pos = 0;
+	int _start = 0;
 
 	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
 
-	if (args == 2)
+	switch (args)
 	{
-		str = getStackString( stack - 1 );
-		find = getStackString( stack );
-		ret = strstr( str, find );
-		_pos = ret ? (unsigned int) (ret - str) +1 : 0;
+		case 2:
+				_str = getStackString( stack - 1 );
+				_find = getStackString( stack );
+
+				if ((_str)&&(_find))
+				{
+					ret = strstr( _str, _find );
+					_pos = ret ? (unsigned int) (ret - _str) +1 : 0;
+				}
+				break;
+		case 3:
+				_str = getStackString( stack - 2 );
+				_find = getStackString( stack -1 );
+				_start = getStackNum( stack ) -1;
+
+				if ((_str)&&(_find)&&(_start>-1) )
+				{
+					int str_len = kittyStack[stack-2].len;
+
+					if (_start >= str_len) _start = str_len-1;
+
+					ret = strstr( _str + _start, _find );
+					_pos = ret ? (unsigned int) (ret - _str) +1 + _start : 0;
+				}
+				break;
+		default:
+				setError(22,data->tokenBuffer);
 	}	
 
 	popStack(stack - data->stack);
@@ -256,7 +307,7 @@ char *_flip( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int l,i;
-	char *str,*p,t;
+	char *str,t;
 
 	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
 
@@ -282,32 +333,37 @@ char *_string( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int i,_len;
-	char *str;
+	char *str = NULL;
 	char *_str;
 
-	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
+	proc_names_printf("%s:%s:%n\n",__FILE__,__FUNCTION__,__LINE__);
 
-	_str = getStackString( stack - 1 );
-	_len = getStackNum( stack  );
+	switch (args)
+	{
+		case 2:
+			_str = getStackString( stack - 1 );
+			_len = getStackNum( stack  );
+			str = (char *) malloc(_len+1);
 
-	str = (char *) malloc(_len+1);
-
-	for (i=0;i<_len;i++) str[i]= (_str ? *_str : 0) ;
-	str[i]= 0;
+			for (i=0;i<_len;i++) str[i]= (_str ? *_str : 0) ;
+			str[i]= 0;
+			break;
+		default:
+			setError(22,data->tokenBuffer);
+	}
 
 	popStack(stack - data->stack);
-
-	setStackStr(str);
+	if (str) setStackStr(str);
 
 	return NULL;
 }
 
 char *_asc( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack + 1 ;
+//	int args = stack - data->stack + 1 ;
 	char *_str;
 
-	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
+	proc_names_printf("%s:%s:%n\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_str = getStackString( stack  );
 
@@ -320,11 +376,11 @@ char *_asc( struct glueCommands *data, int nextToken )
 
 char *_val( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack  + 1;
+//	int args = stack - data->stack  + 1;
 	double num = 0.0f;
 	char *_str;
 
-	proc_names_printf("%s:%d args %d\n",__FUNCTION__,__LINE__,args);
+	proc_names_printf("%s:%s:%n\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_str = getStackString( stack  );
 	if (_str)
@@ -344,7 +400,7 @@ char *_chr( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack + 1;
 	char _str[2];
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_str[0] = args == 1 ? (char) getStackNum( stack ) : 0;
 	_str[1] =0;
@@ -360,13 +416,21 @@ char *_len( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack + 1 ;
 	int len = 0;
-	char *_str;
 
-	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (kittyStack[data->stack + 1].type == type_string)
+	switch (args)
 	{
-		len  = (kittyStack[stack].len);
+		case 1:
+			if (kittyStack[stack].type == type_string)
+			{
+				len  = (kittyStack[stack].len);
+			}
+			break;
+
+		default:		
+			setError(22,data->tokenBuffer);
+
 	}
 
 	popStack(stack - data->stack);
@@ -378,14 +442,13 @@ char *_len( struct glueCommands *data, int nextToken )
 
 char *_space( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack + 1 ;
+//	int args = stack - data->stack + 1 ;
 	int i,_len;
 	char *str;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_len = getStackNum( stack );
-
 	str = (char *) malloc(_len+1);
 
 	for (i=0;i<_len;i++) str[i]=' ';
@@ -400,10 +463,10 @@ char *_space( struct glueCommands *data, int nextToken )
 
 char *_upper( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack + 1  ;
+//	int args = stack - data->stack + 1  ;
 	char *str,*s;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	str = getStackString( stack );
 
@@ -419,10 +482,10 @@ char *_upper( struct glueCommands *data, int nextToken )
 
 char *_lower( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack + 1 ;
+//	int args = stack - data->stack + 1 ;
 	char *str,*s;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	str = getStackString( stack );
 
@@ -598,7 +661,6 @@ void _match_str( struct kittyData *array,  char *str )
 	int new_delta;
 	int found_chars = 0;
 	int delta =INT_MAX;
-	int value;
 	int i;
 	int _l = strlen(str);
 	char c;
@@ -759,7 +821,6 @@ char *cmdSort(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *cmdMatch(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	unsigned short next_token = *((short *) (tokenBuffer));
 	struct reference *ref = NULL;
 	int idx1,idx2;
 	struct kittyData *array_var = NULL;
@@ -839,7 +900,6 @@ char *_cmdRepeatStr( struct glueCommands *data, int nextToken )
 	string txt;
 	int args = stack - data->stack + 1;
 	char *str;
-	char *tmp = NULL;
 	int _num;
 
 	proc_names_printf("%s: args %d\n",__FUNCTION__,args);

@@ -13,8 +13,8 @@ namespace amal
 
 	enum Class
 	{
-		class_cmd_arg,
-		class_cmd_normal
+		class_cmd_arg = 1,
+		class_cmd_normal = 2
 	};
 };
 
@@ -29,7 +29,7 @@ struct amalBuf
 
 struct amalWriterData
 {
-	int pos;
+	unsigned int pos;
 	const char *at_script;
 	unsigned int command_len;
 	unsigned int arg_len;
@@ -55,9 +55,10 @@ struct amalTab
 
 extern void pushBackAmalCmd( amal::Flags flags, void **code, struct kittyChannel *channel, void *(*cmd)  (struct kittyChannel *self, struct amalCallBack *cb)  ) ;
 extern void dumpAmalStack( struct kittyChannel *channel );
+extern void dumpAmalRegs(struct kittyChannel *channel);
 extern bool asc_to_amal_tokens( struct kittyChannel  *channel );
 extern void amal_run_one_cycle( struct kittyChannel  *channel );
-extern void amal_fix_labels( void **code );
+extern bool amal_fix_labels( void **code );
 extern void amal_clean_up_labels();
 extern void freeAmalBuf( struct amalBuf *i);
 

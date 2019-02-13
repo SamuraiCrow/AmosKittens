@@ -1,15 +1,22 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(__amigaos4__) || defined(__amigaos__)
 #include <proto/exec.h>
+#include <proto/dos.h>
+#endif
+
 #include "debug.h"
 #include <string>
-#include <proto/dos.h>
-
 
 #include "amosKittens.h"
 #include "amalCompiler.h"
 #include "channel.h"
+
+extern void *set_reg (struct kittyChannel *self, struct amalCallBack *cb);
 
 void initChannel( struct kittyChannel *item, int channel )
 {
@@ -44,7 +51,6 @@ void initChannel( struct kittyChannel *item, int channel )
 		item -> move_count_to = 0; 
 
 		item -> status = channel_status::uninitialized;
-
 }
 
 struct kittyChannel * ChannelTableClass::newChannel(  int channel )

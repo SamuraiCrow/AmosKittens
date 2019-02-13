@@ -1,9 +1,25 @@
+
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
 #include <exec/emulation.h>
 #include <proto/dos.h>
+#include "readhunk.h"
+#endif
+
+#ifdef __linux__
+#include <retromode.h>
+#include <retromode_lib.h>
+#include <stdint.h>
+#include <unistd.h>
+#include "os/linux/stuff.h"
+#endif
+
 #include "debug.h"
 #include <string>
 #include <iostream>
@@ -12,8 +28,11 @@
 #include "amosKittens.h"
 #include "commands.h"
 #include "commandsMachine.h"
+#include "commandsBanks.h"
 #include "errors.h"
-#include "readhunk.h"
+
+
+#include "var_helper.h"
 
 extern int last_var;
 extern struct globalVar globalVars[];
@@ -28,7 +47,7 @@ char *_machineCopy( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==3)
 	{
@@ -58,7 +77,7 @@ char *_machinePoke( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -79,6 +98,12 @@ char *_machinePoke( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
+char *machinePoke(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _machinePoke, tokenBuffer );
+	return tokenBuffer;
+}
+
 char *_machineDoke( struct glueCommands *data, int nextToken )
 {
 	short *adr;
@@ -87,7 +112,7 @@ char *_machineDoke( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -116,7 +141,7 @@ char *_machineLoke( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -143,7 +168,7 @@ char *_machinePeek( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -169,13 +194,19 @@ char *_machinePeek( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
+char *machinePeek(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdParm( _machinePeek, tokenBuffer );
+	return tokenBuffer;
+}
+
 char *_machineDeek( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -202,7 +233,7 @@ char *_machineLeek( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -223,17 +254,7 @@ char *_machineLeek( struct glueCommands *data, int nextToken )
 }
 
 
-char *machinePoke(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	stackCmdNormal( _machinePoke, tokenBuffer );
-	return tokenBuffer;
-}
 
-char *machinePeek(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	stackCmdParm( _machinePeek, tokenBuffer );
-	return tokenBuffer;
-}
 
 char *machineDoke(struct nativeCommand *cmd, char *tokenBuffer)
 {
@@ -267,7 +288,7 @@ char *machineCopy(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *machineVarPtr(struct nativeCommand *cmd, char *ptr)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (NEXT_TOKEN( ptr ) == 0x0074) ptr+=2;
 
@@ -306,7 +327,7 @@ char *_machineFill( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int _n, _size = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==3)
 	{
@@ -386,7 +407,7 @@ char *_machineRolB( struct glueCommands *data, int nextToken )
 	unsigned int shift;
 	int args = stack - data->stack +1 ;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -411,7 +432,7 @@ char *_machineRolW( struct glueCommands *data, int nextToken )
 	unsigned int shift;
 	int args = stack - data->stack +1 ;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -436,7 +457,7 @@ char *_machineRolL( struct glueCommands *data, int nextToken )
 	unsigned int shift;
 	int args = stack - data->stack +1 ;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -461,7 +482,7 @@ char *_machineRorB( struct glueCommands *data, int nextToken )
 	unsigned int shift;
 	int args = stack - data->stack +1 ;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -486,7 +507,7 @@ char *_machineRorW( struct glueCommands *data, int nextToken )
 	unsigned int shift;
 	int args = stack - data->stack +1 ;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -511,7 +532,7 @@ char *_machineRorL( struct glueCommands *data, int nextToken )
 	unsigned int shift;
 	int args = stack - data->stack +1 ;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -577,7 +598,7 @@ char *_machineBtst( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool ret = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -600,9 +621,8 @@ char *_machineBset( struct glueCommands *data, int nextToken )
 {
 	unsigned int bit;
 	int args = stack - data->stack +1 ;
-	bool ret = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -624,9 +644,8 @@ char *_machineBchg( struct glueCommands *data, int nextToken )
 {
 	unsigned int bit;
 	int args = stack - data->stack +1 ;
-	bool ret = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -648,9 +667,8 @@ char *_machineBclr( struct glueCommands *data, int nextToken )
 {
 	unsigned int bit;
 	int args = stack - data->stack +1 ;
-	bool ret = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -712,11 +730,8 @@ char *_set_reg( struct glueCommands *data, int nextToken )
 
 char *_machineAREG( struct glueCommands *data, int nextToken )
 {
-	unsigned int bit;
 	int args = stack - data->stack +1 ;
-	bool ret = false;
-
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -732,11 +747,8 @@ char *_machineAREG( struct glueCommands *data, int nextToken )
 
 char *_machineDREG( struct glueCommands *data, int nextToken )
 {
-	unsigned int bit;
 	int args = stack - data->stack +1 ;
-	bool ret = false;
-
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -764,10 +776,14 @@ char *machineDREG(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_machineDOSCALL( struct glueCommands *data, int nextToken )
 {
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+#ifdef __amigaos4__
+
 	int libVec;
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+
 
 	if (args==1)
 	{
@@ -776,6 +792,8 @@ char *_machineDOSCALL( struct glueCommands *data, int nextToken )
 		if (libVec<0)
 		{
 			ret = libVec;
+
+			regs[8+6] = (unsigned int) DOSBase;
 
 			ret = EmulateTags( 
 					DOSBase,
@@ -788,9 +806,10 @@ char *_machineDOSCALL( struct glueCommands *data, int nextToken )
 					ET_RegisterD5,regs[5],
 					ET_RegisterD6,regs[6],
 					ET_RegisterD7,regs[7],
-					ET_RegisterA0,regs[8],
-					ET_RegisterA1,regs[9],
-					ET_RegisterA2,regs[10],
+					ET_RegisterA0,regs[8+0],
+					ET_RegisterA1,regs[8+1],
+					ET_RegisterA2,regs[8+2],
+					ET_RegisterA6,regs[8+6],
 					TAG_END	 );
 
 		}
@@ -800,15 +819,32 @@ char *_machineDOSCALL( struct glueCommands *data, int nextToken )
 	popStack( stack - data->stack );
 	setStackNum(ret);
 
+#else
+	setError(1001,data->tokenBuffer);	// 'not supported on Linux/Windows/MacOSX
+#endif
+
 	return NULL;
+}
+
+char *machineDOSCALL(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdParm( _machineDOSCALL, tokenBuffer );
+	setStackNum(0);	// do not remove.
+	return tokenBuffer;
 }
 
 char *_machineEXECALL( struct glueCommands *data, int nextToken )
 {
-	int libVec;
 	int args = stack - data->stack +1 ;
+
+#ifdef __amigaos4__
+	int libVec;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+#endif
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+#ifdef __amigaos4__
 
 	if (args==1)
 	{
@@ -817,6 +853,8 @@ char *_machineEXECALL( struct glueCommands *data, int nextToken )
 		if (libVec<0)
 		{
 			ret = libVec;
+
+			regs[8+6] = (unsigned int) SysBase;
 
 			ret = EmulateTags( 
 					SysBase,
@@ -829,9 +867,10 @@ char *_machineEXECALL( struct glueCommands *data, int nextToken )
 					ET_RegisterD5,regs[5],
 					ET_RegisterD6,regs[6],
 					ET_RegisterD7,regs[7],
-					ET_RegisterA0,regs[8],
-					ET_RegisterA1,regs[9],
-					ET_RegisterA2,regs[10],
+					ET_RegisterA0,regs[8+0],
+					ET_RegisterA1,regs[8+1],
+					ET_RegisterA2,regs[8+2],
+					ET_RegisterA6,regs[8+6],
 					TAG_END	 );
 
 		}
@@ -841,50 +880,49 @@ char *_machineEXECALL( struct glueCommands *data, int nextToken )
 	popStack( stack - data->stack );
 	setStackNum(ret);
 
+#else
+	setError(1001,data->tokenBuffer);	// 'not supported on Linux/Windows/MacOSX
+#endif
+
 	return NULL;
 }
-
-char *machineDOSCALL(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	stackCmdParm( _machineDOSCALL, tokenBuffer );
-	return tokenBuffer;
-}
-
 
 char *machineEXECALL(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	stackCmdParm( _machineEXECALL, tokenBuffer );
+	setStackNum(0);	// do not remove.
 	return tokenBuffer;
 }
+
+#ifdef __amigaos4__
 
 char *_machinePload( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
+	struct kittyBank *bank;
 	char *keep_code = NULL;
 	int code_size;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
 		char *name = getStackString(stack-1);
-		int bank = getStackNum(stack);
-		FILE *fd;
+		int bankNr = getStackNum(stack);
 
 		if (name)	readhunk( name, &keep_code, &code_size );
 
-		if ((bank>0)&&(bank<16)&&(keep_code))
+		freeBank(bankNr);
+
+		bank = __ReserveAs( 11, bankNr, code_size, "Code", NULL );
+
+		if ((bank)&&(keep_code))
 		{
-			kittyBanks[bank-1].length = code_size;
-			if (kittyBanks[bank-1].start) free( kittyBanks[bank-1].start );
-			kittyBanks[bank-1].start = keep_code;
-			kittyBanks[bank-1].type = 11;	
-		}
-		else
-		{
-			if (keep_code) free(keep_code);
+			memcpy( bank->start, keep_code, code_size );
 		}
 
+		// we can now delete it, as we made a copy.
+		if (keep_code) free(keep_code);
 	}
 	else setError(22,data->tokenBuffer);
 
@@ -893,6 +931,18 @@ char *_machinePload( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
+#endif
+
+#ifdef __linux__
+
+char *_machinePload( struct glueCommands *data, int nextToken )
+{
+	popStack( stack - data->stack );
+	setError(1001,data->tokenBuffer);
+	return NULL;
+}
+
+#endif
 
 char *machinePload(struct nativeCommand *cmd, char *tokenBuffer)
 {
@@ -903,29 +953,23 @@ char *machinePload(struct nativeCommand *cmd, char *tokenBuffer)
 char *_machineCall( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+#ifdef __amigaos4__
+	struct kittyBank *bank;
 	void *code = NULL;
+#endif
+
+proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+#ifdef __amigaos4__
 
 	if (args==1)
 	{
-		int bank = getStackNum(stack);
-
-		if ((bank>0)&&(bank<16))
-		{
-			if (kittyBanks[bank-1].type == 11)
-			{
-				code = kittyBanks[bank-1].start;
-			}
-		}
-		else
-		{
-			code = (void *) bank;
-		}
-
+		int bankNr = getStackNum(stack);
+		bank = findBank(bankNr);
+		if (bank) if (bank -> type == 11) code = bank -> start;
 	}
-	else setError(22,data->tokenBuffer);
-	popStack( stack - data->stack );
 
+	popStack( stack - data->stack );
 
 	if (code)
 	{
@@ -939,13 +983,19 @@ char *_machineCall( struct glueCommands *data, int nextToken )
 					ET_RegisterD5,regs[5],
 					ET_RegisterD6,regs[6],
 					ET_RegisterD7,regs[7],
-					ET_RegisterA0,regs[8],
-					ET_RegisterA1,regs[9],
-					ET_RegisterA2,regs[10],
+					ET_RegisterA0,regs[8+0],
+					ET_RegisterA1,regs[8+1],
+					ET_RegisterA2,regs[8+2],
+					ET_RegisterA6,regs[8+6],
 					TAG_END	 );
 		setStackNum(ret);
 	}
 	else setError(22,data->tokenBuffer);
+
+#else
+	setError(1001,data->tokenBuffer);	// 'not supported on Linux/Windows/MacOSX
+#endif
+
 
 	return NULL;
 }
@@ -954,6 +1004,7 @@ char *_machineCall( struct glueCommands *data, int nextToken )
 char *machineCall(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	stackCmdNormal( _machineCall, tokenBuffer );
+	setStackNum(0);	// do not remove.
 	return tokenBuffer;
 }
 
@@ -970,3 +1021,197 @@ char *machineINTCALL(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 */
+
+char *_machineFree( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	unsigned int ret = 0;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)	// commands have never 0 args, but arg 1 can be unset.
+	{
+		ret = sys_memavail_sysmem();
+	}
+	else setError(22,data->tokenBuffer);
+
+	popStack( stack - data->stack );
+	setStackNum(ret);
+	return NULL;
+}
+
+char *machineFree(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdParm( _machineFree, tokenBuffer );
+	return tokenBuffer;
+}
+
+struct LVO 
+{
+	const char *name;
+	int lvo ;
+};
+
+struct LVO lvos[]= {
+					{NULL,0}	// End of list
+				};
+
+int findLVO( const char *name )
+{
+	struct LVO *lvop;
+
+	for ( lvop = lvos; lvop->lvo; lvop++ )
+	{
+		if (strcmp(name,lvop->name)==0)
+		{
+			return lvop->lvo;
+		}
+	}
+
+	return 0;
+}
+
+char *_machineLvo( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	int ret = 0;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)	// commands have never 0 args, but arg 1 can be unset.
+	{
+		ret = findLVO( getStackString(stack) );
+
+		if ( ret == 0x00000)
+		{
+			setError( 40, data->tokenBuffer);	// yes I know its not correct error ;-)
+		}
+	}
+	else setError(22,data->tokenBuffer);
+
+	popStack( stack - data->stack );
+	setStackNum(ret);
+	return NULL;
+}
+
+char *machineLvo(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdParm( _machineLvo, tokenBuffer );
+	return tokenBuffer;
+}
+
+
+
+char *_machinePeekStr( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	int len;
+	char *ret = NULL;
+	char *adr ;
+	char *term;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	dump_stack();
+
+	switch (args)
+	{
+		case 2:
+				adr = (char *) getStackNum(stack-1);
+
+				switch ( kittyStack[stack].type )
+				{
+					case type_int:
+						printf("copy %d chars\n",kittyStack[stack].value);
+						ret = _copy_until_len(adr,kittyStack[stack].value);
+						break;
+
+					case type_string:
+						term = getStackString(stack);
+						ret = _copy_until_char(adr, term ? term[0] : 0 );
+						break;
+				}
+				break;
+		case 3:
+				adr = (char *) getStackNum(stack-2);
+				len = getStackNum(stack-1);
+				term = getStackString(stack);		
+				ret = _copy_until_len_or_char(adr, len, term ? term[0] : 0 );
+				break;
+
+		default:
+				setError(22,data->tokenBuffer);
+
+				break;
+
+	}
+
+	if (ret == NULL)
+	{
+		setError(22,data->tokenBuffer);
+	}
+
+	popStack( stack - data->stack );
+	setStackStr(ret);
+
+	return NULL;
+}
+
+char *machinePeekStr(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdParm( _machinePeekStr, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_machinePokeStr( struct glueCommands *data, int nextToken )
+{
+	char *dest;
+	char *src;
+	int args = stack - data->stack +1 ;
+	bool success = false;
+	int ret = 0;
+	int _len;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==2)
+	{
+		dump_stack();
+
+		dest = (char *) getStackNum(stack-1);
+
+		if (kittyStack[stack].type == type_string)
+		{
+			char *s, *src_end;
+			src = kittyStack[stack].str;
+			_len = kittyStack[stack].len;
+
+			if (dest)	// we can only Poke positive addresses
+			{
+				src_end = src + _len;
+
+				for (s=src;s<src_end;s++)
+				{
+					*s = *dest;
+					dest++;
+				}
+
+				success = true;
+			}
+		}
+	}
+
+	if (success == false) setError(25,data->tokenBuffer);
+
+	popStack( stack - data->stack );
+	setStackNum(ret);
+	return NULL;
+}
+
+char *machinePokeStr(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _machinePokeStr, tokenBuffer );
+	return tokenBuffer;
+}
+
+

@@ -1,20 +1,31 @@
+#include "stdafx.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
 #include <iostream>
-#include <proto/dos.h>
 #include <vector>
 
+#ifdef __amigaos4__
+#include <proto/dos.h>
 #include <proto/exec.h>
 #include <proto/locale.h>
 #include <proto/keymap.h>
 #include <proto/diskfont.h>
 #include <diskfont/diskfonttag.h>
-#include "debug.h"
 #include <proto/retroMode.h>
+#endif
 
+#ifdef __linux__
+#include <stdint.h>
+#include <unistd.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#endif
+
+#include "debug.h"
 #include "stack.h"
 #include "amosKittens.h"
 #include "commands.h"
@@ -48,11 +59,22 @@ std::string input_str;
 using namespace std;
 
 
+#ifdef __linux__
+
+void atomic_get_char( char *buf)
+{
+
+}
+
+#endif
+
+#ifdef __amigaos4__
+
 void atomic_get_char( char *buf)
 {
 	buf[0]=0;
 
-	if (EngineTask)
+	if (engine_started)
 	{
 		struct InputEvent event;
 		bzero(&event,sizeof(struct InputEvent));
@@ -79,22 +101,19 @@ void atomic_get_char( char *buf)
 					event.ie_Qualifier = keyboardBuffer[0].Qualifier;
 					actual = MapRawKey(&event, buffer, 20, 0);
 
-					printf("event code %d\n",event.ie_Code);
 
 					if (actual)
 					{
-						printf("set ascii - %d\n", buffer[0]);
-
 						buf[0] = buffer[0];
 						buf[1]=0;
-
-						if (buf[0]==13) buf[0]=10;
+//						if (buf[0]==13) buf[0]=10;
 					}
 				}
 			}
 			else
 			{
 				buf[0] = keyboardBuffer[0].Char;
+//				if (buf[0]==13) buf[0]=10;
 			}
 
 			keyboardBuffer.erase(keyboardBuffer.begin());
@@ -102,6 +121,8 @@ void atomic_get_char( char *buf)
 		engine_unlock();
 	}
 }
+
+#endif
 
 void kitty_getline(string &input)
 {
@@ -118,22 +139,34 @@ void kitty_getline(string &input)
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	input = "";
+	
+	retroScreen *screen = screens[current_screen];
+	retroTextWindow *textWindow = NULL;
 
-	if (EngineTask)
+	if (screen)
 	{
-		engine_lock();
-		draw_cursor( screens[current_screen] );
-		rightx = screens[current_screen]->locateX;
-		charsPerRow = (screens[current_screen]-> realWidth / 8);
+		textWindow = screen -> currentTextWindow;
+	}
+
+	if ((engine_started)&&(textWindow))
+	{
+		draw_cursor( screen );
+		rightx = textWindow -> locateX;
+		charsPerRow = textWindow -> charsPerRow;
 		charspace = charsPerRow-rightx - 1;
-		engine_unlock();
 
 		done = false;
 
 		do
 		{
 			atomic_get_char(buf);
+
+#ifdef __amigaos4__			
 			WaitTOF();
+#endif
+#ifdef __linux__
+			sleep(1);
+#endif
 
 			if (buf[0] != 0) printf("--%d--\n",buf[0]);
 
@@ -143,7 +176,6 @@ void kitty_getline(string &input)
 					break;
 
 				case 8:
-					printf("<backspace>\n");
 
 					if (input.length()>0)
 					{
@@ -153,18 +185,14 @@ void kitty_getline(string &input)
 							input.erase(cursx,1);
 						}
 
-						engine_lock();
 						clear_cursor( screens[current_screen] );
-						screens[current_screen]->locateX = rightx;
-						engine_unlock();
+						textWindow -> locateX = rightx;
 
 						if (cursx - scrollx < 0) scrollx--;
 
 						__print_text(input.c_str() + scrollx,charspace);
-						engine_lock();
 						clear_cursor( screens[current_screen] );
 						draw_cursor( screens[current_screen] );
-						engine_unlock();
 					}
 
 					break;
@@ -178,22 +206,22 @@ void kitty_getline(string &input)
 					input += buf;
 					cursx ++;
 
-					engine_lock();
+
 					clear_cursor( screens[current_screen] );
-					screens[current_screen]->locateX = rightx;
-					engine_unlock();
+					textWindow -> locateX = rightx;
+
 
 					if (cursx - scrollx > charspace) scrollx++;
 					__print_text(input.c_str() + scrollx,charspace);
 
-					engine_lock();
+
 					draw_cursor( screens[current_screen] );
-					engine_unlock();
+
 
 					break;	
 			}
 
-		} while ((done == false)&&(EngineTask));
+		} while ( (done == false) && (engine_stopped==false) );
 	}
 	else
 	{
@@ -203,9 +231,9 @@ void kitty_getline(string &input)
 
 char *cmdWaitKey(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (EngineTask)
+	if (engine_started)
 	{
 		engine_wait_key = true;
 		do
@@ -227,7 +255,7 @@ char *cmdInkey(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	char buf[2];
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_scancode = 0;
 
@@ -243,18 +271,23 @@ char *_InputStrN( struct glueCommands *data, int nextToken )
 	string tmp;
 	char buf[2];
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_scancode = 0;
 
 	if (args==1)
 	{
 		int n = getStackNum( stack );
-		while (tmp.length()<n)
+		while ((int) tmp.length()<n)
 		{
 			atomic_get_char(buf);
 			tmp += buf;
+
+#ifdef __amigaos4__
 			WaitTOF();
+#else
+			sleep(1);
+#endif
 		}
 	}
 	else
@@ -269,14 +302,14 @@ char *_InputStrN( struct glueCommands *data, int nextToken )
 
 char *cmdScancode(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	setStackNum(_scancode);
 	return tokenBuffer;
 }
 
 char *cmdKeyShift(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	setStackNum(_keyshift);
 	return tokenBuffer;
 }
@@ -284,7 +317,7 @@ char *cmdKeyShift(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *cmdClearKey(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	engine_lock();
 	keyboardBuffer.erase(keyboardBuffer.begin(),keyboardBuffer.begin()+keyboardBuffer.size());
@@ -303,7 +336,7 @@ char *_cmdKeyState( struct glueCommands *data,int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -325,7 +358,7 @@ char *_cmdKeyState( struct glueCommands *data,int nextToken )
 
 char *cmdKeyState(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _cmdKeyState, tokenBuffer );
 	return tokenBuffer;
 }
@@ -353,8 +386,6 @@ char *_LineInput( struct glueCommands *data,int nextToken )
 void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 {
 	int args = 0;
-	int index = 0;
-	int idx;
 	size_t i;
 	std::string arg = "";
 	struct glueCommands data;
@@ -388,7 +419,7 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	{
 		do
 		{
-			while (input_str.empty() && EngineTask ) kitty_getline( input_str);
+			while (input_str.empty() && engine_started ) kitty_getline( input_str);
 
 			i = input_str.find(",");	
 			if (i != std::string::npos)
@@ -400,7 +431,7 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 				arg = input_str; input_str = "";
 			}
 		}
-		while ( arg.empty() && EngineTask );
+		while ( arg.empty() && engine_started );
 
 		if (last_var)
 		{
@@ -415,7 +446,7 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 			}
 		}
 	}
-	while (!success && EngineTask);
+	while (!success && engine_started);
 
 	engine_lock();
 	clear_cursor( screens[current_screen] );
@@ -446,9 +477,6 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 {
 	int args = 0;
-	int index = 0;
-	int idx;
-	size_t i;
 	std::string arg = "";
 	struct glueCommands data;
 	bool success = false;
@@ -496,7 +524,7 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	{
 		do
 		{
-			while (input_str.empty() && EngineTask ) kitty_getline(input_str);
+			while (input_str.empty() && engine_started ) kitty_getline(input_str);
 
 			engine_lock();
 			clear_cursor( screens[current_screen] );
@@ -504,7 +532,7 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 
 			arg = input_str; input_str = "";
 		}
-		while ( arg.empty() && EngineTask );
+		while ( arg.empty() && engine_started );
 
 		if (last_var)
 		{
@@ -522,7 +550,7 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 		printf("%s:%d -- success = %s\n",__FUNCTION__,__LINE__, success ? "True" : "False");
 
 	}
-	while (!success && (EngineTask) );
+	while (!success && (engine_started) );
 
 	__print_text( "\n" ,0 );
 
@@ -550,7 +578,7 @@ void breakdata_inc_stack( struct nativeCommand *cmd, char *tokenBuffer )
 
 char *cmdInput(nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	input_count = 0;
 	input_str = "";
@@ -568,7 +596,7 @@ char *cmdInput(nativeCommand *cmd, char *tokenBuffer)
 
 char *cmdInputStrN(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	input_count = 0;
 	input_str = "";
@@ -582,7 +610,7 @@ char *cmdInputStrN(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *cmdLineInput(nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	engine_lock();
 
@@ -630,7 +658,7 @@ char *_cmdPutKey( struct glueCommands *data,int nextToken )
 
 char *cmdPutKey(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _cmdPutKey, tokenBuffer );
 	return tokenBuffer;
 }

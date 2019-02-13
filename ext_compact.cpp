@@ -1,16 +1,32 @@
+
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#include <proto/retroMode.h>
+#endif
+
+#ifdef __linux__
+#include <string.h>
+#include <stdint.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#endif
+
 #include "debug.h"
 #include <string>
 #include <iostream>
-#include <proto/retroMode.h>
 
 #include "stack.h"
 #include "amosKittens.h"
 #include "commands.h"
 #include "commandsBanks.h"
+#include "commandsBlitterObject.h"
 #include "errors.h"
 #include "engine.h"
 
@@ -26,7 +42,10 @@ extern int current_screen;
 extern struct retroSprite *sprite ;
 extern struct retroSprite *icons ;
 
-void _my_print_text(struct retroScreen *screen, char *text, int maxchars);
+extern void _my_print_text(struct retroScreen *screen, char *text, int maxchars);
+
+extern struct retroTextWindow *newTextWindow( struct retroScreen *screen, int id );
+extern void freeAllTextWindows(struct retroScreen *screen);
 
 // palette data for RLE
 static int r[32]={0},g[32]={0},b[32]={0};
@@ -43,7 +62,7 @@ void getRGB( unsigned char *data, int pos, int &r, int &g, int &b ) { // get RGB
 	b = (data[pos+1] & 0x0F) * 0x11;
 }
 
-void openUnpackedScreen(int screen_num, int bytesPerRow, int height, int depth, int *r, int *g, int *b, unsigned char *raw,bool ham )
+void openUnpackedScreen(int screen_num, int bytesPerRow, int height, int depth, int *r, int *g, int *b, unsigned char *raw, unsigned short mode)
 {
 	int n;
 	int row;
@@ -53,25 +72,49 @@ void openUnpackedScreen(int screen_num, int bytesPerRow, int height, int depth, 
 	int d;
 	int planeOffset;
 	int bytesPerPlan;
-	int bytesPerPlane;
 	int colors = 1 << depth;
+	unsigned int videomode = retroLowres_pixeld;
 	struct retroScreen *screen = NULL;
+	struct retroTextWindow *textWindow = NULL;
+
+	if (mode & 0x8000) videomode = retroHires; 
 
 	engine_lock();
 
-	if (screens[screen_num]) retroCloseScreen(&screens[screen_num]);
-	screens[screen_num] = retroOpenScreen( bytesPerRow * 8, height, retroLowres_pixeld );
+	if (screens[screen_num]) 
+	{
+		videomode = screens[screen_num] -> videomode;
+
+		freeScreenBobs(screen_num);
+		freeAllTextWindows( screens[screen_num] );
+		retroCloseScreen(&screens[screen_num]);
+	}
+
+	screens[screen_num] = retroOpenScreen( bytesPerRow * 8, height, videomode );
 
 	if (screen = screens[screen_num])
 	{
+		current_screen = screen_num;
+
 		retroApplyScreen( screen, video, 0, 0,	screen -> realWidth,screen->realHeight );
+
+		if (textWindow = newTextWindow( screen, 0 ))
+		{
+			textWindow -> charsPerRow = screen -> realWidth / 8;
+			textWindow -> rows = screen -> realHeight / 8;
+			screen -> pen = 2;
+			screen -> paper = 1;
+			screen -> autoback = 2;
+
+			screen -> currentTextWindow = textWindow;
+		}
 
 		for (n=0;n<colors;n++)	
 		{
 			retroScreenColor( screen, n,r[n],g[n],b[n]);
 		}
 
-		retroBAR( screen, 0,0, screen -> realWidth,screen->realHeight, 1 );
+		retroBAR( screen, 0,0, screen -> realWidth,screen->realHeight, screen -> paper );
 
 		bytesPerPlan = bytesPerRow * height;
 
@@ -97,25 +140,25 @@ void openUnpackedScreen(int screen_num, int bytesPerRow, int height, int depth, 
 		}
 	}
 
+	video -> refreshAllScanlines = TRUE;
 	engine_unlock();
 }
 
 
 // pac.pic. RLE decompressor
-int convertPacPic( int screen, unsigned char *data, const char *name )
+int convertPacPic( int screen, unsigned char *data, const char *name  )
 {
 	//  int o = 20;
 	int o=0;
+	unsigned short mode = 0;
 
-	bool ham = false;
+
 	if( get4(o) == 0x12031990 )
 	{
-		// detect HAM
-		if( get2(o+20) & 0x800 )
-		{
-		      ham = true;
-		      printf("HAM data is not yet supported, output will look garbled!\n");
-		}
+	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+		mode = get2(o+20);
+
 		// fetch palette
 		for( int i=0; i<32; ++i )
 		{ 
@@ -186,7 +229,7 @@ int convertPacPic( int screen, unsigned char *data, const char *name )
 		}
 
 		printf ("%d,%d,%d\n",w*8,h*ll,1<<d);
-		openUnpackedScreen( screen, w, h*ll, d, r,g ,b,raw, ham );
+		openUnpackedScreen( screen, w, h*ll, d, r,g ,b,raw, mode );
 		free(raw);
 	}
 
@@ -197,7 +240,7 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 {
 	int n;
 	int s;
-	unsigned char *adr;
+	struct kittyBank *bank;
 	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	int args = stack - data -> stack  +1;
 
@@ -206,12 +249,24 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 		n = getStackNum(stack-1);
 		s = getStackNum(stack);
 
-		if ((n>0)&&(n<16))
+		printf("unpack %d to %d\n",n,s);
+
+		dump_banks();
+
+		bank = findBank(n);
+		if (bank)
 		{
-			adr = (unsigned char *) kittyBanks[n-1].start;
-			convertPacPic( s, adr, "dump" );
-		} 
+			if (bank -> start)
+			{
+				convertPacPic( s, (unsigned char *) bank -> start, "dump" );
+
+				if (screens[s] == NULL) setError(47,data->tokenBuffer );
+			}
+			else setError(36,data->tokenBuffer);	// Bank not reserved
+		}
+		else setError(25, data->tokenBuffer);
 	}
+	else setError(22, data->tokenBuffer);	// wrong number of args.
 
 	popStack( stack - data->stack );
 	return NULL;

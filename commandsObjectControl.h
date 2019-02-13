@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
+
 #include "amosKittens.h"
 
 char *ocMouseKey(struct nativeCommand *cmd, char *tokenBuffer);
@@ -42,4 +46,5 @@ char *ocFire(struct nativeCommand *cmd, char *tokenBuffer);
 char *ocUpdateOn(struct nativeCommand *cmd, char *tokenBuffer);
 char *ocMakeMask(struct nativeCommand *cmd, char *tokenBuffer);
 char *ocJoy(struct nativeCommand *cmd, char *tokenBuffer);
+char *ocIconMakeMask(struct nativeCommand *cmd, char *tokenBuffer);
 

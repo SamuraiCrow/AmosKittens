@@ -1,13 +1,37 @@
 
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <proto/exec.h>
-#include <proto/dos.h>
 #include <vector>
 #include <math.h>
+
+#include "config.h"
+
+#ifdef __amigaos4__
+#include <proto/exec.h>
+#include <proto/dos.h>
 #include <libraries/retroMode.h>
 #include <proto/retroMode.h>
+#endif
+
+#ifdef __linux__
+#include <sys/time.h>
+#include <unistd.h>
+#include <stdint.h>
+#include <signal.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#include <byteswap.h>
+#endif
+
+#ifdef __LITTLE_ENDIAN__
+#warning "This is a little endien CPU, Amos was made for big endien CPU's"
+#include "os/littleendian/littleendian.h"
+#endif
+
 #include "stack.h"
 #include "amosKittens.h"
 #include "commands.h"
@@ -28,6 +52,8 @@
 #include "commandsBlitterObject.h"
 #include "commandsBackgroundGraphics.h"
 #include "commandsAmal.h"
+#include "commandsMenu.h"
+#include "commandsFonts.h"
 #include "debug.h"
 #include "errors.h"
 #include "pass1.h"
@@ -36,15 +62,26 @@
 #include "engine.h"
 #include "AmalCompiler.h"
 #include "channel.h"
+#include "spawn.h"
 
 #include "ext_compact.h"
+#include "ext_turbo.h"
+
 
 bool running = true;
 bool interpreter_running = false;
 
-int sig_main_vbl = 0;
 
+int sig_main_vbl = 0;
 int proc_stack_frame = 0;
+
+#define enable_vars_crc
+
+#ifdef enable_vars_crc
+unsigned int _vars_crc = 0;
+unsigned int str_crc( char *name );
+unsigned int vars_crc();
+#endif 
 
 char *var_param_str = NULL;
 int var_param_num;
@@ -54,12 +91,15 @@ char *_file_start_ = NULL;
 char *_file_pos_  = NULL;		// the problem of not knowing when stacked commands are executed.
 char *_file_end_ = NULL;
 
+struct retroVideo *video = NULL;
+struct retroScreen *screens[8] ;
+
 int parenthesis_count = 0;
 int cmdStack = 0;
 int procStackCount = 0;
 unsigned short last_tokens[MAX_PARENTHESIS_COUNT];
 int last_var = 0;
-int tokenlength;
+int32_t tokenlength;
 
 unsigned int amiga_joystick_dir[4];
 unsigned int amiga_joystick_button[4];
@@ -73,7 +113,7 @@ char *data_read_pointers[PROC_STACK_SIZE];
 char *_get_var_index( glueCommands *self, int nextToken);
 
 char *(*do_var_index) ( glueCommands *self, int nextToken ) = _get_var_index;
-char *(*do_to) ( struct nativeCommand *, char * ) = do_to_default;
+char *(**do_to) ( struct nativeCommand *, char * ) ;
 void (**do_input) ( struct nativeCommand *, char * ) ;
 void (*do_breakdata) ( struct nativeCommand *, char * ) = NULL;
 
@@ -86,7 +126,7 @@ struct retroSpriteObject bobs[64];
 
 //struct proc procStack[1000];	// 0 is not used.
 struct globalVar globalVars[VAR_BUFFERS];	// 0 is not used.
-struct kittyBank kittyBanks[16];
+
 struct kittyFile kittyFiles[10];
 struct zone *zones = NULL;
 int zones_allocated = 0;
@@ -98,6 +138,7 @@ ChannelTableClass *channels = NULL;
 std::vector<struct label> labels;	// 0 is not used.
 std::vector<struct lineAddr> linesAddress;
 std::vector<struct defFn> defFns;
+std::vector<struct kittyBank> kittyBankList;
 
 int global_var_count = 0;
 int labels_count = 0;
@@ -122,6 +163,36 @@ const char *str_dump_screen_info = "dump screen info";
 int findVar( char *name, int type, int _proc );
 
 extern void dumpScreenInfo();
+
+bool alloc_video()
+{
+
+#ifdef __amigaos4__
+	video = retroAllocVideo( 640,480 );
+#endif
+
+#ifdef __linux__
+	video = retroAllocVideo();
+#endif
+
+	retroAllocSpriteObjects(video,64);
+	return true;
+}
+
+void free_video()
+{
+	if (video)
+	{
+		uint32_t n;
+
+		for (n=0; n<8;n++)
+		{
+			if (screens[n]) retroCloseScreen(&screens[n]);
+		}
+
+		retroFreeVideo(video);
+	}
+}
 
 char *cmdRem(nativeCommand *cmd, char *ptr)
 {
@@ -206,25 +277,23 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 char *nextCmd(nativeCommand *cmd, char *ptr)
 {
 	char *ret = NULL;
-	unsigned int flag;
+	unsigned int flags;
 
 	// we should empty stack, until first/normal command is not a parm command.
 
 	while (cmdStack)
 	{
-		flag = cmdTmp[cmdStack-1].flag;
+		flags = cmdTmp[cmdStack-1].flag;
 
-		if  ( flag & (cmd_loop | cmd_never | cmd_onEol | cmd_onNextCmd )) break;
-
+		if  ( flags & (cmd_loop | cmd_never | cmd_onEol | cmd_onNextCmd | cmd_proc )) break;
 		ret = cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
 
 		if (cmdTmp[cmdStack].flag & cmd_normal) break;
 		if (ret) break;
 	}
 
-	do_to = do_to_default;
+	do_to[parenthesis_count] = do_to_default;
 	tokenMode = mode_standard;
-	dprintf("setTokenMode = mode_standard\n");
 
 	if (ret) return ret -2;		// when exit +2 token 
 
@@ -250,9 +319,8 @@ char *cmdNewLine(nativeCommand *cmd, char *ptr)
 		} while (cmdStack);
 	}
 
-	do_to = do_to_default;
+	do_to[parenthesis_count] = do_to_default;
 	tokenMode = mode_standard;
-	dprintf("setTokenMode = mode_standard\n");
 
 	if (breakpoint)
 	{
@@ -354,7 +422,7 @@ char *_get_var_index( glueCommands *self , int nextToken )
 
 char *_alloc_mode_off( glueCommands *self, int nextToken )
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	do_input[parenthesis_count] = do_std_next_arg;
 	do_var_index = _get_var_index;
@@ -364,14 +432,12 @@ char *_alloc_mode_off( glueCommands *self, int nextToken )
 
 char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 {
-	int args = stack - cmd -> stack + 1;
 	int size = 0;
 	int n;
 	int varNum;
-	int count;
 	struct kittyData *var;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	varNum = cmd -> lastVar;	
 	if (varNum == 0) return NULL;
@@ -380,8 +446,6 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 	var -> cells = stack - cmd -> stack +1;
 
 	if (var -> sizeTab) free( var -> sizeTab);
-
-	printf("var -> cells = %d\n",var -> cells);
 
 	var -> sizeTab = (int *) malloc( sizeof(int) * var -> cells );
 
@@ -413,8 +477,6 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 	}
 
 	if (var -> str) memset( var -> str, 0, size );	// str is a union :-)
-
-	printf("type %d array %08x sizeTab %08x\n", var->type, var->str, var->sizeTab);
 
 	popStack(stack - cmd -> stack);
 
@@ -461,9 +523,8 @@ char *cmdVar(nativeCommand *cmd, char *ptr)
 {
 	struct reference *ref = (struct reference *) ptr;
 	unsigned short next_token = *((short *) (ptr+sizeof(struct reference)+ref->length));
-	struct kittyData *var;
 	
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	last_var = ref -> ref;
 
@@ -485,8 +546,6 @@ char *cmdVar(nativeCommand *cmd, char *ptr)
 		if (ref -> ref)
 		{
 			int idx = ref->ref-1;
-
-			dprintf("varname: %s type: %d\n",globalVars[idx].varName, globalVars[idx].var.type & 7);
 
 			switch (globalVars[idx].var.type & 7)
 			{
@@ -518,7 +577,6 @@ char *cmdQuote(nativeCommand *cmd, char *ptr)
 	unsigned short length = *((unsigned short *) ptr);
 	unsigned short length2 = length;
 	unsigned short next_token;
-	char *txt;
 
 	// check if - or + comes before *, / or ; symbols
 	
@@ -565,6 +623,8 @@ char *cmdNumber(nativeCommand *cmd, char *ptr)
 	}
 
 	setStackNum( *((int *) ptr) );
+
+//	printf("num is %d\n",*((int *) ptr) );
 
 	kittyStack[stack].state = state_none;
 	flushCmdParaStack( next_token );
@@ -632,8 +692,10 @@ struct nativeCommand nativeCommands[]=
 	{0x015A,"Doke",0,machineDoke},
 	{0x019C, "Every On", 0, cmdEveryOn },
 	{0x01AA, "Every Off", 0, cmdEveryOff },
+	{0x01C8,"Logic",0,gfxLogic },	// current screen
+	{0x01D4,"Logic",0,gfxLogic },	// =Logic(screen)
 	{0x01dc, "Asc",0, cmdAsc },
-	{0x01E6,"At",0,cmdAt },
+	{0x01E6,"At",0,textAt },
 	{0x01EE,"Call",0,machineCall},	
 	{0x01F8,"EXECALL",0,machineEXECALL},
 	{0x0214,"DOSCALL",0,machineDOSCALL},
@@ -656,7 +718,7 @@ struct nativeCommand nativeCommands[]=
 	{0x02E6, "on error", 0, errOnError },
 	{0x0316, "On", 4, cmdOn },
 	{0x031E, "Resume Label", 0, errResumeLabel },
-	{0x0330, "Resume Label", 0, errResumeLabel }, 
+	{0x0330, "Resume", 0, errResume }, 
 	{0x033C, "Pop Proc",0,cmdPopProc },
 	{0x034A, "Every ...",  0, cmdEvery },
 	{0x0356, "Step",0,cmdStep },
@@ -668,10 +730,12 @@ struct nativeCommand nativeCommands[]=
 	{0x039E, "Shared", 0, cmdShared },
 	{0x03AA, "Global", 0, cmdGlobal },
 	{0x03B6, "End",0,cmdEnd },
+	{0x03C0, "Stop", 0, cmdStop },
 	{0x03CA, "Param#",0,cmdParamFloat },
 	{0x03D6, "Param$",0,cmdParamStr },
 	{0x03E2, "Param",0,cmdParam },
 	{0x03EE, "Error", 0, errError },
+	{0x03FA, "Errn",0,errErrn },
 	{0x0404,"data", 2, cmdData },		
 	{0x040E,"read",0,cmdRead },
 	{0x0418,"Restore", 0, cmdRestore },
@@ -681,14 +745,14 @@ struct nativeCommand nativeCommands[]=
 	{0x044E, "Dec",0,mathDec },
 	{0x0458, "Add",0,mathAdd },
 	{0x0462, "Add var,n,f TO t", 0, mathAdd },
-	{0x046A, "Print #",0,cmdPrintOut },
+	{0x046A, "Print #",0,discPrintOut },
 	{0x0476, "Print",0,textPrint },
 	{0x0482, "LPrint",0,textPrint },
 	{0x048E,"Input$(n)",0,cmdInputStrN },
-	{0x049C,"Input$(f,n)", 0, cmdInputStrFile },
+	{0x049C,"Input$(f,n)", 0, discInputStrFile },
 	{0x04A6,"Using",0,textPrintUsing },
-	{0x04B2, "Input #",0,cmdInputIn },
-	{0x04BE, "Line Input #",0,cmdLineInputFile },
+	{0x04B2, "Input #",0, discInputIn },
+	{0x04BE, "Line Input #",0,discLineInputFile },
 	{0x04D0, "Input",0,cmdInput },
 	{0x04DC, "Line Input", 0, cmdLineInput },
 	{0x04FE, "Set Buffers", 0, cmdSetBuffers },
@@ -712,6 +776,7 @@ struct nativeCommand nativeCommands[]=
 	{0x05E4, "Instr",0, cmdInstr },
 	{0x05F4, "Instr",0, cmdInstr },	// POS=Instr(ITEM$,"@",CHARNUM)
 	{0x0600,"Tab$",0,cmdTabStr },
+	{0x060A,"Free",0,machineFree },
 	{0x0614,"Varptr",0,machineVarPtr},
 	{0x0620,"Remember X",0,textRememberX },
 	{0x0630,"Remember Y",0,textRememberY },
@@ -746,6 +811,19 @@ struct nativeCommand nativeCommands[]=
 	{0x0772,"Log",0,mathLog},
 	{0x077C,"Ln",0,mathLn},
 	{0x0786,"Exp",0,mathExp},
+	{0x0790,"Menu To Bank",0,menuMenuToBank },
+	{0x07B8,"Menu On",0,menuMenuOn },
+	{0x07C6,"Menu Off",0,menuMenuOff },
+	{0x07D4,"Menu Calc",0,menuMenuCalc },
+	{0x081E,"Set Menu",0,menuSetMenu },
+	{0x0832,"Menu X",0,menuMenuX },
+	{0x0840,"Menu Y",0,menuMenuY },
+	{0x08EA,"Menu Active",0,menuMenuActive },
+	{0x08FC,"Menu Inactive",0,menuMenuInactive },
+	{0x0956,"Menu Del",0,menuMenuDel },
+	{0x0964,"Menu$",0,menuMenuStr },
+	{0x0970,"Choice",0,menuChoice },
+	{0x097E,"Choice",0,menuChoice },
 	{0x0986,"Screen Copy",0,gfxScreenCopy },
 	{0x09A8,"Screen Copy",0,gfxScreenCopy },
 	{0x09D6,"Screen Clone",0,gfxScreenClone },
@@ -762,7 +840,8 @@ struct nativeCommand nativeCommands[]=
 	{0x0AC0,"Screen Hide",0,gfxScreenHide },
 	{0x0AC8,"Screen Show",0,gfxScreenShow },
 	{0x0ADA,"Screen Show",0,gfxScreenShow },
-	{0x0AE2,"Screen Swap",0,gfxScreenSwap },	
+	{0x0AE2,"Screen Swap",0,gfxScreenSwap },	// screen swap
+	{0x0AF4,"Screen Swap",0,gfxScreenSwap },	// screen swap <screen num>
 	{0x0AFC,"Save Iff",0,gfxSaveIff },
 	{0x0B16,"View",0,ocView },
 	{0x0B20,"Auto View Off", 0, ocAutoViewOff },
@@ -774,16 +853,21 @@ struct nativeCommand nativeCommands[]=
 	{0x0BB8,"Cls color",0,gfxCls},
 	{0x0BC0,"Cls color,x,y,w,h to d,x,y",0,gfxCls},
 	{0x0BD0,"Def Scroll",0,gfxDefScroll },
-	{0x0BEE,"X Hard",0,gfxXHard },
-	{0x0C1E,"=XScreen",0,gfxXScreen },
-	{0x0C38,"=YScreen",0,gfxYScreen },
+	{0x0BEE,"=X Hard",0,gfxXHard },
+	{0x0BFC,"=X Hard(s,x)",0,gfxXHard },
 	{0x0C06,"=Y Hard",0,gfxYHard },
+	{0x0C14,"=Y Hard(s,y)",0,gfxYHard }, 
+	{0x0C1E,"=XScreen",0,gfxXScreen },
+	{0x0C2E,"=XScreen(n,n)",0,gfxXScreen },	// =XScreen(0,X Mouse)
+	{0x0C38,"=YScreen",0,gfxYScreen },
+	{0x0C48,"=YScreen(n,n)",0,gfxYScreen },	// =YScreen(0,Y Mouse)
 	{0x0C52,"=X Text",0,textXText },
 	{0x0C60,"=Y Text",0,textYText },
 	{0x0C6E,"Screen",0,gfxScreen },
 	{0x0C7C,"=Screen",0,gfxGetScreen },
 	{0x0C84,"Hires",0,gfxHires },
 	{0x0C90,"Lowres",0,gfxLowres },
+	{0x0C9C,"Dual Playfield",0,gfxDualPlayfield },	// not suppoted, just report error!
 	{0x0CCA,"Wait Vbl", 0,gfxWaitVbl },
 	{0x0CD8,"Default Palette",0,gfxDefaultPalette },
 	{0x0CEE,"Default",0,gfxDefault },
@@ -802,6 +886,7 @@ struct nativeCommand nativeCommands[]=
 	{0x0DDC,"Rainbow",0,gfxRainbow },
 	{0x0DF0,"Rain",0,gfxRain },
 	{0x0DFE,"Fade",0,gfxFade },
+	{0x0E24,"Physic",0,gfxPhysic },
 	{0x0E2C, "Autoback", 0, gfxAutoback },
 	{0x0E3C,"Plot",0,gfxPlot },
 	{0x0E4A,"Plot x,y,c",0,gfxPlot },
@@ -814,10 +899,22 @@ struct nativeCommand nativeCommands[]=
 	{0x0EBA,"Polygon",0,gfxPolygon },
 	{0x0EC8,"Bar",0,gfxBar },
 	{0x0ED8,"Box",0,gfxBox },
-	{0x0EE8, "Paint",0, gfxPaint },
+	{0x0EE8,"Paint",0, gfxPaint },
+	{0x0EF8,"Paint",0,gfxPaint },		// Paint n,n,n
 	{0x0F04,"Gr Locate",0,gfxGrLocate },
-	{0x0F4A,"Text",0,gfxText },	
+	{0x0F16,"Text Length",0,gfxTextLength },
+	{0x0F3A,"Text Base",0,gfxTextBase },
+	{0x0F4A,"Text",0,gfxText },
+	{0x0F5A,"Set Text",0,gfxSetText },
 	{0x0F6A,"Set Paint",0,gfxSetPaint },			// dummy function
+	{0x0F7A,"Get Fonts",0,fontsGetRomFonts },
+	{0x0F8A,"Get Disc Fonts",0,fontsGetRomFonts },
+	{0x0F9E,"Get Rom Fonts",0,fontsGetRomFonts },
+	{0x0FB2,"Set Font",0,fontsSetFont },
+	{0x0FC2,"Fonts$",0,fontsFontsStr },
+	{0x0FCE,"Hslider",0,gfxHslider },
+	{0x0FE8,"Vslider",0,gfsVslider },
+	{0x1002,"Set Slider",0,gfxSetSlider },
 	{0x1022,"Set Pattern",0,gfxSetPattern },
 	{0x1034,"Set Line",0,gfxSetLine },
 	{0x1044,"Ink",0,gfxInk },
@@ -831,6 +928,7 @@ struct nativeCommand nativeCommands[]=
 	{0x10D6,"zoom",0,gfxZoom },
 	{0x1146,"Get Block",0,bgGetBlock },
 	{0x1160,"Get Block [n,x,y,w,h,?] ",0,bgGetBlock },
+	{0x1172,"Put Block",0,bgPutBlock },	// Put Block (Num)
 	{0x1184,"Put Block",0,bgPutBlock },
 	{0x11BE,"Del Block",0,bgDelBlock },
 	{0x11C6,"Key Speed",0,cmdKeySpeed },
@@ -851,6 +949,13 @@ struct nativeCommand nativeCommands[]=
 	{0x129E, "Wait", 0, cmdWait },
 	{0x12AA,"Key$",0, cmdKeyStr },
 	{0x12CE, "Timer", 0, cmdTimer },
+	{0x12DA,"Wind Open",0,textWindOpen },
+	{0x12F4,"Wind Open",0,textWindOpen },	// Wind Open n,x,y,w,h,border
+	{0x131A,"Wind Close",0,textWindClose },	// Wind Close
+	{0X132A,"Wind Save",0,textWindSave },	// Wind Save
+	{0x133A,"Wind Move",0,textWindMove },	// Wind Move x,y
+	{0x134C,"Wind Size",0,textWindSize },
+	{0x136C,"=Windon",0,textWindon },					// Windon returns current window number.
 	{0x135E,"Window",0,textWindow },
 	{0x1378,"Locate",0, textLocate },
 	{0x1388,"Clw",0,textClw },
@@ -863,6 +968,7 @@ struct nativeCommand nativeCommands[]=
 	{0x13DC,"Paper",0,textPaper },
 	{0x13E8,"Centre",0,textCentre },
 	{0x1408,"Writing",0,textWriting },
+	{0x1422,"Title Top",0,textTitleTop },
 	{0x1446,"Curs Off",0,textCursOff },
 	{0x1454,"Curs On",0,textCursOn },
 	{0x1462,"textInverseOff",0,textInverseOff },
@@ -871,6 +977,7 @@ struct nativeCommand nativeCommands[]=
 	{0x1494,"Under On",0,textUnderOn },
 	{0x14A2,"Shade Off",0,textShadeOff },
 	{0x14B2,"Shade On",0,textShadeOn },
+	{0x14C0,"Scroll Off",0,gfxScrollOff },
 	{0x14E0,"Scroll",0,gfxScroll },
 	{0x1504,"Cleft$",0,textCLeftStr },
 	{0x151E,"CUp",0,textCUp },
@@ -888,6 +995,8 @@ struct nativeCommand nativeCommands[]=
 	{0x15C8,"Set Curs",0,textSetCurs },
 	{0x15E6,"X Curs",0,textXCurs },
 	{0x15F2,"Y Curs",0,textYCurs },
+	{0x15FE,"X Graphic",0,textXGraphic },
+	{0x160E,"Y Graphic",0,textYGraphic },
 	{0x1632,"Reserve Zone", 0, ocReserveZone },
 	{0x1646,"Reserve Zone", 0, ocReserveZone },
 	{0x164E,"Reset Zone", 0, ocResetZone },
@@ -895,41 +1004,47 @@ struct nativeCommand nativeCommands[]=
 	{0x16AA,"HZone",0,ocHZone },
 	{0x16B6,"Scin(x,y)",0,gfxScin },
 	{0x16E2,"Mouse Zone",0,ocMouseZone },
-	{0x16F2,"Set input", 0, cmdSetInput },
+	{0x16F2,"Set input", 0, discSetInput },
 	{0x1704, "Close Workbench", 0, cmdCloseWorkbench },
 	{0x171A, "Close Editor", 0, cmdCloseEditor },
-	{0x172C,"Dir First$",0,cmdDirFirstStr },
-	{0x173E,"Dir Next$",0,cmdDirNextStr },
-	{0x174E,"Exist",0,cmdExist },
-	{0x175A,"Dir$",0,cmdDirStr },
-	{0x17A4,"Dir",0,cmdDir },		// no argument
-	{0x17AE,"Dir",0,cmdDir },
-	{0x17C4,"Set Dir",0,cmdSetDir },
+	{0x172C,"Dir First$",0,discDirFirstStr },
+	{0x173E,"Dir Next$",0,discDirNextStr },
+	{0x174E,"Exist",0,discExist },
+	{0x175A,"Dir$",0,discDirStr },
+	{0x17A4,"Dir",0,discDir },		// no argument
+	{0x17AE,"Dir",0,discDir },
+	{0x17B6,"Set Dir",0,discSetDir },
+	{0x17C4,"Set Dir",0,discSetDir },
 	{0x17D4,"Load iff",0, gfxLoadIff },
 	{0x17E4,"Load Iff",0, gfxLoadIff },
 	{0x180C, "Bload",0,cmdBload },
 	{0x181A, "Bsave", 0, cmdBsave },
 	{0x182A,"PLoad",0,machinePload},
 	{0x1838,"Save",0,cmdSave },
+	{0x1844,"Save",0,cmdSave },	// save name,bank
 	{0x184E,"Load",0,cmdLoad },
 	{0x185A,"Load",0,cmdLoad },
-	{0x1864,"Dfree",0,cmdDfree },
-	{0x187C,"Lof(f)", 0, cmdLof },
-	{0x1886,"Eof(f)", 0, cmdEof },
-	{0x1890,"Pof(f)", 0, cmdPof },
-	{0x18A8,"open random f,name", 0, cmdOpenRandom },
-	{0x18BC,"Open In",0,cmdOpenIn },
-	{0x18CC,"Open Out",0,cmdOpenOut },
-	{0x18F0,"Append",0,cmdAppend },
-	{0x1900,"Close",0,cmdClose },	// token used in Help_69.Amos
-	{0x190C,"Close",0,cmdClose },
-	{0x1914,"Parent",0,cmdParent },
-	{0x1920,"Rename",0,cmdRename },
-	{0x1930,"Dfree",0,cmdKill },
-	{0x1948,"Field f,size as nane$,...", 0, cmdField },
-	{0x1954,"Fsel$",0,cmdFselStr },		// found in Help_72.amos
-	{0x196C,"Fsel$",0,cmdFselStr },
+	{0x1864,"Dfree",0,discDfree },
+	{0x1870,"Makedir",0,discMakedir },
+	{0x187C,"Lof(f)", 0, discLof },
+	{0x1886,"Eof(f)", 0, discEof },
+	{0x1890,"Pof(f)", 0, discPof },
+	{0x18A8,"open random f,name", 0, discOpenRandom },
+	{0x18BC,"Open In",0,discOpenIn },
+	{0x18CC,"Open Out",0,discOpenOut },
+	{0x18F0,"Append",0,discAppend },
+	{0x1900,"Close",0,discClose },	// token used in Help_69.Amos
+	{0x190C,"Close",0,discClose },
+	{0x1914,"Parent",0,discParent },
+	{0x1920,"Rename",0,discRename },
+	{0x1930,"Dfree",0,discKill },
+	{0x1948,"Field f,size as nane$,...", 0, discField },
+	{0x1954,"Fsel$",0,discFselStr },		// found in Help_72.amos
+	{0x196C,"Fsel$",0,discFselStr },
+	{0x1978,"Fsel$",0,discFselStr },
 	{0x199E,"Sprite Off",0,hsSpriteOff },
+	{0x1A72,"Sprite Base",0,hsSpriteBase },
+	{0x1A84,"Icon Base",0,bgIconBase },
 	{0x1A94,"Sprite",0,hsSprite },
 	{0x1AA8,"Bob Off",0,boBobOff },
 	{0x1AB6,"Bob Off [number]",0,boBobOff },
@@ -944,13 +1059,15 @@ struct nativeCommand nativeCommands[]=
 	{0x1BAE,"Get Sprite Palette",0,hsGetSpritePalette },
 	{0x1BD0,"Get Sprite",0,hsGetSprite },
 	{0x1BFC,"Get Bob",0,boGetBob },
+	{0x1C14,"Get Bob",0,boGetBob },	// get bob 0,0,0,0 to 0,0
 	{0x1C42,"Del Bob",0,boDelBob },
 	{0x1CA6,"Get Icon Palette", 0, bgGetIconPalette },
 	{0x1CC6,"Get Icon", 0, bgGetIcon },
 	{0x1CF0,"Put Bob",0,boPutBob },
 	{0x1CFE,"Paste Bob",0,boPasteBob },
-	{0x1d12,"Paste Icon", 0, bgPasteIcon },
+	{0x1D12,"Paste Icon", 0, bgPasteIcon },
 	{0x1D28,"Make Mask", 0, ocMakeMask },
+	{0x1D56,"Icon Make Mask", 0, ocIconMakeMask },
 	{0x1DA2,"Hot Spot", 0, boHotSpot },
 	{0x1DAE,"Priority On",0,ocPriorityOn },
 	{0x1DC0,"Priority Off",0,ocPriorityOff },
@@ -992,7 +1109,6 @@ struct nativeCommand nativeCommands[]=
 	{0x20AE,"Update",0,ocUpdate },
 	{0x20BA,"X Bob",0,boXBob},
 	{0x20C6,"Y Bob",0,boYBob},
-
 	{0x20F2,"Reserve As Work",0,cmdReserveAsWork },
 	{0x210A,"Reserve As Chip Work",0,cmdReserveAsChipWork },
 	{0x2128,"Reserve As Data",0, cmdReserveAsData },
@@ -1021,23 +1137,40 @@ struct nativeCommand nativeCommands[]=
 	{0x2288,"rol.l",0,machineRolL},
 	{0x2296,"AREG",0,machineAREG},
 	{0x22A2,"DREG",0,machineDREG},
-	{0x23AC,"Put f,n", 0, cmdPut },
-	{0x23B8,"Get f,n", 0, cmdGet },
+	{0x23A0,"BGrab", 0, bankBGrab },
+	{0x23AC,"Put f,n", 0, discPut },
+	{0x23B8,"Get f,n", 0, discGet },
 	{0x23D0,"Multi Wait",0,cmdMultiWait },		// dummy function.
+	{0x23C4,"System",0,cmdEnd },
 	{0x23FC,"Priority Reverse On",0,ocPriorityReverseOn },
 	{0x2416,"Priority Reverse Off",0,ocPriorityReverseOff },
-	{0x2430,"Dev First$",0,cmdDevFirstStr },
-	{0x2442,"Dev Next$",0,cmdDevNextStr },
+	{0x2430,"Dev First$",0,discDevFirstStr },
+	{0x2442,"Dev Next$",0,discDevNextStr },
 	{0x2476,"Hrev(n)",0,boHrev},
 	{0x2482,"Vrev(n)",0,boVrev},
 	{0x248e,"Rev(n)",0,boRev},
+	{0x2498,"Bank Swap",0,bankBankSwap},	// AmosPro?
 	{0x24AA,"Amos To Front",0,cmdAmosToFront},
 	{0x24BE,"Amos To Back",0,cmdAmosToBack},
 	{0x2516,"Ntsc", 0, gfxNtsc },		// only reports false.
+	{0x2520,"Laced",0, gfxLaced },
+	{0x253C,"Command Line$", 0, cmdCommandLineStr },
+	{0x2578,"Set Accessory",0, cmdSetAccessory },
 	{0x259A,"Trap", 0, errTrap },
 	{0x25A4,"Else If", 2, cmdElseIf },
+	{0x26D8,"Erase All", 0, cmdEraseAll },
+	{0x28A0,"Poke$",0,machinePokeStr },	// Poke$(adr, string)
+	{0x28AE,"Peek$",0,machinePeekStr },	// Peek$(adr, length)
+	{0x28BE,"Peek$",0,machinePeekStr },	// Peek$(adr, termChar) // returns string
+	{0x2962,"Errtrap",0,errErrTrap },	// AmosPro command
+	{0x2A4A,"Lvo", 6, machineLvo },	// AmosPro command. (should look up string in pass1 says docs), maybe 16bit BOOL, 32bit offset
+	{0x2B3E,"Exec",0,cmdExec },
+	{0x2B58,"Screen Mode",0,gfxScreenMode },
+	{0x2B72,"Kill Editor",0,cmdKillEditor },
+	{0x2BAE,"Get Bob Palette",0,hsGetSpritePalette },
 	{0xFF4C,"or",0, orData },
-	{0xFF58,"or",0, andData },
+	{0xFF3E,"xor",0,xorData },
+	{0xFF58,"and",0, andData },
 	{0xFF66,"not equal",0,cmdNotEqual },
 	{0xFF7A,"<=",0,lessOrEqualData },
 	{0xFF84,"<=",0,lessOrEqualData },
@@ -1080,15 +1213,13 @@ char *executeToken( char *ptr, unsigned short token )
 	struct nativeCommand *cmd;
 	char *ret;
 
-	currentLine = getLineFromPointer( ptr );	// maybe slow!!!
-
 	for (cmd = nativeCommands ; cmd < nativeCommands + nativeCommandsSize ; cmd++ )
 	{
 		if (token == cmd->id ) 
 		{
 #ifdef show_token_numbers_yes
 			printf("%08d   %08X %20s:%08d stack is %d cmd stack is %d flag %d token %04x -- name %s\n",
-					getLineFromPointer(ptr), ptr,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token , TokenName(token));	
+					getLineFromPointer(ptr), (unsigned int) ptr,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token , TokenName(token));	
 #endif
 			ret = cmd -> fn( cmd, ptr ) ;
 			if (ret) ret += cmd -> size;
@@ -1099,10 +1230,15 @@ char *executeToken( char *ptr, unsigned short token )
 	token_not_found = token;
 	currentLine = getLineFromPointer( ptr );
 	setError(23, ptr);
-	printf("Addr %08x, token not found %04X at line %d\n", ptr, token_not_found, getLineFromPointer(ptr));
+	printf("Addr %08x, token not found %04X at line %d\n", 
+				(unsigned int) ptr, 
+				(unsigned int) token_not_found, 
+				getLineFromPointer( ptr));
 
 	return NULL;
 }
+
+#define enable_vars_crc
 
 char *token_reader( char *start, char *ptr, unsigned short lastToken, unsigned short token, int tokenlength )
 {
@@ -1113,6 +1249,13 @@ char *token_reader( char *start, char *ptr, unsigned short lastToken, unsigned s
 		printf("dog fart, stinky fart at line %d, stack is %d\n",getLineFromPointer(ptr),stack);
 		return NULL;
 	}
+
+#ifdef enable_vars_crc
+	if (_vars_crc != vars_crc())
+	{
+		printf("vars are corrupted at line: %d\n", getLineFromPointer(ptr));
+	}
+#endif
 
 	if ( ( (long long int) ptr - (long long int) start)  >= tokenlength ) return NULL;
 
@@ -1133,8 +1276,11 @@ void code_reader( char *start, int tokenlength )
 	{
 		// this basic for now, need to handel "on error " commands as well.
 
-		ptr = onError( ptr );
-		if (ptr == NULL) break;
+		if (kittyError.newError)
+		{
+			ptr = onError( ptr );
+			if (ptr == NULL) break;
+		}
 
 		if (every_on)
 		{
@@ -1176,119 +1322,13 @@ void code_reader( char *start, int tokenlength )
 
 char *filename = NULL;
 
-/*
-void set_default_filename()
-{
-	if (filename) return;
+#define DLINE printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-//	filename = strdup("amos-test/var.amos");
-//	filename = strdup("amos-test/var_num.amos");
-//	filename = strdup("amos-test/math.amos");
-//	filename = strdup("amos-test/dim2.amos");
-//	filename = strdup("amos-test/input.amos");
-//	filename = strdup("amos-test/goto.amos");
-//	filename = strdup("amos-test/if.amos");
-//	filename = strdup("amos-test/goto2.amos");
-//	filename = strdup("amos-test/do-loop.amos");
-//	filename = strdup("amos-test/repeat-until.amos");
-//	filename = strdup("amos-test/legal-ilegal-if.amos");
-//	filename = strdup("amos-test/while-wend.amos");
-//	filename = strdup("amos-test/for-to-step-next.amos");
-//	filename = strdup("amos-test/for-to-next.amos");
-//	filename = strdup("amos-test/for-to-next2.amos");
-//	filename = strdup("amos-test/gosub-return.amos");
-//	filename = strdup("amos-test/left-mid-right.amos");
-//	filename = strdup("amos-test/instr.amos");
-//	filename = strdup("amos-test/upper-lower-flip-spaces.amos");
-//	filename = strdup("amos-test/str-chr-asc-len.amos");
-//	filename = strdup("amos-test/hex-bin-val-str.amos");
-//	filename = strdup("amos-test/casting_int_float.amos");
-//	filename = strdup("amos-test/arithmetic.amos");
-//	filename = strdup("amos-test/inc-dec-add.amos");
-//	filename = strdup("amos-test/compare-strings.amos");
-//	filename = strdup("amos-test/procedure.amos");
-//	filename = strdup("amos-test/procedure2.amos");
-//	filename = strdup("amos-test/procedure_with_paramiters_x.amos");
-//	filename = strdup("amos-test/procedure-shared.amos");
-//	filename = strdup("amos-test/procedure-global.amos");
-//	filename = strdup("amos-test/procedure_return_value.amos");
-//	filename = strdup("amos-test/procedure_all_params.amos");
-//	filename = strdup("amos-test/procedure_pop_proc.amos");
-//	filename = strdup("amos-test/reserve.amos");
-//	filename = strdup("amos-test/erase-start-length-bsave-bload.amos");
-//	filename = strdup("amos-test/sort.amos");
-//	filename = strdup("amos-test/or.amos");
-//	filename = strdup("amos-test/logical1.amos");
-//	filename = strdup("amos-test/match.amos");
-//	filename = strdup("amos-test/dir.amos");
-//	filename = strdup("amos-test/dir_str.amos");
-//	filename = strdup("amos-test/parent-set-dir.amos");
-//	filename = strdup("amos-test/fsel_exits_dir_first_dir_next.amos");
-//	filename = strdup("amos-test/open-out.amos");
-//	filename = strdup("amos-test/open-in.amos");
-//	filename = strdup("amos-test/line_input_file.amos");
-//	filename = strdup("amos-test/line-input.amos");
-//	filename = strdup("amos-test/set-input-input-eof-pof.amos");
-//	filename = strdup("amos-test/open_random.amos");
-//	filename = strdup("amos-test/dir_first_dir_next.amos");
-//	filename = strdup("amos-test/on_error_goto.amos");
-//	filename = strdup("amos-test/on_error_proc.amos");
-//	filename = strdup("amos-test/on_gosub.amos");
-//	filename = strdup("amos-test/input_two_args.amos");
-//	filename = strdup("amos-test/exit.amos");
-//	filename = strdup("amos-test/exit2.amos");
-//	filename = strdup("amos-test/exit-if.amos");
-//	filename = strdup("amos-test/every.amos");
-//	filename = strdup("amos-test/timer.amos");
-//	filename = strdup("amos-test/string_compare.amos");
-//	filename = strdup("amos-test/close-wb-editor-break.amos");
-//	filename = strdup("amos-test/if-then-else-if-end-if.amos");
-//	filename = strdup("amos-test/sin.amos");
-//	filename = strdup("amos-test/m.amos");
-//	filename = strdup("amos-test/varptr.amos");
-//	filename = strdup("amos-test/fill.amos");
-//	filename = strdup("amos-test/hunt.amos");
-//	filename = strdup("amos-test/rol-ror.amos");
-//	filename = strdup("amos-test/bit.amos");
-//	filename = strdup("amos-test/asm.amos");
-//	filename = strdup("amos-test/doscall.amos");
-//	filename = strdup("amos-test/execall.amos");
-//	filename = strdup("amos-test/pload.amos");
-//	filename = strdup("amos-test/def-fn.amos");
-//	filename = strdup("amos-test/swap.amos");
-//	filename = strdup("amos-test/data.amos");
-//	filename = strdup("amos-test/restore.amos");
-	filename = strdup("amos-test/not.amos");
-}
-*/
-
-void init_banks( char *data , int size)
-{
-	int i;
-	unsigned char c;
-
-	for (i=0;i<size;i++)
-	{
-		c = data[i];
-
-		if (((c>='a')&&(c<='z'))||((c>='A')&&(c<='Z')))
-		{
-			printf("%c", data[i]);
-		}
-//		else
-//		{
-//			printf(".");
-//		}
-	}
-
-	getchar();
-}
-
-int main(char args, char **arg)
+int main(int args, char **arg)
 {
 	BOOL runtime = FALSE;
 	FILE *fd;
-	int amos_filesize;
+	int32_t amos_filesize;
 	char amosid[17];
 	char *data;
 	int n;
@@ -1306,10 +1346,17 @@ int main(char args, char **arg)
 
 	memset(globalVars,0,sizeof(globalVars));
 
+#ifdef __amigaos4__
 	sig_main_vbl = AllocSignal(-1);
+#endif
+
+#ifdef __linux__
+	sig_main_vbl = SIGUSR1;
+#endif
 
 	for (n=0;n<64;n++)
 	{
+		bobs[n].screen_id = -1;
 		bobs[n].image = -1;
 	}
 
@@ -1318,34 +1365,56 @@ int main(char args, char **arg)
 	if (init() && channels)
 	{
 		// set up a fake extention lookup
-		kitty_extensions[2].lookup = (char *) malloc( 0xFFFF );
+
+		// set default values.
+		memset( kitty_extensions , 0, sizeof(struct extension_lib) *32 );
+
+		// alloc tabels for 2 fake extentions
+		kitty_extensions[2].lookup = (char *) malloc( 0xFFFF );		// compat.lib
+		kitty_extensions[12].lookup = (char *) malloc( 0xFFFF );	// turbo extention.
+
+		// init default values for fake extentions
+		for (n=0;n<32;n++) if (kitty_extensions[n].lookup) memset(kitty_extensions[n].lookup,0,0xFFFF);
+
+		// function table init.
 		if (kitty_extensions[2].lookup)
-		{
-			memset(kitty_extensions[2].lookup,0,0xFFFF);
+		{	
+			*((void **) (kitty_extensions[2].lookup + 0x0048)) = (void *) ext_cmd_unpack;
 			*((void **) (kitty_extensions[2].lookup + 0x0056)) = (void *) ext_cmd_unpack;
 		}
 
-		do_input = (void (**)(nativeCommand*, char*)) malloc( sizeof(void *) * MAX_PARENTHESIS_COUNT );
-		if (do_input) 
+		// function table init.
+		if (kitty_extensions[12].lookup)
 		{
-			int n; 
-			for (n=0;n<1000;n++) do_input[n] = do_std_next_arg;
+			*((void **) (kitty_extensions[12].lookup + 0x0A08)) = (void *) ext_cmd_range;
 		}
 
-		start_engine();
+		do_input = (void (**)(nativeCommand*, char*)) malloc( sizeof(void *) * MAX_PARENTHESIS_COUNT );
+		do_to = (char *(**)(nativeCommand*, char*)) malloc( sizeof(void *) * MAX_PARENTHESIS_COUNT );
 
-		Delay(10);
+		for (n=0;n<MAX_PARENTHESIS_COUNT;n++) 
+		{
+			if (do_input) do_input[n] = do_std_next_arg;
+			if (do_to) do_to[n] = do_to_default;
+		}
 
-		fd = fopen(filename,"r");
+		alloc_video();
 
-		if (fd)
+		if (video) start_engine();
+
+		fd = filename ? fopen(filename,"r") : NULL;
+		if ((fd)&&(video))
 		{
 			fseek(fd, 0, SEEK_END);
 			amos_filesize = ftell(fd);
 			fseek(fd, 0, SEEK_SET);
+
 			fread( amosid, 16, 1, fd );
 			fread( &tokenlength, 4, 1, fd );
 
+#ifdef __LITTLE_ENDIAN__
+			tokenlength = __bswap_32(tokenlength);
+#endif
 			data = (char *) malloc(amos_filesize);
 			if (data)
 			{
@@ -1356,13 +1425,18 @@ int main(char args, char **arg)
 
 				fread(data,amos_filesize - _file_code_start_ ,1,fd);
 
+#ifdef __LITTLE_ENDIAN__
+				token_littleendian_fixer( data, _file_end_ );
+#endif
 				// snifff the tokens find labels, vars, functions and so on.
 				pass1_reader( data, _file_end_ );
 
-				printf("done with pass1_reader\n");
-
 				if (kittyError.code == 0)
 				{
+#ifdef enable_vars_crc
+					_vars_crc = vars_crc();
+#endif
+
 					runtime = TRUE;
 
 					_file_start_ = data;
@@ -1371,6 +1445,8 @@ int main(char args, char **arg)
 					// init banks
 
 					init_banks( _file_end_ , amos_filesize - tokenlength - _file_code_start_ );
+
+					gfxDefault(NULL, NULL);
 
 					//  execute the code.
 					code_reader( data, tokenlength );
@@ -1391,11 +1467,12 @@ int main(char args, char **arg)
 		}
 		else
 		{
-			printf("AMOS file not open/can't find it\n");
+			if (!fd) printf("AMOS file not open/can't find it\n");
+			if (!video) printf("technical problems\n");
 		}
 
 		running = false;
-		wait_engine();
+		wait_spawns();
 
 		if (do_input)
 		{
@@ -1403,11 +1480,21 @@ int main(char args, char **arg)
 			do_input = NULL;
 		}
 
-		printf("clean up vars\n");
+		if (do_to)
+		{
+			free( (void *) do_to );
+			do_to = NULL;
+		}
+
+		printf("-- close & free video --\n");
+
+		free_video();
+
+		printf("-- clean up vars --\n");
 
 		clean_up_vars();
 
-		printf("clean up stack\n");
+		printf("-- clean up stack --\n");
 
 		clean_up_stack();
 		clean_up_files();
@@ -1418,7 +1505,9 @@ int main(char args, char **arg)
 
 	if (sig_main_vbl) 
 	{
+		#ifdef __amigaos4__
 		FreeSignal(sig_main_vbl);
+		#endif
 		sig_main_vbl = 0;
 	}
 	

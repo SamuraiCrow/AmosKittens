@@ -14,12 +14,32 @@ extern int engine_mouse_key;
 extern int engine_mouse_x;
 extern int engine_mouse_y;
 extern bool engine_stopped;
+
+extern struct retroVideo *video;
+extern struct retroScreen *screens[8] ;
+
+#ifdef __amigaos4__
 extern Process *EngineTask;
+#endif
 
 struct keyboard_buffer
 {
 	ULONG Code;
 	ULONG Qualifier;
 	char	Char;
+};
+
+struct amos_selected
+{
+	ULONG menu;
+	ULONG item;
+	ULONG sub;
+};
+
+struct amosMenuItem
+{
+	int levels;
+	int index[3];
+	char *str;
 };
 

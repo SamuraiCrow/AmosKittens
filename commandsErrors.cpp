@@ -1,7 +1,20 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
+
+#ifdef __linux__
+#include <retromode.h>
+#include <retromode_lib.h>
+#include <stdint.h>
+#include <unistd.h>
+#endif
+
 #include "debug.h"
 #include <string>
 #include <iostream>
@@ -23,53 +36,53 @@ extern char *findLabel( char *name );
 extern int findVarPublic( char *name, int type );
 extern std::vector<struct label> labels;
 
+char *(*onErrorTemp)(char *ptr) = NULL;
 char *(*onError)(char *ptr) = NULL;
 char *on_error_goto_location = NULL;
 char *on_error_proc_location = NULL;
 char *resume_location = NULL;
 
-char *_errError( struct glueCommands *data, int nextToken )
+void name_from_ref( char **tokenBuffer, char **name_out)
 {
-	int args = stack - data->stack +1 ;
+	unsigned short next_token = NEXT_TOKEN(*tokenBuffer );
 
-	if (args == 1)
+	if ((next_token == 0x006) || (next_token == 0x0018))
 	{
-		setError( getStackNum(stack), data -> tokenBuffer );
-	}
-
-	popStack( stack - data->stack );
-	return NULL;
+		char *name;
+		struct reference *ref = (struct reference *) (*tokenBuffer + 2);
+		*name_out = strndup( *tokenBuffer + 2 + sizeof(struct reference), ref->length );
+		*tokenBuffer += (2 + sizeof(struct reference) + ref -> length) ;	
+	}	
 }
 
 char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("Next token %04x\n",NEXT_TOKEN(tokenBuffer));
+	char *name = NULL;
+	unsigned short next_token; 
 
 	onError = onErrorBreak;	// default.
 
 	switch ( NEXT_TOKEN(tokenBuffer ))
 	{
 		case 0x02A8:	// Goto
-				tokenBuffer += 2;
-				
-				if (NEXT_TOKEN(tokenBuffer ) == 0x006)	// label
+
+				printf("On Error ... Goto ...\n");
+
+				tokenBuffer += 2;				
+				name_from_ref(&tokenBuffer, &name);
+				if (name)
 				{
-					char *name;
-					struct reference *ref = (struct reference *) (tokenBuffer + 2);
-					name = strndup( tokenBuffer + 2 + sizeof(struct reference), ref->length );
-
-					if (name)
-					{
-						on_error_goto_location = findLabel(name);
-						onError = onErrorGoto;
-						free(name);
-					}
-
-					tokenBuffer += (2 + sizeof(struct reference) + ref -> length) ;					
+					printf("name %s\n",name);
+					on_error_goto_location = findLabel(name);
+					onError = onErrorGoto;
+					free(name);
 				}
 				break;
 
 		case 0x0386:	// Proc
+
+				printf("On Error ... Gosub ...\n");
+
 				tokenBuffer += 2;
 
 				if (NEXT_TOKEN(tokenBuffer ) == 0x0012)	// proc
@@ -94,7 +107,6 @@ char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 				}
 				break;
 	}
-
 	return tokenBuffer;
 }
 
@@ -141,45 +153,47 @@ char *errResumeLabel(nativeCommand *cmd, char *tokenBuffer)
 char *errResumeNext(nativeCommand *cmd, char *tokenBuffer)
 {
 	struct reference *ref;
-
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-
+	printf("this command is not yet working!!!\n");
+	getchar();
 	return tokenBuffer;
 }
 
 
 char *onErrorBreak(char *ptr)
 {
-	return kittyError.newError ? NULL : ptr;
+	return NULL;
+}
+
+char *onErrorIgnore(char *ptr)
+{
+	return ptr;
 }
 
 char *onErrorGoto(char *ptr)
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
-
-	if ( kittyError.newError )
-	{
-		kittyError.newError = false;
-		return on_error_goto_location;
-	}
-	else
-	{
-		return ptr;
-	}
+	kittyError.newError = false;
+	return on_error_goto_location -2;
 }
 
 char *onErrorProc(char *ptr)
 {
-	if ( kittyError.newError )
+	kittyError.newError = false;
+	stackCmdLoop( _procedure, ptr);
+	return on_error_proc_location -2;
+}
+
+char *_errError( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+
+	if (args == 1)
 	{
-		kittyError.newError = false;
-		stackCmdLoop( _procedure, ptr);
-		return on_error_proc_location;
+		setError( getStackNum(stack), data -> tokenBuffer );
 	}
-	else
-	{
-		return ptr;
-	}
+
+	popStack( stack - data->stack );
+	return NULL;
 }
 
 char *errError(struct nativeCommand *cmd, char *tokenBuffer)
@@ -189,8 +203,85 @@ char *errError(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+
+char *errResume(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	char *name = NULL;
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	name_from_ref(&tokenBuffer, &name);
+
+	if (name)	// has args
+	{
+		char *ret;
+
+		ret = findLabel(name);
+		free(name);
+
+		if (ret) 
+		{
+			kittyError.code = 0;
+			kittyError.pos = 0;  
+			kittyError.newError = false;
+			return ret -2;
+		}
+	}
+	else	// has no args, return to error.
+	{
+		if (kittyError.pos)
+		{
+			kittyError.code = 0;
+			kittyError.pos = 0;  
+			kittyError.newError = false;
+			return kittyError.pos-2;
+		}
+	}
+
+	return tokenBuffer;
+}
+
+
+char *_errTrap( struct glueCommands *data, int nextToken )
+{
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	if (onErrorTemp)
+	{
+		onError = onErrorTemp;
+		onErrorTemp = NULL;
+
+		kittyError.trapCode = kittyError.code;
+		kittyError.code = 0;
+		kittyError.newError = false;
+	}
+
+	return NULL;
+}
+
 char *errTrap(nativeCommand *err, char *tokenBuffer)
 {
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	onErrorTemp = onError;
+	onError = onErrorIgnore;
+	stackCmdFlags( _errTrap, tokenBuffer, cmd_onNextCmd | cmd_onEol );
+
 	return tokenBuffer;
 }
+
+
+char *errErrn(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	setStackNum( kittyError.code );
+	return tokenBuffer;
+}
+
+char *errErrTrap(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	setStackNum( kittyError.trapCode );
+	return tokenBuffer;
+}
+
+

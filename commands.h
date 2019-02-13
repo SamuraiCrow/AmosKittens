@@ -2,7 +2,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
+
 #include "amosKittens.h"
 
 char *nextArg(struct nativeCommand *cmd, char *tokenBuffer);
@@ -59,6 +63,7 @@ char *cmdBreakOff(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdBreakOn(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdCloseWorkbench(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdCloseEditor(struct nativeCommand *cmd, char *tokenBuffer );
+char *cmdKillEditor(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdElseIf(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdAmosToBack(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdAmosToFront(struct nativeCommand *cmd, char *tokenBuffer );
@@ -71,6 +76,10 @@ char *cmdPop(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdExtension( struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdChipFree( struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdFastFree( struct nativeCommand *cmd, char *tokenBuffer );
+char *cmdStop( struct nativeCommand *cmd, char *tokenBuffer );
+char *cmdCommandLineStr( struct nativeCommand *cmd, char *tokenBuffer );
+char *cmdExec(struct nativeCommand *cmd, char *tokenBuffer);
+char *cmdSetAccessory(struct nativeCommand *cmd, char *tokenBuffer);
 
 // not used outside of commands.cpp, normally but just for testing.
 char *_addStr( struct glueCommands *data, int nextToken );
@@ -113,7 +122,7 @@ struct rem
 };
 
 extern bool every_on;
-extern int every_timer;
+extern unsigned int every_timer;
 extern char *on_every_gosub_location;
 extern char *on_every_proc_location;
 extern struct timeval every_before, every_after;

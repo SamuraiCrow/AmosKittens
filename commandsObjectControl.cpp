@@ -1,12 +1,25 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
+#endif
+
+#ifdef __linux__
+#include <stdint.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#endif
+
 #include "debug.h"
 #include <string>
 #include <iostream>
-#include <proto/retroMode.h>
 
 #include "stack.h"
 #include "amosKittens.h"
@@ -31,6 +44,50 @@ extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
 
 int priorityReverse = 0;
+
+int find_zone_in_any_screen( int hx, int hy)
+{
+	int z,x,y;
+	struct zone *zz;
+	struct retroScreen *s;
+
+	for (z=0;z<zones_allocated;z++)
+	{
+		if ((zones[z].screen>-1) && (zones[z].screen<8))
+		{
+			if (s = screens[zones[z].screen])
+			{
+				x = XScreen_formula( s, hx );
+				y = YScreen_formula( s, hy );
+				zz = &zones[z];
+				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z;
+			}
+		}
+	}
+	return -1;
+}
+
+int find_zone_in_only_screen( int screen, int hx, int hy)
+{
+	int z,x,y;
+	struct zone *zz;
+	struct retroScreen *s;
+
+	for (z=0;z<zones_allocated;z++)
+	{
+		if (zones[z].screen == screen)
+		{
+			if (s = screens[zones[z].screen])
+			{
+				x = XScreen_formula( s, hx );
+				y = YScreen_formula( s, hy );
+				zz = &zones[z];
+				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z;
+			}
+		}
+	}
+	return -1;
+}
 
 char *ocXMouse(struct nativeCommand *cmd, char *tokenBuffer)
 {
@@ -65,7 +122,7 @@ char *ocHide(struct nativeCommand *cmd, char *tokenBuffer)
 char *_ocMouseLimit( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -73,7 +130,7 @@ char *_ocMouseLimit( struct glueCommands *data, int nextToken )
 
 char *ocMouseLimit(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocMouseLimit, tokenBuffer );
 	return tokenBuffer;
 }
@@ -81,7 +138,7 @@ char *ocMouseLimit(struct nativeCommand *cmd, char *tokenBuffer)
 char *_ocReserveZone( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (zones) free(zones);
 	zones_allocated = 0;
@@ -104,7 +161,7 @@ char *_ocReserveZone( struct glueCommands *data, int nextToken )
 
 char *ocReserveZone(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocReserveZone, tokenBuffer );
 	return tokenBuffer;
 }
@@ -114,7 +171,7 @@ char *_ocZoneStr( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	char *newstr = NULL;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 2)
 	{
@@ -144,7 +201,7 @@ char *_ocZoneStr( struct glueCommands *data, int nextToken )
 
 char *ocZoneStr(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 
 	stackCmdParm( _ocZoneStr, tokenBuffer );
@@ -153,25 +210,11 @@ char *ocZoneStr(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_ocMouseZone( struct glueCommands *data, int nextToken )
 {
-	struct retroScreen *s;
-	struct zone *zz;
 	int args = stack - data->stack +1 ;
-	int z,rz = -1;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	int rz;
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	for (z=0;z<zones_allocated;z++)
-	{
-		if ((zones[z].screen>-1) && (zones[z].screen<8))
-		{
-			if (s = screens[zones[z].screen])
-			{
-				int x = XScreen_formula( s, engine_mouse_x );
-				int y = YScreen_formula( s, engine_mouse_y );
-				zz = &zones[z];
-				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	rz = z;
-			}
-		}
-	}
+	rz = find_zone_in_any_screen( engine_mouse_x, engine_mouse_y );
 
 	popStack( stack - data->stack );
 	setStackNum( rz );
@@ -181,7 +224,7 @@ char *_ocMouseZone( struct glueCommands *data, int nextToken )
 
 char *ocMouseZone(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocMouseZone, tokenBuffer );
 	return tokenBuffer;
 }
@@ -189,7 +232,7 @@ char *ocMouseZone(struct nativeCommand *cmd, char *tokenBuffer)
 char *_ocChangeMouse( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -197,7 +240,7 @@ char *_ocChangeMouse( struct glueCommands *data, int nextToken )
 
 char *ocChangeMouse(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocChangeMouse, tokenBuffer );
 	return tokenBuffer;
 }
@@ -205,7 +248,7 @@ char *ocChangeMouse(struct nativeCommand *cmd, char *tokenBuffer)
 char *_ocSetZone( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 5)
 	{
@@ -232,7 +275,7 @@ char *_ocSetZone( struct glueCommands *data, int nextToken )
 
 char *ocSetZone(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocSetZone, tokenBuffer );
 	return tokenBuffer;
 }
@@ -240,7 +283,7 @@ char *ocSetZone(struct nativeCommand *cmd, char *tokenBuffer)
 char *_ocResetZone( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
@@ -263,45 +306,45 @@ char *_ocResetZone( struct glueCommands *data, int nextToken )
 
 char *ocResetZone(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocResetZone, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *ocShowOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	return tokenBuffer;
 }
 
 char *ocHideOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	return tokenBuffer;
 }
 
 char *ocPriorityOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	return tokenBuffer;
 }
 
 char *ocPriorityOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	return tokenBuffer;
 }
 
 char *ocPriorityReverseOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	priorityReverse = 0;
 	return tokenBuffer;
 }
 
 char *ocPriorityReverseOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	priorityReverse = 1;
 	return tokenBuffer;
 }
@@ -320,12 +363,14 @@ char *ocAutoViewOn(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *ocShow(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	autoView = 1;
 	return tokenBuffer;
 }
 
 char *ocView(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	autoView =1;
 	return tokenBuffer;
 }
@@ -373,7 +418,7 @@ char *_ocJUp( struct glueCommands *data, int nextToken )
 
 char *ocJUp(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocJUp, tokenBuffer );
 	return tokenBuffer;
 }
@@ -398,7 +443,7 @@ char *_ocJDown( struct glueCommands *data, int nextToken )
 
 char *ocJDown(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocJDown, tokenBuffer );
 	return tokenBuffer;
 }
@@ -424,7 +469,7 @@ char *_ocJLeft( struct glueCommands *data, int nextToken )
 
 char *ocJLeft(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocJLeft, tokenBuffer );
 	return tokenBuffer;
 }
@@ -449,7 +494,7 @@ char *_ocJRight( struct glueCommands *data, int nextToken )
 
 char *ocJRight(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocJRight, tokenBuffer );
 	return tokenBuffer;
 }
@@ -457,7 +502,7 @@ char *ocJRight(struct nativeCommand *cmd, char *tokenBuffer)
 char *_ocSynchro( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
@@ -470,21 +515,21 @@ char *_ocSynchro( struct glueCommands *data, int nextToken )
 
 char *ocSynchro(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocSynchro, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *ocUpdateOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	return tokenBuffer;
 }
 
 char *_ocUpdateEvery( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
@@ -497,7 +542,7 @@ char *_ocUpdateEvery( struct glueCommands *data, int nextToken )
 
 char *ocUpdateEvery(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocUpdateEvery, tokenBuffer );
 	return tokenBuffer;
 }
@@ -506,7 +551,7 @@ char *_ocFire( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
@@ -522,7 +567,7 @@ char *_ocFire( struct glueCommands *data, int nextToken )
 
 char *ocFire(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocFire, tokenBuffer );
 	return tokenBuffer;
 }
@@ -530,7 +575,7 @@ char *ocFire(struct nativeCommand *cmd, char *tokenBuffer)
 char *_ocMakeMask( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -548,18 +593,38 @@ char *_ocMakeMask( struct glueCommands *data, int nextToken )
 
 char *ocMakeMask(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocMakeMask, tokenBuffer );
 	return tokenBuffer;
 }
 
+
+
 char *_ocHZone( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	int ret = -1;
+	int s=-1,x=-1,y=-1;
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	Printf("Sorry HZone out of order, comeback when it works :-)\n");
+	switch (args)
+	{
+		case 2:
+				x = getStackNum( stack-1 );
+				y = getStackNum( stack );
+				ret = find_zone_in_any_screen( x,y );
+				break;
+		case 3:
+				s = getStackNum( stack-2 );
+				x = getStackNum( stack-1 );	
+				y = getStackNum( stack );
+				ret = find_zone_in_only_screen( s, x,y );
+				break;
+		default:
+				setError(22, data-> tokenBuffer);
+	}
+
+	printf("HZone(%d,%d,%d) is %d\n",s,x,y,ret);
 
 	popStack( stack - data->stack );
 	setStackNum( ret );
@@ -568,7 +633,7 @@ char *_ocHZone( struct glueCommands *data, int nextToken )
 
 char *ocHZone(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocHZone, tokenBuffer );
 	return tokenBuffer;
 }
@@ -577,7 +642,7 @@ char *_ocJoy( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
@@ -593,7 +658,32 @@ char *_ocJoy( struct glueCommands *data, int nextToken )
 
 char *ocJoy(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _ocJoy, tokenBuffer );
 	return tokenBuffer;
 }
+
+char *_ocIconMakeMask( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	int ret = 0;
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args == 1)
+	{
+		int n = getStackNum( stack );
+	}
+	else setError(22,data->tokenBuffer);;
+
+	popStack( stack - data->stack );
+	setStackNum( ret );
+	return NULL;
+}
+
+char *ocIconMakeMask(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdNormal( _ocIconMakeMask, tokenBuffer );
+	return tokenBuffer;
+}
+

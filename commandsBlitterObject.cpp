@@ -1,16 +1,30 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
+#endif
+
+#ifdef __linux__
+#include <stdint.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#endif
+
 #include "debug.h"
 #include <string>
 #include <iostream>
-#include <proto/retroMode.h>
 
 #include "stack.h"
 #include "amosKittens.h"
 #include "commandsGfx.h"
+#include "commandsBlitterObject.h"
 #include "errors.h"
 #include "engine.h"
 
@@ -40,10 +54,7 @@ void clearBobs()
 	int n;
 	struct retroScreen *screen;
 	struct retroSpriteObject *bob;
-	struct retroFrameHeader *frame;
 	struct retroSpriteClear *clear;
-	int image;
-	int x1,y1,x2,y2;
 
 	if (!sprite) return;
 	if (!sprite -> frames) return;
@@ -77,6 +88,38 @@ void clearBobs()
 			}
 		}
 	}
+}
+
+
+void freeScreenBobs( int screen_id )
+{
+	int n;
+	struct retroSpriteObject *bob;
+
+	for (n=0;n<64;n++)
+	{
+		bob = &bobs[n];
+
+		bob -> x = 0;
+		bob -> y = 0;
+		bob -> image = 0;
+
+		if (bob->screen_id == screen_id)
+		{
+			freeBobClear( bob );
+		}
+	}
+}
+
+void freeBobClear( struct retroSpriteObject *bob )
+{
+	struct retroSpriteClear *clear = bob -> clear;
+
+	if (clear -> mem)
+	{
+		sys_free(clear -> mem);
+		clear -> mem = NULL;
+	}	
 }
 
 void copyScreenToClear( struct retroScreen *screen, struct retroSpriteClear *clear )
@@ -149,8 +192,6 @@ void copyClearToScreen( struct retroSpriteClear *clear, struct retroScreen *scre
 		src += clear -> w;
 		dest += screen -> bytesPerRow;
 	}
-
-	retroBox(screen,x0,y0,x1,y1,1);
 }
 
 void drawBobs()
@@ -165,6 +206,7 @@ void drawBobs()
 	int start=0,end=0,dir=0;
 
 	if (!sprite) return;
+	if (!sprite -> frames) return;
 
 	switch ( priorityReverse )
 	{
@@ -179,18 +221,17 @@ void drawBobs()
 	for (n=start;n!=end;n+=dir)
 	{
 		bob = &bobs[n];
+
 		screen = screens[bob->screen_id];
 
 		if (screen)
 		{
-			image = bob->image & 0x3FFFF;
+			image = (bob->image & 0x3FFFF) - 1;
 			flags = bob -> image & 0xC000;
 
-			if (image > sprite -> number_of_frames) image =0;	
-
-			if ( (image > 0) && ( sprite -> frames) )
+			if ( (image >= 0 ) && (image < sprite -> number_of_frames) )
 			{
-				frame = &sprite -> frames[ image-1 ];
+				frame = &sprite -> frames[ image ];
 
 				clear = &bob -> clear[ 0 ];
 
@@ -205,26 +246,18 @@ void drawBobs()
 
 				if (clear -> mem)
 				{
-					FreeVec(clear -> mem);
+					sys_free(clear -> mem);
 					clear -> mem = NULL;
 				}
 
 				if (size) 
 				{
-					clear -> mem = (char *) AllocVecTags( size, 
-							AVT_Type, MEMF_PRIVATE, 
-							AVT_ClearWithValue, 0,
-							TAG_END );
-
+					clear -> mem = (char *) sys_public_alloc_clear(size);
 					clear -> size = size;
 				}
 
-				if (clear -> mem)
-				{
-					copyScreenToClear( screen,clear );
-				}
-
-				retroPasteSprite(screen, sprite, bob->x, bob->y, image-1, flags);
+				if (clear -> mem) copyScreenToClear( screen,clear );
+				retroPasteSprite(screen, sprite, bob->x, bob->y, image, flags);
 			}
 		}
 	}
@@ -236,7 +269,7 @@ char *_boBob( struct glueCommands *data, int nextToken )
 	int num;
 	struct retroSpriteObject *bob;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	num = getStackNum( stack - 3 );
 	bob = &bobs[num];
@@ -245,8 +278,13 @@ char *_boBob( struct glueCommands *data, int nextToken )
 	stack_get_if_int( stack - 1 , &bob->y );
 
 	bob->image = getStackNum( stack );
-
 	bob->screen_id = current_screen;
+
+
+	if (screens[current_screen])
+	{
+		screens[current_screen] -> force_swap = TRUE;
+	}
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -254,21 +292,21 @@ char *_boBob( struct glueCommands *data, int nextToken )
 
 char *boBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _boBob, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *boBobOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	return tokenBuffer;
 }
 
 char *_boNoMask( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -276,7 +314,7 @@ char *_boNoMask( struct glueCommands *data, int nextToken )
 
 char *boNoMask(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _boNoMask, tokenBuffer );
 	return tokenBuffer;
 }
@@ -285,7 +323,7 @@ char *boNoMask(struct nativeCommand *cmd, char *tokenBuffer)
 char *_boSetBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -293,7 +331,7 @@ char *_boSetBob( struct glueCommands *data, int nextToken )
 
 char *boSetBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _boNoMask, tokenBuffer );
 	return tokenBuffer;
 }
@@ -302,7 +340,7 @@ char *_boXBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int x = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -318,7 +356,7 @@ char *_boXBob( struct glueCommands *data, int nextToken )
 
 char *boXBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boXBob, tokenBuffer );
 	return tokenBuffer;
 }
@@ -327,7 +365,7 @@ char *_boYBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int y=0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -344,7 +382,7 @@ char *_boYBob( struct glueCommands *data, int nextToken )
 
 char *boYBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boYBob, tokenBuffer );
 	return tokenBuffer;
 }
@@ -352,14 +390,13 @@ char *boYBob(struct nativeCommand *cmd, char *tokenBuffer)
 char *_boPasteBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	int num;
-	struct retroSpriteObject *bob;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 3:	// past bob x,y,i
+				if ( screens[current_screen] )
 				{
 					int x = getStackNum( stack-2 );
 					int y = getStackNum( stack-1 );
@@ -380,7 +417,9 @@ char *_boPasteBob( struct glueCommands *data, int nextToken )
 
 char *boPasteBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+
 	stackCmdNormal( _boPasteBob, tokenBuffer );
 	return tokenBuffer;
 }
@@ -388,42 +427,63 @@ char *boPasteBob(struct nativeCommand *cmd, char *tokenBuffer)
 char *_boGetBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	int num;
-	struct retroSpriteObject *bob;
+	struct retroScreen *screen = NULL;
+	int screen_nr = 0;
+	int image = 0;
+	int x0 = 0;
+	int y0 = 0;
+	int x1 = 0;
+	int y1 = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	printf("stack is %d\n",stack);
 
 	switch (args)
 	{
 		case 5:	// get bob i,x,y to x2,y2
-				{
-					int image = getStackNum( stack-4 );
-					int x0 = getStackNum( stack-3 );
-					int y0 = getStackNum( stack-2 );
-					int x1 = getStackNum( stack-1 );
-					int y1 = getStackNum( stack );
 
-					engine_lock();
-
-					if (sprite==NULL)
-					{
-						sprite = (struct retroSprite *) AllocVecTags(  sizeof(struct retroSprite), AVT_Type, MEMF_SHARED, AVT_ClearWithValue, 0, TAG_END );
-					}
-
-					if (sprite)
-					{
-						retroGetSprite(screens[current_screen],sprite,image-1,x0,y0,x1,y1);
-					}
-
-					engine_unlock();
-
-
-				}
+				image = getStackNum( stack-4 );
+				x0 = getStackNum( stack-3 );
+				y0 = getStackNum( stack-2 );
+				x1 = getStackNum( stack-1 );
+				y1 = getStackNum( stack );
+				screen = screens[current_screen];
 				break;
 
 		case 6:	// get bob s,i,x,y to x2,y2
+
+				screen_nr = getStackNum( stack-5 );
+				image = getStackNum( stack-4 );
+				x0 = getStackNum( stack-3 );
+				y0 = getStackNum( stack-2 );
+				x1 = getStackNum( stack-1 );
+				y1 = getStackNum( stack );
+
+				if ((screen_nr > -1) && (screen_nr < 8)) screen = screens[ screen_nr ];
 				break;
 	 }
+
+	if (screen)
+	{
+		engine_lock();
+
+		if (sprite==NULL)
+		{
+			printf("no srpite found\n");
+			sprite = (struct retroSprite *) sys_public_alloc_clear( sizeof(struct retroSprite) );
+		}
+
+		if (sprite)
+		{
+			retroGetSprite(screen,sprite,image-1,x0,y0,x1,y1);
+		}
+
+		printf("try engine unlock\n");
+		engine_unlock();
+	}
+	else setError(22,data->tokenBuffer);
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -431,7 +491,7 @@ char *_boGetBob( struct glueCommands *data, int nextToken )
 
 char *boGetBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _boGetBob, tokenBuffer );
 	return tokenBuffer;
 }
@@ -439,11 +499,9 @@ char *boGetBob(struct nativeCommand *cmd, char *tokenBuffer)
 char *_boPutBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	int n;
-	int image,flags;
-	struct retroSpriteObject *bob;
+	int n,image,flags;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -466,7 +524,7 @@ char *_boPutBob( struct glueCommands *data, int nextToken )
 
 char *boPutBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _boPutBob, tokenBuffer );
 	return tokenBuffer;
 }
@@ -477,41 +535,72 @@ char *_boHotSpot( struct glueCommands *data, int nextToken )
 	int image;
 	int p;
 	int x,y;
-	struct retroSpriteObject *bob;
+	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	dump_stack();
+	if (!sprite)
+	{
+		popStack( stack - data->stack );
+		setError(36,data->tokenBuffer);
+		return NULL;
+	}
+
+
+	printf("sprite -> number_of_frames: %d\n",sprite -> number_of_frames);
 
 	switch (args)
 	{
 		case 2:
-				image = getStackNum( stack-1 );
+				image = getStackNum( stack-1 )-1;
 				p = getStackNum( stack );
 
 				if (sprite)
 				{
-					struct retroFrameHeader *frame = &sprite -> frames[image];
-					x = (p >> 4) & 0xF;
-					y = p & 0xF;
-					frame -> XHotSpot = (x * frame -> Width) >> 1;
-					frame -> YHotSpot = (y * frame -> Height) >> 1;
+					if (image < sprite -> number_of_frames)
+					{
+						struct retroFrameHeader *frame = &sprite -> frames[image];
+
+						if (frame)
+						{
+							x = (p >> 4) & 0xF;
+							y = p & 0xF;
+							frame -> XHotSpot = (x * frame -> Width) >> 1;
+							frame -> YHotSpot = (y * frame -> Height) >> 1;
+							success = true;
+						}
+					}
 				}
 
+				 if (success == false) setError( 23, data -> tokenBuffer );
 				break;
 
 		case 3:
-				image = getStackNum( stack-2 );
+				image = getStackNum( stack-2 )-1;
 				x = getStackNum( stack-1 );
 				y = getStackNum( stack );
 
 				if (sprite)
 				{
-					struct retroFrameHeader *frame = &sprite -> frames[image];
-					frame -> XHotSpot = x;
-					frame -> YHotSpot = y;
+					if (image < sprite -> number_of_frames)
+					{
+						struct retroFrameHeader *frame = &sprite -> frames[image];
+
+						if (frame)
+						{
+							frame -> XHotSpot = x;
+							frame -> YHotSpot = y;
+							success = true;
+						}
+					}
 				}
+
+				 if (success == false) setError( 23, data -> tokenBuffer );
 				break;
+
+		default:
+				printf("args: %d\n",args);
+				setError(22,data->tokenBuffer);
 
 	}
 
@@ -522,17 +611,15 @@ char *_boHotSpot( struct glueCommands *data, int nextToken )
 
 char *boHotSpot(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _boHotSpot, tokenBuffer );
 	return tokenBuffer;
 }
 char *_boLimitBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	int num;
-	struct retroSpriteObject *bob;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	dump_stack();
 
@@ -542,7 +629,7 @@ char *_boLimitBob( struct glueCommands *data, int nextToken )
 
 char *boLimitBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _boLimitBob, tokenBuffer );
 	return tokenBuffer;
 }
@@ -551,7 +638,7 @@ char *_boHrev( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -565,7 +652,7 @@ char *_boHrev( struct glueCommands *data, int nextToken )
 
 char *boHrev(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boHrev, tokenBuffer );
 	return tokenBuffer;
 }
@@ -574,7 +661,7 @@ char *_boVrev( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -588,7 +675,7 @@ char *_boVrev( struct glueCommands *data, int nextToken )
 
 char *boVrev(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boVrev, tokenBuffer );
 	return tokenBuffer;
 }
@@ -597,7 +684,7 @@ char *_boRev( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -611,21 +698,21 @@ char *_boRev( struct glueCommands *data, int nextToken )
 
 char *boRev(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boRev, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *boBobUpdateOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	bobUpdate = 0;
 	return tokenBuffer;
 }
 
 char *boBobUpdate(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	return tokenBuffer;
 }
 
@@ -634,7 +721,7 @@ char *_boBobCol( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	popStack( stack - data->stack );
 	setStackNum(ret);
@@ -643,7 +730,7 @@ char *_boBobCol( struct glueCommands *data, int nextToken )
 
 char *boBobCol(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boBobCol, tokenBuffer );
 	return tokenBuffer;
 }
@@ -652,7 +739,7 @@ char *_boCol( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int ret = 0;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	popStack( stack - data->stack );
 	setStackNum(ret);
@@ -661,7 +748,7 @@ char *_boCol( struct glueCommands *data, int nextToken )
 
 char *boCol(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boCol, tokenBuffer );
 	return tokenBuffer;
 }
@@ -670,9 +757,8 @@ char *_boDelBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int del = 0;
-	struct retroFrameHeader *frame;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -682,7 +768,7 @@ char *_boDelBob( struct glueCommands *data, int nextToken )
 		{
 			int f;
 
-			if (sprite -> frames[del].data) FreeVec(sprite -> frames[del].data);
+			if (sprite -> frames[del].data) sys_free(sprite -> frames[del].data);
 
 			for (f=sprite->number_of_frames-1;f>del;f--)
 			{
@@ -699,7 +785,8 @@ char *_boDelBob( struct glueCommands *data, int nextToken )
 
 char *boDelBob(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _boDelBob, tokenBuffer );
 	return tokenBuffer;
 }
+

@@ -10,7 +10,7 @@ VERSION = 1
 #RM     = delete
 # RM     = rm
 
-warnings = -wall -Wuninitialized
+warnings = -Wuninitialized
 
 opt=-Dtest_app
 
@@ -39,7 +39,7 @@ AmalCompiler.exe:		AmalCompiler.cpp  ${objects_in_dir} AmalCompiler.h
 	g++ $(warnings) -O2 -D__USE_INLINE__ $(@:.exe=.cpp) ${objects_in_dir} ${opt} -o $@
 
 clean:
-	delete $(programs) ${objects_in_dir}
+	rm $(programs) ${objects_in_dir}
 
 .PHONY: revision 
 revision:

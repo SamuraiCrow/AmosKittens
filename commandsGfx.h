@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
+
 #include "amosKittens.h"
 
 char *gfxColour(struct nativeCommand *cmd, char *tokenBuffer);
@@ -27,6 +31,7 @@ char *gfxDefaultPalette(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxPolygon(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxCls(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxDefScroll(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxScrollOff(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxScroll(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxShiftUp(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxShiftDown(struct nativeCommand *cmd, char *tokenBuffer);
@@ -46,8 +51,17 @@ char *gfxSetPaint(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxSetTempras(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxGrWriting(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxText(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxTextLength(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxTextBase(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxSetText(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxClip(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxSetPattern(struct nativeCommand *cmd, char *tokenBuffer);
 char *gfxSetLine(struct nativeCommand *cmd, char *tokenBuffer);
-
+char *gfxPhysic(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxLogic(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxHslider(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfsVslider(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxSetSlider(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxDualPlayfield(struct nativeCommand *cmd, char *tokenBuffer);
+char *gfxLaced(struct nativeCommand *cmd, char *tokenBuffer);
 

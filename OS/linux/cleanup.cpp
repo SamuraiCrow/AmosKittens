@@ -1,12 +1,20 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <proto/exec.h>
-#include <proto/dos.h>
 #include "stack.h"
-#include "amosKittens.h"
 #include <vector>
-#include <proto/retroMode.h>
+
+#ifdef __linux__
+#include <unistd.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#define Pritnf printf
+#endif
+
+#include "amosKittens.h"
 #include "commandsbanks.h"
 #include "amalcompiler.h"
 #include "channel.h"
@@ -21,10 +29,60 @@ extern struct retroSprite *sprite ;
 extern struct retroSprite *icons ;
 extern ChannelTableClass *channels;
 
-void clean_up_vars()
+extern std::vector<struct kittyBank> kittyBankList;
+
+
+void clear_local_vars( int proc )
 {
 	int n;
-	int i;
+	struct kittyData *var;
+
+	printf("%s;%s\n",__FILE__,__FUNCTION__);
+
+	for (n=0;n<global_var_count;n++)
+	{
+		if (globalVars[n].proc == proc)
+		{
+			printf("clear %s\n",globalVars[n].varName);
+
+			var = &globalVars[n].var;
+
+			switch (var->type)
+			{
+				case type_int:
+					var -> value = 0;
+					break;
+
+				case type_float:
+					var -> decimal = 0;
+					break;
+
+				case type_string:
+					if (var->str) var->str[0] = 0;
+					var->len = 0;
+					break;
+
+				case type_int | type_array:
+				case type_float | type_array:
+				case type_string | type_array:
+
+					if (var -> sizeTab) free( var -> sizeTab);
+	 				if (var->str) free (var->str);
+					var -> sizeTab = NULL;
+					var->str = NULL;
+					break;
+
+			}
+		}
+	}
+
+	Delay(5);
+}
+
+void clean_up_vars()
+{
+	struct kittyData *var;
+	int n;
 
 	for (n=0;n<global_var_count;n++)
 	{
@@ -37,22 +95,27 @@ void clean_up_vars()
 			globalVars[n].varName = NULL;
 		}
 
-		switch (globalVars[n].var.type)
+		var = &globalVars[n].var;
+
+		switch (var -> type)
 		{
 			case type_string:
+ 				if (var->str) free (var->str);
+				break;
+
 			case type_int | type_array:
 			case type_float | type_array:
 			case type_string | type_array:
 
-//				printf("--->Free array?");
-
-				// its a union, so any array or string will be freed.
-
- 				if (globalVars[n].var.str) free (globalVars[n].var.str);
-				globalVars[n].var.str = NULL;
+				// free
+				if (var -> sizeTab) free( var -> sizeTab);
+ 				if (var->str) free (var->str);
 				break;
 		}
-//		printf("--->Done :-)\n");
+
+		// reset
+		var -> sizeTab = NULL;
+		var->str = NULL;
 	}
 
 	global_var_count = 0;
@@ -89,51 +152,22 @@ void clean_up_files()
 	}
 }
 
-void clean_up_bank(int n)
-{
-	if (kittyBanks[n].start)
-	{
-		switch ( kittyBanks[n].type )
-		{
-			case bank_type_icons:
-
-					printf("try free icons\n");
-
-					retroFreeSprite( (struct retroSprite *) kittyBanks[n].object_ptr );
-					icons = NULL;
-					break;
-
-			case bank_type_sprite:
-
-					printf("try free sprite\n");
-
-					retroFreeSprite( (struct retroSprite *) kittyBanks[n].object_ptr );
-					sprite = NULL;
-					break;
-
-			default:
-					free( kittyBanks[n].start - 8 );
-					break;
-		}
-
-		kittyBanks[n].start = NULL;
-		kittyBanks[n].length = 0;
-		kittyBanks[n].type = 0;
-	}
-}
+extern void freeBank( int banknr );
 
 void clean_up_banks()
 {
-	int n;
-	for (n=0;n<15;n++)
+	unsigned int n;
+	for (n=0;n<kittyBankList.size();n++)
 	{
-		clean_up_bank(n);
+		freeBank(n);
 	}
 }
 
 void clean_up_special()
 {
 	int n;
+
+	printf("should clean up menus here, don't forget me\n");
 
 	printf("clean up channels!!\n");
 
@@ -154,19 +188,15 @@ void clean_up_special()
 
 	clean_up_banks();
 
-	printf("clean up contextDir\n");
-
-	if (contextDir)
-	{
-		ReleaseDirContext(contextDir);
-		contextDir = NULL;
-	}
+	printf("clean up dir first pattern");
 
 	if (dir_first_pattern)
 	{
 		free(dir_first_pattern);
 		dir_first_pattern = NULL;
 	}
+
+	printf("clean up zones\n");
 
 	if (zones)
 	{

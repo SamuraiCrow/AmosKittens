@@ -2,11 +2,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
+
 #include "amosKittens.h"
 
 char *machinePoke(struct nativeCommand *cmd, char *tokenBuffer);
+char *machinePokeStr(struct nativeCommand *cmd, char *tokenBuffer);
 char *machinePeek(struct nativeCommand *cmd, char *tokenBuffer);
+char *machinePeekStr(struct nativeCommand *cmd, char *tokenBuffer);
 char *machineDoke(struct nativeCommand *cmd, char *tokenBuffer);
 char *machineDeek(struct nativeCommand *cmd, char *tokenBuffer);
 char *machineLoke(struct nativeCommand *cmd, char *tokenBuffer);
@@ -42,3 +48,7 @@ char *machineINTCALL(struct nativeCommand *cmd, char *tokenBuffer);
 
 char *machinePload(struct nativeCommand *cmd, char *tokenBuffer);
 char *machineCall(struct nativeCommand *cmd, char *tokenBuffer);
+
+char *machineFree(struct nativeCommand *cmd, char *tokenBuffer);
+char *machineLvo(struct nativeCommand *cmd, char *tokenBuffer);
+

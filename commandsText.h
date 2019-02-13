@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
 #include "amosKittens.h"
 
 extern char *textPrint(nativeCommand *cmd, char *ptr);
@@ -50,4 +52,13 @@ extern char *textCLeftStr(nativeCommand *cmd, char *ptr);
 extern char *textCRightStr(nativeCommand *cmd, char *ptr);
 extern char *textPrintUsing(nativeCommand *cmd, char *ptr);
 extern char *textWindow(nativeCommand *cmd, char *ptr);
-
+extern char *textWindClose(nativeCommand *cmd, char *ptr);
+extern char *textWindOpen(nativeCommand *cmd, char *ptr);
+extern char *textWindMove(nativeCommand *cmd, char *ptr);
+extern char *textWindSave(nativeCommand *cmd, char *ptr);
+extern char *textWindSize(nativeCommand *cmd, char *ptr);
+extern char *textWindon(nativeCommand *cmd, char *ptr);
+extern char *textXGraphic(nativeCommand *cmd, char *ptr);
+extern char *textYGraphic(nativeCommand *cmd, char *ptr);
+extern char *textTitleTop(nativeCommand *cmd, char *ptr);
+extern char *textAt(struct nativeCommand *disc, char *tokenBuffer);

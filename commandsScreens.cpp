@@ -1,18 +1,31 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
-#include "debug.h"
-#include <string>
-#include <iostream>
 #include <proto/retroMode.h>
 #include <proto/datatypes.h>
 #include <datatypes/pictureclass.h>
+#endif
 
+#ifdef __linux__
+#include <stdint.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#endif
+
+#include "debug.h"
+#include <string>
+#include <iostream>
 #include "stack.h"
 #include "amosKittens.h"
 #include "commandsScreens.h"
+#include "commandsBlitterObject.h"
 #include "errors.h"
 #include "engine.h"
 
@@ -23,13 +36,52 @@ extern struct retroVideo *video;
 int current_screen = 0;
 extern struct retroRGB DefaultPalette[256];
 
+extern struct retroTextWindow *newTextWindow( struct retroScreen *screen, int id );
+extern void freeAllTextWindows(struct retroScreen *screen);
+
+void init_amos_kittens_screen_default_text_window( struct retroScreen *screen, int colors )
+{
+	struct retroTextWindow *textWindow = NULL;
+
+	if (colors == 2)
+	{
+		screen->pen = 1;
+		screen->paper = 0;
+		screen->ink0 = 1;
+		screen->ink1= 0;
+		screen->ink2= 0;
+	}
+	else
+	{
+		screen->pen = 2;
+		screen->paper = 1;
+		screen->ink0 = 2;
+		screen->ink1= 0;
+		screen->ink2= 0;
+	}
+
+	if (textWindow = newTextWindow( screen, 0 ))
+	{
+		textWindow -> charsPerRow = screen -> realWidth / 8;
+		textWindow -> rows = screen -> realHeight / 8;
+		screen -> currentTextWindow = textWindow;
+	}
+}
+
+void init_amos_kittens_screen_default_colors(struct retroScreen *screen)
+{
+	set_default_colors( screen );
+	retroFlash( screen, 3, (char *) "(100,5),(200,5),(300,5),(400,5),(500,5),(600,5)(700,5),(800,5),(900,5),(A00,5),(B00,5),(A00,5),(900,5),(800,5),(700,5),(600,5),(500,5)(400,5),(300,5),(200,5)");
+	retroBAR( screen, 0,0, screen -> realWidth,screen->realHeight, screen -> paper );
+}
+
 char *_gfxScreenOpen( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	bool success = false;
-	int ret = 0;
+	int colors = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==5)
 	{
@@ -37,26 +89,25 @@ char *_gfxScreenOpen( struct glueCommands *data, int nextToken )
 
 		if ((screen_num>-1)&&(screen_num<8))
 		{
+			struct retroScreen *screen;
 			current_screen = screen_num;
 
 			// Kitty ignores colors we don't care, allways 256 colors.
 
+			colors = getStackNum( stack-1 );
+
 			engine_lock();
 			if (screens[screen_num]) retroCloseScreen(&screens[screen_num]);
 			screens[screen_num] = retroOpenScreen(getStackNum( stack-3 ),getStackNum( stack-2 ),getStackNum( stack ));
-
-			if (screens[screen_num])
+	
+			if (screen = screens[screen_num])
 			{
-				retroApplyScreen( screens[screen_num], video, 0, 0,
-					screens[screen_num] -> realWidth,screens[screen_num]->realHeight );
-
-				set_default_colors( screens[screen_num] );
-				retroFlash( screens[screen_num], 3, (char *) "(100,5),(200,5),(300,5),(400,5),(500,5),(600,5)(700,5),(800,5),(900,5),(A00,5),(B00,5),(A00,5),(900,5),(800,5),(700,5),(600,5),(500,5)(400,5),(300,5),(200,5)");
-
-				retroBAR( screens[screen_num], 0,0, screens[screen_num] -> realWidth,screens[screen_num]->realHeight, 1 );
-				draw_cursor(screens[screen_num]);
+				init_amos_kittens_screen_default_text_window(screen, colors);
+				init_amos_kittens_screen_default_colors(screen);
+				draw_cursor(screen);
 			}
 
+			retroApplyScreen( screen, video, 0, 0, screen -> realWidth,screen->realHeight );
 			engine_unlock();
 
 			success = true;
@@ -69,26 +120,16 @@ char *_gfxScreenOpen( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
-char *_gfxScreenClose( struct glueCommands *data, int nextToken )
+// make sure there is standard way to close screens, that take care of clean up.
+
+bool kitten_screen_close(int screen_num)
 {
-	int args = stack - data->stack +1 ;
-	bool success = false;
-	int ret = 0;
-
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
-
-	if (args==1)
+	if ((screen_num>-1)&&(screen_num<8))
 	{
-		int screen_num = getStackNum( stack );
-
-		if ((screen_num>-1)&&(screen_num<8))
-		{
-			engine_lock();
-			if (screens[screen_num]) retroCloseScreen(&screens[screen_num]);
-			engine_unlock();
-
-			success = true;
-		}
+		engine_lock();
+		freeAllTextWindows( screens[screen_num]  );
+		freeScreenBobs( screen_num );
+		if (screens[screen_num]) retroCloseScreen(&screens[screen_num]);
 
 		// find a open screen, and set current screen to that.
 		if (screen_num == current_screen)
@@ -103,6 +144,24 @@ char *_gfxScreenClose( struct glueCommands *data, int nextToken )
 				}
 			}
 		}
+		engine_unlock();
+		return true;
+	}
+
+	return false;
+}
+
+char *_gfxScreenClose( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	bool success = false;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+		int screen_num = getStackNum( stack );
+		success = kitten_screen_close( screen_num );
 	}
 
 	if (success == false) setError(22,data->tokenBuffer);
@@ -111,13 +170,29 @@ char *_gfxScreenClose( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
+char *gfxScreenClose(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _gfxScreenClose, tokenBuffer );
+	return tokenBuffer;
+}
+
+void copy_pal(	struct retroRGB *source_pal,	struct retroRGB *dest_pal)
+{
+	int n;
+	for (n=0; n<256;n++)
+	{
+		*dest_pal=*source_pal;
+		source_pal++;
+		dest_pal++;
+	}
+}
+
 char *_gfxScreenClone( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	bool success = false;
-	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -134,16 +209,18 @@ char *_gfxScreenClone( struct glueCommands *data, int nextToken )
 
 				if (screens[screen_num])
 				{
-					set_default_colors( screens[screen_num] );
+					screens[screen_num] -> fade_speed = 0;
+					screens[screen_num] -> fade_count = 0;
+
+					copy_pal( screens[current_screen] -> orgPalette, screens[screen_num] -> orgPalette );
+					copy_pal( screens[current_screen] -> rowPalette, screens[screen_num] -> rowPalette );
+					copy_pal( screens[current_screen] -> fadePalette, screens[screen_num] -> fadePalette );
 
 					retroApplyScreen( screens[screen_num], video, 0, 100, screens[screen_num]->displayWidth, screens[screen_num]->displayHeight );
 					video -> refreshAllScanlines = TRUE;
 				}
 
 				engine_unlock();
-
-				printf("screen clone %d at %04x org screen %d\n",screen_num, screens[screen_num], current_screen);
-//				getchar();
 
 				current_screen = screen_num;
 				success = true;
@@ -163,7 +240,7 @@ char *_gfxScreenDisplay( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==5)
 	{
@@ -177,21 +254,27 @@ char *_gfxScreenDisplay( struct glueCommands *data, int nextToken )
 
 			if (screen = screens[screen_num])
 			{
-
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
-
 				if (kittyStack[stack-3].type ==  type_int) screen -> scanline_x = getStackNum( stack-3 );
 				if (kittyStack[stack-2].type ==  type_int) screen -> scanline_y = (getStackNum( stack-2 ) *2) - 80;
 				if (kittyStack[stack-1].type ==  type_int) screen -> displayWidth = getStackNum( stack-1 );
 				if (kittyStack[stack].type ==  type_int) screen -> displayHeight = getStackNum( stack );
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+				printf( "retroApplyScreen( screen %08x, video %08x, screen -> scanline_x %d, screen -> scanline_y, %d,	screen -> displayWidth %d, screen -> displayHeight  %d );\n",
+					screen, video, 
+					screen -> scanline_x,
+					screen -> scanline_y,
+					screen -> displayWidth,
+					screen -> displayHeight );
 
 				retroApplyScreen( screen, video, 
 					screen -> scanline_x,
 					screen -> scanline_y,
 					screen -> displayWidth,
 					screen -> displayHeight );
+			}
+			else
+			{
+				setError(47,data->tokenBuffer);	// Screen not open.
 			}
 
 			video -> refreshAllScanlines = TRUE;
@@ -212,7 +295,7 @@ char *_gfxScreenOffset( struct glueCommands *data, int nextToken )
 	bool success = false;
 	int ret = 0;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==3)
 	{
@@ -240,7 +323,7 @@ char *_gfxScreen( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -262,10 +345,9 @@ char *_gfxScreen( struct glueCommands *data, int nextToken )
 char *_gfxScin( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
 	int ret = -1;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
@@ -297,7 +379,6 @@ char *_gfxScin( struct glueCommands *data, int nextToken )
 					}
 				}
 			}
-			printf("ret: %d\n",ret);
 		}
 	}
 
@@ -332,11 +413,7 @@ char *gfxScreenDisplay(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *gfxScreenClose(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	stackCmdNormal( _gfxScreenClose, tokenBuffer );
-	return tokenBuffer;
-}
+
 
 char *gfxScreenOffset(struct nativeCommand *cmd, char *tokenBuffer)
 {
@@ -386,6 +463,8 @@ char *gfxGetScreen(struct nativeCommand *cmd, char *tokenBuffer)
 	{
 		setStackNum(current_screen);
 	}
+	else 	setStackNum(-1);
+
 	return tokenBuffer;
 }
 
@@ -400,7 +479,7 @@ char *_gfxScreenToFront( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -425,7 +504,7 @@ char *_gfxScreenToBack( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -453,7 +532,7 @@ char *_gfxScreenToBack( struct glueCommands *data, int nextToken )
 
 char *gfxScreenToFront(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _gfxScreenToFront, tokenBuffer );
 	return tokenBuffer;
 }
@@ -471,7 +550,7 @@ char *_gfxScreenShow( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -505,7 +584,7 @@ char *_gfxScreenHide( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
@@ -530,9 +609,8 @@ char *_gfxScreenHide( struct glueCommands *data, int nextToken )
 char *_gfxScreenCopy( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -540,11 +618,16 @@ char *_gfxScreenCopy( struct glueCommands *data, int nextToken )
 			{
 				int src_screen = getStackNum( stack-1 );
 				int dest_screen = getStackNum( stack );
+				unsigned int src_mode = ((src_screen & 0xFFFFFF00) == 0xC0000000) ? 1 : 0;
+				unsigned int dest_mode = ((dest_screen & 0xFFFFFF00) == 0xC0000000) ? 1 : 0;
+
+				src_screen &=0xFF;
+				dest_screen &= 0xFF;
 
 				if ((src_screen>-1)&&(src_screen<8)&&(dest_screen>-1)&&(dest_screen<8))
 				{
-					retroScreenBlit( screens[src_screen], 0, 0, screens[src_screen]->realWidth, screens[src_screen]->realHeight,
-							screens[dest_screen],0, 0);
+					retroScreenBlit( screens[src_screen],src_mode, 0, 0, screens[src_screen]->realWidth, screens[src_screen]->realHeight,
+							screens[dest_screen],dest_mode, 0, 0);
 				}
 			}
 			break;
@@ -559,11 +642,16 @@ char *_gfxScreenCopy( struct glueCommands *data, int nextToken )
 				int dest_screen = getStackNum( stack-2 );
 				int dest_x = getStackNum( stack-1 );
 				int dest_y = getStackNum( stack );
+				unsigned int src_mode = ((src_screen & 0xFFFFFF00) == 0xC0000000) ? 1 : 0;
+				unsigned int dest_mode = ((dest_screen & 0xFFFFFF00) == 0xC0000000) ? 1 : 0;
+
+				src_screen &=0xFF;
+				dest_screen &= 0xFF;
 
 				if ((src_screen>-1)&&(src_screen<8)&&(dest_screen>-1)&&(dest_screen<8))
 				{
-					retroScreenBlit( screens[src_screen], src_x0, src_y0, src_x1-src_x0, src_y1-src_y0,
-							screens[dest_screen],dest_x, dest_y);
+					retroScreenBlit( screens[src_screen], src_mode ,src_x0, src_y0, src_x1-src_x0, src_y1-src_y0,
+							screens[dest_screen], dest_mode, dest_x, dest_y);
 				}
 			}
 			break;
@@ -600,6 +688,7 @@ char *gfxScreenCopy(struct nativeCommand *cmd, char *tokenBuffer)
 
 void LoadIff( char *name, const int n )
 {
+#if 0
 	struct DataType *dto = NULL;
 	struct BitMapHeader *bm_header;
 	struct BitMap *dt_bitmap;
@@ -620,7 +709,7 @@ void LoadIff( char *name, const int n )
 
 		engine_lock();
 
-		if (screens[n]) retroCloseScreen(&screens[n]);
+		if (screens[n]) 	kitten_screen_close( n );
 		screens[n] = retroOpenScreen(bm_header -> bmh_Width,bm_header -> bmh_Height,1);
 
 		if (screens[n])
@@ -628,8 +717,10 @@ void LoadIff( char *name, const int n )
 			struct RastPort rp;
 			int x,y,c;
 
+			init_amos_kittens_screen_default_text_window(screens[n], 256);
+
 			retroApplyScreen( screens[n], video, 0, 20, screens[n] -> realWidth,screens[n]->realHeight );
-			retroBAR( screens[n], 0,0, screens[n] -> realWidth,screens[n]->realHeight, 1 );
+			retroBAR( screens[n], 0,0, screens[n] -> realWidth,screens[n]->realHeight, screens[n] -> paper );
 			set_default_colors( screens[n] );
 
 			current_screen = n;
@@ -657,10 +748,42 @@ void LoadIff( char *name, const int n )
 		DisposeDTObject((Object*) dto);
 		engine_unlock();
 	}
+
+#endif
+}
+
+char *_gfxLoadIff( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	switch (args)
+	{
+		case 1:	// load iff image to current screen.
+				{
+					char *name= getStackString( stack );
+					if (name)	LoadIff(name,current_screen);
+				}
+				break;
+		case 2:	// load iff image to new screen.
+				{
+					char *name= getStackString( stack -1);
+					int screen_num = getStackNum( stack );
+					if (name)	LoadIff(name,screen_num);
+				}
+				break;
+	}
+
+	popStack( stack - data->stack );
+	return NULL;
 }
 
 void SaveIff( char *name, const int n )
 {
+
+#if 0
+
 	struct DataType *dto = NULL;
 	struct BitMapHeader *bm_header;
 	struct BitMap *dt_bitmap;
@@ -728,41 +851,17 @@ void SaveIff( char *name, const int n )
 		 DisposeDTObject((Object*) dto);
 	}
 	else 	if (dt_bitmap) FreeBitMap(dt_bitmap);
+
+#endif
+
 }
 
-char *_gfxLoadIff( struct glueCommands *data, int nextToken )
-{
-	int args = stack - data->stack +1 ;
-
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
-
-	switch (args)
-	{
-		case 1:	// load iff image to current screen.
-				{
-					char *name= getStackString( stack );
-					if (name)	LoadIff(name,current_screen);
-				}
-				break;
-		case 2:	// load iff image to new screen.
-				{
-					char *name= getStackString( stack -1);
-					int screen_num = getStackNum( stack );
-					if (name)	LoadIff(name,screen_num);
-				}
-				break;
-	}
-
-	popStack( stack - data->stack );
-	return NULL;
-}
 
 char *_gfxSaveIff( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-	printf("args: %d\n",args);
 
 	switch (args)
 	{
@@ -803,6 +902,8 @@ char *gfxDoubleBuffer(struct nativeCommand *cmd, char *tokenBuffer)
 
 	if (screen)
 	{
+		freeScreenBobs( current_screen );
+
 		engine_lock();
 		retroAllocDoubleBuffer( screen );
 		video -> refreshAllScanlines = TRUE;
@@ -812,26 +913,57 @@ char *gfxDoubleBuffer(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+char *_gfxScreenSwap( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	int screen_num;
+	struct retroScreen *screen;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	switch (args)
+	{
+		case 1:
+
+			if (kittyStack[stack].type == type_int)
+			{
+				screen_num = kittyStack[stack].value;
+			}
+			else screen_num = current_screen;
+
+			if (screen = screens[screen_num]) 
+			{
+				engine_lock();
+				if (screen -> Memory[1])		// have buffer2
+				{
+					screen -> double_buffer_draw_frame = 1 - screen -> double_buffer_draw_frame ;
+				}
+				engine_unlock();
+			}
+			break;
+	}
+
+	popStack( stack - data->stack );
+	return NULL;
+}
+
 char *gfxScreenSwap(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	struct retroScreen *screen = screens[current_screen];
+//	struct retroScreen *screen = screens[current_screen];
 
-	if (screen) 
-	{
-		engine_lock();
-		if (screen -> Memory[1])		// have buffer2
-		{
-			screen -> double_buffer_draw_frame = 1 - screen -> double_buffer_draw_frame ;
-		}
-		engine_unlock();
-	}
+	stackCmdNormal( _gfxScreenSwap, tokenBuffer );
+	setStackNone();
 
 	return tokenBuffer;
 }
 
 char *gfxDefault(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	int n;
+	int n,screen_num;
+	struct retroScreen *screen;
+
+	engine_lock();
+
 	for (n=0; n<8;n++)
 	{
 		if (screens[n]) retroCloseScreen(&screens[n]);
@@ -839,16 +971,20 @@ char *gfxDefault(struct nativeCommand *cmd, char *tokenBuffer)
 	}
 
 	current_screen = 0;
+	screen_num = 0;
 	screens[0] = retroOpenScreen(320,200,retroLowres);
 
-	if (screens[0])
+	if (screen = screens[screen_num])
 	{
-		set_default_colors( screens[0] );
-		retroFlash( screens[0], 3, (char *) "(110,5),(220,5),(330,5),(440,5),(550,5),(660,5)(770,5),(880,5),(990,5),(AA0,5),(BB0,5),(CC0,5),(DD0,5),(CC0,5),(BB0,5),(AA0,5),(990,5),(880,5),(770,5),(660,5),(550,5)(440,5),(330,5),(220,5)");
-		retroBAR( screens[0], 0,0, screens[0] -> realWidth, screens[0] -> realHeight, 1 );
-		draw_cursor(screens[0]);
-		retroApplyScreen( screens[0], video, 0, 0,320,200 );
+		screen -> double_buffer_draw_frame = 0;
+
+		init_amos_kittens_screen_default_text_window(screen, 256);
+		init_amos_kittens_screen_default_colors(screen);
+		draw_cursor(screen);
 	}
+	retroApplyScreen( screen, video, 0, 0, screen -> realWidth,screen->realHeight );
+
+	engine_unlock();
 
 	return tokenBuffer;
 }
@@ -856,11 +992,10 @@ char *gfxDefault(struct nativeCommand *cmd, char *tokenBuffer)
 char *_gfxXScreen( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
 	int s,x = 0;
 	struct retroScreen *screen;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -889,11 +1024,10 @@ char *gfxXScreen(struct nativeCommand *cmd, char *tokenBuffer)
 char *_gfxYScreen( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
 	int s,y = 0;
 	struct retroScreen *screen;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -922,11 +1056,10 @@ char *gfxYScreen(struct nativeCommand *cmd, char *tokenBuffer)
 char *_gfxXHard( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
 	int s=0,x = 0;
 	struct retroScreen *screen;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -955,11 +1088,10 @@ char *gfxXHard(struct nativeCommand *cmd, char *tokenBuffer)
 char *_gfxYHard( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
 	int s=0,y = 0;
 	struct retroScreen *screen;
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -982,6 +1114,34 @@ char *_gfxYHard( struct glueCommands *data, int nextToken )
 char *gfxYHard(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	stackCmdParm( _gfxYHard, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_gfxScreenMode( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	int ret = 0;
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+	}
+	else setError(22,data->tokenBuffer);
+
+	if (screens[current_screen])
+	{
+		ret = screens[current_screen]->videomode;
+	}
+
+	popStack( stack - data->stack );
+	setStackNum(ret);
+	return NULL;
+}
+
+char *gfxScreenMode(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	// some thing to do with drawing, not sure.
+	stackCmdParm( _gfxScreenMode, tokenBuffer );
 	return tokenBuffer;
 }
 

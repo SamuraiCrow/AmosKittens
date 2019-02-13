@@ -1,7 +1,13 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
+#endif
+
 #include <string>
 #include <iostream>
 #include <math.h>
@@ -105,6 +111,7 @@ char *_mathAdd( struct glueCommands *data, int nextToken )
 	struct kittyData *var = NULL;
 	int args = stack - data->stack +1;
 	char *ptr = data -> tokenBuffer ;
+	bool success = true;
 
 	if (NEXT_TOKEN( ptr ) == 0x0006)
 	{
@@ -147,24 +154,30 @@ char *_mathAdd( struct glueCommands *data, int nextToken )
 					}
 				}
 				break;
+
+			default:
+				success = false;
 		}
 
-		switch (var->type)
+		if (success)
 		{
-			case type_int:
-				var->value= _value;
-				break;
+			switch (var->type)
+			{
+				case type_int:
+					var->value= _value;
+					break;
 	
-			case type_int | type_array:
-				var->int_array[var -> index]= _value;
-				break;
+				case type_int | type_array:
+					var->int_array[var -> index]= _value;
+					break;
 	
-			default:
-				setError(ERROR_Type_mismatch,data->tokenBuffer);
+				default:
+					setError(ERROR_Type_mismatch,data->tokenBuffer);
+			}
 		}
 	}
-	else setError(22,data->tokenBuffer);
 
+	if (success == false) setError(22,data->tokenBuffer);
 
 	popStack(stack - data->stack);
 	return NULL;
@@ -428,11 +441,14 @@ char *_mathMax( struct glueCommands *data, int nextToken )
 	double a = 0.0, b=0.0;
 	proc_names_printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
 	int args = stack - data->stack +1;
+
 	if (args == 2)
 	{
-		a = getStackDecimal( stack );
+		a = getStackDecimal( stack-1 );
 		b = getStackDecimal( stack );
+//		printf("max(%0.2f,%0.2f) = %02f\n",a,b, a>b ? a: b);
 	}
+
 	popStack(stack - data->stack);
 	setStackDecimal( a>b ? a: b );
 	kittyStack[stack].state = state_none;
@@ -657,42 +673,42 @@ char *mathRnd(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *mathRandomize(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _mathRandomize, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *mathMax(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _mathMax, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *mathMin(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _mathMin, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *mathSwap(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _mathSwap, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *mathFix(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _mathFix, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *mathDefFn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (NEXT_TOKEN(tokenBuffer) == 0x0006 )
 	{
@@ -719,7 +735,6 @@ char *_mathFnReturn( struct glueCommands *data, int nextToken )
 char *_mathFn( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack + 1 ;
-	char *_str;
 	int ref = data -> lastVar;
 	char *ptr;
 
@@ -759,7 +774,7 @@ char *_mathFn( struct glueCommands *data, int nextToken )
 
 char *mathFn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (NEXT_TOKEN(tokenBuffer) == 0x0006 )
 	{

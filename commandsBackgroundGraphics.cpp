@@ -1,13 +1,27 @@
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
+#endif
+
+#ifdef __linux__
+#include <stdint.h>
+#include "os/linux/stuff.h"
+#include <retromode.h>
+#include <retromode_lib.h>
+#endif
+
 #include "debug.h"
 #include <string>
 #include <iostream>
-#include <proto/retroMode.h>
+
 
 #include "stack.h"
 #include "amosKittens.h"
@@ -40,6 +54,7 @@ struct retroBlock
 	int y;
 	int w;
 	int h;
+	int mask;
 	unsigned char *mem;
 };
 
@@ -58,7 +73,7 @@ std::vector<struct retroBlock> blocks;	// 0 is not used.
 char *_bgPasteIcon( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -92,10 +107,8 @@ char *bgPasteIcon(struct nativeCommand *cmd, char *tokenBuffer)
 char *_bgGetIcon( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	int num;
-	struct retroSpriteObject *bob;
 
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -109,7 +122,7 @@ char *_bgGetIcon( struct glueCommands *data, int nextToken )
 
 					if (icons==NULL)
 					{
-						icons = (struct retroSprite *) AllocVecTags(  sizeof(struct retroSprite), AVT_Type, MEMF_SHARED, AVT_ClearWithValue, 0, TAG_END );
+						icons = (struct retroSprite *) sys_public_alloc_clear(sizeof(struct retroSprite));
 					}
 
 					if (icons)
@@ -139,7 +152,7 @@ char *_bgGetIconPalette( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	struct retroScreen *screen = screens[current_screen];
 
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if ((icons)&&(screen))
 	{
@@ -212,6 +225,33 @@ char *bgMaskIconMask(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+
+
+void del_block(int id)
+{
+	int _index = -1;
+	int b;
+
+	for (b=0;b<blocks.size();b++)
+	{
+		if (blocks[b].id == id) 
+		{
+			_index = b;
+			break;
+		}	
+	}
+
+	if (_index>-1)
+	{
+		if (blocks[_index].mem) 
+		{
+			free(blocks[_index].mem);
+			blocks[_index].mem = NULL;
+		}
+		blocks.erase(blocks.begin()+_index);
+	}
+}
+
 void get_block(struct retroScreen *screen,struct retroBlock *block,  int x, int y)
 {
 	int _x,_y;
@@ -230,23 +270,77 @@ void get_block(struct retroScreen *screen,struct retroBlock *block,  int x, int 
 			for (_x=0;_x<block->w;_x++)
 			{
 				sx = _x+x;
-
 				if ((sx>=0)&&(sx<screen->realWidth))
 				{
 					dslice[_x]= sslice[sx];
+				}
+				else dslice[_x] = 0;
+			}
+		}
+		else
+		{
+			dslice = block->mem + (block->w * _y);
+
+			for (_x=0;_x<block->w;_x++)
+			{
+				dslice[_x]= 0;
+			}
+		}
+	}
+}
+
+void put_block(struct retroScreen *screen,int id,  int x, int y, unsigned char bitmask)
+{
+	struct retroBlock *block = NULL;
+	unsigned char *sslice,*dslice;
+	int _x,_y,dx,dy;
+	unsigned int b;
+
+	for (b=0;b<blocks.size();b++)
+	{
+		if (blocks[b].id == id) block = &blocks[b];
+	}
+	if (NULL == block) return;
+
+	for (_y=0;_y<block->h;_y++)
+	{
+		dy = _y+y;
+		if ((dy>=0)&&(dy<screen->realHeight))
+		{
+			dslice = screen->Memory[0] + (screen->bytesPerRow*dy);
+			sslice = block->mem + (block->w * _y);
+
+			if (block->mask)
+			{
+				for (_x=0;_x<block->w;_x++)
+				{
+					dx = _x+x;
+					if ((dx>=0)&&(dx<screen->realWidth))
+					{
+						if (sslice[_x]) dslice[dx]= sslice[_x] & bitmask;
+					}
+				}
+			}
+			else
+			{
+				for (_x=0;_x<block->w;_x++)
+				{
+					dx = _x+x;
+					if ((dx>=0)&&(dx<screen->realWidth))
+					{
+						dslice[dx]= sslice[_x] & bitmask;
+					}
 				}
 			}
 		}
 	}
 }
 
-
 char *_bgGetBlock( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
-	printf("args: %d\n",args);
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -257,25 +351,29 @@ char *_bgGetBlock( struct glueCommands *data, int nextToken )
 					block.y = getStackNum(stack-2);
 					block.w = getStackNum(stack-1);
 					block.h = getStackNum(stack);
+					block.mask = 0;
+
+					del_block( block.id );
 					block.mem  = (unsigned char *) malloc( block.w * block.h );		
-					blocks.push_back(block);
-
 					get_block(screens[current_screen],&block, block.x, block.y);
-
+					blocks.push_back(block);
 				}
 				break;
 		case 6:	{
 					struct retroBlock block;
-					int flags;
 					block.id = getStackNum(stack-5);
 					block.x = getStackNum(stack-4);
 					block.y = getStackNum(stack-3);
 					block.w = getStackNum(stack-2);
 					block.h = getStackNum(stack-1);
-					flags = getStackNum(stack);
+					block.mask = getStackNum(stack);
+
+					del_block( block.id );	// delete old
 					block.mem  = (unsigned char *) malloc( block.w * block.h );
+					get_block(screens[current_screen],&block, block.x, block.y);
 
 					blocks.push_back(block);
+
 				}
 				break;
 		default:
@@ -306,48 +404,14 @@ char *_bgPutBlock( struct glueCommands *data, int nextToken )
 	{
 		case 3:
 			{
-				int b;
-				struct retroBlock *block = NULL;
 				int id = getStackNum(stack-2);
 				int x = getStackNum(stack-1);
 				int y = getStackNum(stack);
 
 				printf("%d,%d,%d\n",id,x,y);
 
-				if (screen = screens[current_screen])
-				{
-					for (b=0;b<blocks.size();b++)
-					{
-						if (blocks[b].id == id)
-						{
-							block = &blocks[b];
-							unsigned char *sslice,*dslice;
-							int _x,_y,dx,dy;
-
-							for (_y=0;_y<block->h;_y++)
-							{
-								dy = _y+y;
-
-								if ((dy>=0)&&(dy<screen->realHeight))
-								{
-									dslice = screen->Memory[0] + (screen->bytesPerRow*dy);
-									sslice = block->mem + (block->w * _y);
-
-									for (_x=0;_x<block->w;_x++)
-									{
-										dx = _x+x;
-
-										if ((dx>=0)&&(dx<screen->realWidth))
-										{
-											dslice[dx]= sslice[_x];
-										}
-									}
-								}
-							}
-							break;
-						}
-					}
-				}
+				screen = screens[ current_screen ];
+				if (screen) put_block(screen, id,x,y, 255);
 			}		
 
 			break;
@@ -369,6 +433,8 @@ char *bgPutBlock(struct nativeCommand *cmd, char *tokenBuffer)
 char *_bgDelBlock( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
+	int id;
+
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	printf("args: %d\n",args);
@@ -376,6 +442,8 @@ char *_bgDelBlock( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 1:
+			id = getStackNum(stack);
+			del_block(id);
 			break;
 		default:
 			setError(22,data->tokenBuffer);
@@ -470,4 +538,35 @@ char *bgDelCBlock(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+char *_bgIconBase( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	int pick = 0;
+
+	void *ret = NULL;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+		pick = getStackNum(stack)-1;
+
+		if ((pick>0)&&(icons->number_of_frames)&&(pick<icons->number_of_frames))
+		{
+			ret = &icons -> frames[pick-1] ;
+		}
+	}
+	else setError(22, data->tokenBuffer);
+
+	popStack( stack - data->stack );
+	setStackNum( (int) ret );
+	return NULL;
+}
+
+char *bgIconBase(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _bgIconBase, tokenBuffer );
+	return tokenBuffer;
+}
 

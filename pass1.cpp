@@ -1,9 +1,21 @@
 
+#include "stdafx.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#endif
+
+#ifdef __linux__
+#include <string.h>
+#include <stdint.h>
+#include "os/linux/stuff.h"
+#endif
+
 #include "amosKittens.h"
 #include "commands.h"
 #include "debug.h"
@@ -32,6 +44,13 @@ void addLineAddress( char *_start, char *_end );
 int ifCount = 0;
 int endIfCount = 0;
 int currentLine = 0;
+int pass1_bracket_for;
+
+enum
+{
+	pass1_bracket_none,
+	pass1_bracket_end_proc
+};
 
 bool pass1_inside_proc = false;
 int procCount = 0;
@@ -87,7 +106,7 @@ int findVarPublic( char *name, int type )
 {
 	int n;
 
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	pass1_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	for (n=0;n<global_var_count;n++)
 	{
@@ -129,7 +148,7 @@ int findVar( char *name, int type, int _proc )
 {
 	int n;
 
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	pass1_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	for (n=0;n<global_var_count;n++)
 	{
@@ -182,7 +201,7 @@ int findVar( char *name, int type, int _proc )
 
 char *findLabel( char *name )
 {
-	int n;
+	unsigned int n;
 
 	for (n=0;n<labels.size();n++)
 	{
@@ -196,7 +215,7 @@ char *findLabel( char *name )
 
 int findLabelRef( char *name )
 {
-	int n;
+	unsigned int n;
 
 	for (n=0;n<labels.size();n++)
 	{
@@ -249,7 +268,7 @@ char *FinderTokenInBuffer( char *ptr, unsigned short token , unsigned short toke
 
 int findFnByName(char *name)
 {
-	int n;
+	unsigned int n;
 	for (n=0;n<defFns.size();n++)
 	{
 		if (strcasecmp(name, defFns[n].name) == 0)
@@ -263,7 +282,6 @@ int findFnByName(char *name)
 
 char *pass1Fn( char *ptr )
 {
-	char *_;
 	// skip all new lines..
 
 	if (*(unsigned short *) ptr  == 0x0006 )
@@ -298,7 +316,6 @@ char *pass1Fn( char *ptr )
 
 char *pass1DefFn( char *ptr )
 {
-	char *_;
 	// skip all new lines..
 
 	if (*(unsigned short *) ptr  == 0x0006 )
@@ -343,8 +360,6 @@ struct kittyData * pass1var(char *ptr, bool is_proc_call, bool is_procedure )
 	char *tmp;
 	int found = 0;
 	struct reference *ref = (struct reference *) (ptr);
-
-	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	tmp = dupRef( ref );
 	if (tmp)
@@ -412,10 +427,6 @@ char *pass1_procedure( char *ptr )
 	{
 		current_proc = pass1var( ptr +2, false, true );
 
-		printf("current_proc %08x\n", current_proc);
-
-		getchar();
-
 		pass1_inside_proc = true;
 		// we like to skip the variable, so its not added as a local variable.
 		ptr += 2 + sizeof(struct reference) + ReferenceByteLength(ptr + 2) ;
@@ -437,28 +448,26 @@ void pass1label(char *ptr)
 	char *tmpName;
 	int found_ref;
 	struct reference *ref = (struct reference *) ptr;
-	struct kittyData *var;
 	char *next;
 
-	printf("%s:%d    --- ptr=%08x\n",__FUNCTION__,__LINE__,ptr);
+	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	tmpName = strndup( ptr + sizeof(struct reference), ref->length  );
 	if (tmpName)
 	{
-		printf("%s\n",tmpName);
 		ref -> ref = 0;	
 
 		// only add new labels if last token is 0.
 
 		if (last_tokens[parenthesis_count]  == 0)
 		{
-
 			found_ref = findLabelRef(tmpName);
 
 			if (found_ref>0)
 			{
 				ref -> ref = found_ref;
 				free(tmpName);		//  don't need tmp
+				tmpName = NULL;
 			}
 			else
 			{
@@ -473,14 +482,12 @@ void pass1label(char *ptr)
 
 				labels.push_back(tmp);
 				ref -> ref = labels.size();
-
 				tmpName = NULL;			// we store tmpName, we only set tmpName to NULL
 			}
 		}
 		else
 		{
 			found_ref = findLabelRef(tmpName);
-
 			if (found_ref>0)
 			{
 				ref -> ref = found_ref;
@@ -492,6 +499,10 @@ void pass1label(char *ptr)
 		}
 
 		if (tmpName) free(tmpName);
+	}
+	else
+	{
+		printf("bad data\n");
 	}
 }
 
@@ -681,9 +692,6 @@ void eol( char *ptr )
 
 	if (nested_count>0)
 	{
-		proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
-		dprintf("nested command: %s\n",nest_names[ nested_command[ nested_count -1 ].cmd ]);
-
 		switch (nested_command[ nested_count -1 ].cmd )
 		{
 			case nested_data:
@@ -697,10 +705,6 @@ void eol( char *ptr )
 				{
 					offset = (short) ((int) (ptr - nested_command[ nested_count -1 ].ptr)) / 2;
 					*((short *) (nested_command[ nested_count -1 ].ptr)) = offset;
-
-					printf(" *((short *) (nested_command[ %d -1 ].ptr)) = %08x\n",
-							nested_count,
-							*((short *) (nested_command[ nested_count -1 ].ptr)) );
 				}
 				nested_count --;
 				break;
@@ -715,7 +719,7 @@ void eol( char *ptr )
 
 void fix_token_short( int cmd, char *ptr )
 {
-	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+	pass1_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if (nested_count>0)
 	{
@@ -729,23 +733,24 @@ void fix_token_short( int cmd, char *ptr )
 
 void pass1_proc_end( char *ptr )
 {
-	char *ret;
+	procStackCount--;
 
-	if ( *((short *) ptr) == 0x0084 )
-	{
-		ret = FinderTokenInBuffer( ptr, 0x008C , 0x0000, 0x0000, _file_end_ );
-		if (ret)
-		{
-			((struct procedure *) (nested_command[ nested_count -1 ].ptr)) -> EndOfProc = ret;
-		}
-	}
-	else
-	{
-		((struct procedure *) (nested_command[ nested_count -1 ].ptr)) -> EndOfProc = ptr-2;
-	}
+	((struct procedure *) (nested_command[ nested_count -1 ].ptr )) -> EndOfProc = ptr-2;
 
 	nested_count --;
 	pass1_inside_proc = false;
+}
+
+void pass1_bracket_end( char *ptr )
+{
+	switch (pass1_bracket_for)
+	{
+		case pass1_bracket_end_proc:
+			pass1_proc_end( ptr );
+			break;
+	}
+
+	pass1_bracket_for = pass1_bracket_none;	// reset.
 }
 
 void pass1_if_or_else( char *ptr )
@@ -780,7 +785,6 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 {
 	struct nativeCommand *cmd;
 	char *ret;
-	unsigned short length;
 
 	for (cmd = nativeCommands ; cmd < nativeCommands + nativeCommandsSize ; cmd++ )
 	{
@@ -955,15 +959,27 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				case 0x0390: // End Proc
-							procStackCount--;
 							current_proc = NULL;
 
 							if IS_LAST_NEST_TOKEN(proc)
 							{
-								pass1_proc_end( ptr );
+								short next_token = *((short *) ptr);
+
+								if (next_token == 0x0084)
+								{
+									pass1_bracket_for = pass1_bracket_end_proc;
+								}
+								else 
+								{
+									pass1_proc_end( ptr );
+								}
 							}
 							else
 								setError(11,ptr);
+							break;
+
+				case 0x008C:
+							pass1_bracket_end( ptr );
 							break;
 
 				case 0x039E:	// Shared

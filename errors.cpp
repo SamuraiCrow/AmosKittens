@@ -1,9 +1,14 @@
+#include "stdafx.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#endif
+
 #include "amosKittens.h"
 #include "stack.h"
 #include "errors.h"
@@ -317,4 +322,7 @@ struct error errorsRunTime[]= {
 // Misc
 // ~~~~
 	{ 200,"Cannot open powerpacker.library (v35)"},
+// Kitty errors 
+	{ 1000,"Amos Kittens don't support this command" },
+	{ 1001,"Command needs AmigaOS (not supported on Linux/Windows/MacOSX)" },
 	{ 0,NULL }};
