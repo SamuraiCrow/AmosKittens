@@ -14,11 +14,12 @@
 #define show_debug_amal_no
 #define show_pass1_tokens_no
 #define show_array_no
-#define enable_engine_debug_output_yes
+#define enable_engine_debug_output_no
 
 //------------- end of options -----------------
 
 void dump_global();
+void dump_local( int n );
 void dump_prog_stack();
 void dump_stack();
 void dump_labels();

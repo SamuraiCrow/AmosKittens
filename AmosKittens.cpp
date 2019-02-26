@@ -151,6 +151,7 @@ extern char *nextToken_pass1( char *ptr, unsigned short token );
 bool breakpoint = false;
 
 const char *str_dump_stack = "dump stack";
+const char *str_dump_prog_stack = "dump prog stack";
 const char *str_breakpoint_on = "breakpoint on";
 const char *str_breakpoint_off = "breakpoint off";
 const char *str_warning = "warning";
@@ -160,7 +161,7 @@ const char *str_show_var = "show var ";
 const char *str_dump_banks = "dump banks";
 const char *str_dump_screen_info = "dump screen info"; 
 
-int findVar( char *name, int type, int _proc );
+int findVar( char *name, bool  is_first_token, int type, int _proc );
 
 extern void dumpScreenInfo();
 
@@ -223,6 +224,13 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 				printf("stack %d at line %d\n",stack, getLineFromPointer( ptr ));
 			}
 
+			if (strncmp(txt,str_dump_prog_stack,strlen(str_dump_stack))==0)
+			{
+				dump_prog_stack();
+				printf("<press enter to continue>\n");
+				getchar();
+			}
+
 			if (strncmp(txt,str_pause,strlen(str_pause))==0)
 			{
 				printf("line %d -- <press enter to continue>\n", getLineFromPointer( ptr ));
@@ -237,7 +245,7 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 
 				for (c=var_name;*c;c++) if (*c==' ') *c = 0;
 
-				ref = findVar( var_name, type_int, 0 );
+				ref = findVar( var_name, false, type_int, 0 );
 
 				if (ref)
 				{
@@ -245,7 +253,16 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 				}
 				else
 				{
-					printf("line %d, int var: [%s] is not found\n",getLineFromPointer( ptr ), var_name);
+					ref = findVar( var_name, false, type_string, 0 );
+
+					if (ref)
+					{
+						printf("line %d, int var: [%s]=%s\n",getLineFromPointer( ptr ), var_name, globalVars[ref-1].var.str);
+					}
+					else
+					{
+						printf("line %d, int var: [%s] is not found\n",getLineFromPointer( ptr ), var_name);
+					}
 				}
 			}
 
@@ -285,7 +302,7 @@ char *nextCmd(nativeCommand *cmd, char *ptr)
 	{
 		flags = cmdTmp[cmdStack-1].flag;
 
-		if  ( flags & (cmd_loop | cmd_never | cmd_onEol | cmd_onNextCmd | cmd_proc )) break;
+		if  ( flags & (cmd_loop | cmd_never | cmd_onEol | cmd_proc )) break;
 		ret = cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
 
 		if (cmdTmp[cmdStack].flag & cmd_normal) break;
@@ -324,8 +341,10 @@ char *cmdNewLine(nativeCommand *cmd, char *ptr)
 
 	if (breakpoint)
 	{
-		dump_stack();
-		dump_global();
+		printf("breakpoint at line %d - <press enter for next line>\n",getLineFromPointer( ptr ) );
+
+//		dump_stack();
+//		dump_global();
 		getchar();
 	}
 

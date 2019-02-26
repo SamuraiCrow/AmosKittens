@@ -306,19 +306,32 @@ char *amalChannel(struct nativeCommand *cmd, char *tokenBuffer)
 
 void channel_amal( struct kittyChannel *channel )
 {
-	AmalPrintf("%s:%s:%d - channel -> status: %d, channel -> amalProgCounter %08x \n",__FILE__,__FUNCTION__,__LINE__, channel -> status, channel -> amalProgCounter);
+	AmalPrintf("%s:%s:%d - channel -> status: %d, channel -> amalProg,amalProgCounter %08x \n",__FILE__,__FUNCTION__,__LINE__, channel -> status, channel -> amalProg.amalProgCounter);
+
+	if (channel -> amalProg.amalAutotest != NULL)
+	{
+		amal_run_one_cycle(channel,channel -> amalProg.amalAutotest,false);
+	}
+
+	if (channel -> status == channel_status::wait) return;		// if amal program is set to wait..., only autotest can activate it.
+
+	if (channel -> status == channel_status::direct) 	// if amal program gets paused, we reset program to direct.
+	{
+		channel -> amalProg.amalProgCounter = channel -> amalProg.directProgCounter;
+		channel -> status = channel_status::active;
+	}
 
 	// check if program is ready to run, and it has program.
-	if ( ( channel -> status == channel_status::active ) && ( channel -> amalProgCounter ) )
+	if ( ( channel -> status == channel_status::active ) && ( channel -> amalProg.amalProgCounter ) )
 	{
 		AmalPrintf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 		// Check that program has not ended.
-		if ( *channel -> amalProgCounter )	
+		if ( *channel -> amalProg.amalProgCounter )	
 		{
-			amal_run_one_cycle(channel);
+			amal_run_one_cycle(channel, channel -> amalProg.amalProgCounter, true );
 		}
-		else 	AmalPrintf("%s:%s:%d - channel -> amalProgCounter %d\n",__FILE__,__FUNCTION__,__LINE__, channel -> amalProgCounter);
+		else 	AmalPrintf("%s:%s:%d - channel -> amalProgCounter %d\n",__FILE__,__FUNCTION__,__LINE__, channel -> amalProg.amalProgCounter);
 	}
 }
 
@@ -530,7 +543,7 @@ void channel_anim( struct kittyChannel *self )
 		}
 	}
 
-	if (self -> sleep >= self -> sleep_to )
+	if (self -> anim_sleep >= self -> anim_sleep_to )
 	{
 		int sign = 1;
 		int num = 0;
@@ -563,7 +576,7 @@ void channel_anim( struct kittyChannel *self )
 							switch (arg)
 							{
 								case 0: api -> setImage( self -> number,  num );  break;
-								case 1: self -> sleep_to = num; self -> sleep = 0; break;
+								case 1: self -> anim_sleep_to = num; self -> anim_sleep = 0; break;
 							}
 
 							arg ++;num = 0;sign = 1;
@@ -581,8 +594,8 @@ void channel_anim( struct kittyChannel *self )
 	}
 	else
 	{
-		self -> sleep ++;
-		if (self -> sleep == self -> sleep_to)
+		self -> anim_sleep ++;
+		if (self -> anim_sleep == self -> anim_sleep_to)
 		{
 //			engine_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 //			engine_printf("script: %s\n", self -> anim_at);
@@ -732,9 +745,9 @@ void channel_movex( struct kittyChannel *self )
 			{
 				switch (arg)
 				{
-					case 0: self -> sleep_to = num; self -> sleep = 0; break;
+					case 0: self -> move_sleep_to = num; self -> move_sleep = 0; break;
 					case 1: self -> deltax = sign * num; break;
-					case 2: self -> count_to = num; self -> count = 0; break;
+					case 2: self -> move_count_to = num; self -> move_count = 0; break;
 				}
 
 				arg ++;num = 0;sign = 1;
@@ -750,10 +763,10 @@ void channel_movex( struct kittyChannel *self )
 	}
 	else
 	{
-		self -> sleep ++;
-		if (self -> sleep >= self -> sleep_to)
+		self -> move_sleep ++;
+		if (self -> move_sleep >= self -> move_sleep_to)
 		{
-			self -> sleep = 0;
+			self -> move_sleep = 0;
 			self -> count++;
 			channel_do_object( self );
 		}
@@ -781,7 +794,7 @@ void channel_movey( struct kittyChannel *self )
 			{
 				switch (arg)
 				{
-					case 0: self -> sleep_to = num; self -> sleep = 0; break;
+					case 0: self -> move_sleep_to = num; self -> move_sleep = 0; break;
 					case 1: self -> deltay = sign * num; break;
 					case 2: self -> count_to = num; self -> count = 0; break;
 				}
@@ -799,10 +812,10 @@ void channel_movey( struct kittyChannel *self )
 	}
 	else
 	{
-		self -> sleep ++;
-		if (self -> sleep >= self -> sleep_to)
+		self -> move_sleep ++;
+		if (self -> move_sleep >= self -> move_sleep_to)
 		{
-			self -> sleep = 0;
+			self ->move_sleep = 0;
 			self -> count++;
 			channel_do_object( self );
 		}

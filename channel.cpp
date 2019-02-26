@@ -36,7 +36,9 @@ void initChannel( struct kittyChannel *item, int channel )
 		item -> progStackCount = 0;
 		item -> argStack = NULL;
 		item -> argStackCount = 0;
-		item -> amalProgCounter = NULL;
+		item -> amalProg.amalProgCounter = NULL;
+		item -> amalProg.amalAutotest = NULL;
+		item -> amalProg.directProgCounter = NULL;
 
 		item -> parenthses = 0;
 		item -> objectAPI = NULL;
@@ -47,6 +49,11 @@ void initChannel( struct kittyChannel *item, int channel )
 		item -> deltax = 0;
 		item -> deltay = 0;
 
+		item -> anim_sleep = 0;
+		item -> anim_sleep_to = 0;
+
+		item ->  move_sleep = 0;
+		item ->  move_sleep_to = 0;
 		item -> move_count = 0; 
 		item -> move_count_to = 0; 
 

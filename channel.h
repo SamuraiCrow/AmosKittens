@@ -9,7 +9,7 @@ struct amalCallBack
 	void **code ;
 	void *(*cmd) (struct kittyChannel *self, struct amalCallBack *cb);
 	void *ret;
-	unsigned char last_reg;
+	int last_reg;
 	int argStackCount;
 	int progStackCount;
 	amal::Flags Flags;
@@ -25,7 +25,9 @@ namespace channel_status
 		done,		// Amal program is done.
 		active,		// Amal program is running.
 		paused,		// Same as exit amal prgram at VBL
-		frozen		// Stops the amal program, until its unfrozen.
+		frozen,		// Stops the amal program, until its unfrozen.
+		wait,			// same as frozen, but triggered by wait command.
+		direct		// if direct, then amal program counter is set. status reset.
 	};
 };
 
@@ -58,8 +60,10 @@ struct kittyChannel
 	char *movey_at;
 	int deltax;
 	int deltay;
-	int sleep;
-	int sleep_to;
+	int anim_sleep;
+	int anim_sleep_to;
+	int move_sleep;
+	int move_sleep_to;
 	int count;
 	int count_to;
 	
@@ -77,7 +81,6 @@ struct kittyChannel
 	int parenthses;
 	int *argStack;
 	struct amalBuf amalProg;
-	void *(**amalProgCounter) API_AMAL_CALL_ARGS;
 	unsigned int argStackCount;
 	struct amalCallBack *progStack;
 	unsigned int progStackCount;

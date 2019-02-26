@@ -50,6 +50,7 @@ char *_ifNotSuccess(struct glueCommands *data, int nextToken) ;
 char *_ifThenSuccess(struct glueCommands *data, int nextToken) ;
 char *_ifThenNotSuccess(struct glueCommands *data, int nextToken) ;
 
+char *_cmdNot (struct glueCommands *data, int nextToken);
 char *_textCentre (struct glueCommands *data, int nextToken);
 char *_mathSin (struct glueCommands *data, int nextToken);
 char *_addData (struct glueCommands *data, int nextToken);
@@ -131,6 +132,7 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_len,"len"},
 	{_lessOrEqualData,"<="},
 	{_moreOrEqualData,">="},
+	{_cmdNot,"Not"},
 
 	{NULL, NULL}
 };
@@ -186,16 +188,13 @@ unsigned int vars_crc()
 	return crc;
 }
 
-void dump_global()
+
+void dump_var( int n )
 {
-	int n;
 #ifdef show_array_yes
 	int i;
 #endif
 
-	for (n=0;n<global_var_count;n++)
-	{
-		if (globalVars[n].varName == NULL) return;
 
 		switch (globalVars[n].var.type)
 		{
@@ -292,6 +291,32 @@ void dump_global()
 
 				break;
 		}
+}
+
+void dump_local( int proc )
+{
+	int n;
+
+	for (n=0;n<global_var_count;n++)
+	{
+		if (globalVars[n].varName == NULL) return;
+
+		if (globalVars[n].proc == proc)
+		{
+			dump_var( n );
+		}
+	}
+}
+
+
+void dump_global()
+{
+	int n;
+
+	for (n=0;n<global_var_count;n++)
+	{
+		if (globalVars[n].varName == NULL) return;
+		dump_var( n );
 	}
 }
 

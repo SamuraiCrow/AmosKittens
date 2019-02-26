@@ -469,7 +469,7 @@ char *parenthesisStart(struct nativeCommand *cmd, char *tokenBuffer)
 	parenthesis[parenthesis_count] =stack;
 	parenthesis_count++;
 
-	setParenthesis();
+	setStackParenthesis();
 	stack++;
 	setStackNone();
 
@@ -579,7 +579,7 @@ char *cmdThen(struct nativeCommand *cmd, char *tokenBuffer)
 	
 	// empty the stack for what ever is inside the IF.
 
-	while ((cmdStack)&&(stack))
+	while (cmdStack)
 	{
 		if (cmdTmp[cmdStack-1].cmd == _if ) break;
 		cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
@@ -694,6 +694,7 @@ char *cmdEndIf(struct nativeCommand *cmd, char *tokenBuffer)
 		{
 			cmdStack--;
 		}
+		else setError(23,tokenBuffer);
 	}
 
 	return tokenBuffer;
@@ -921,7 +922,14 @@ char *cmdLoop(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _do ) tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+	if (cmdStack) 
+	{
+		if (cmdTmp[cmdStack-1].cmd == _do )
+		{
+			tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+		}
+		else setError(23,tokenBuffer);
+	}
 
 	return tokenBuffer;
 }
@@ -958,7 +966,7 @@ char *cmdUntil(struct nativeCommand *cmd, char *tokenBuffer)
 char *cmdTrue(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackNum(-1);
+	setStackNum( ~0 );
 	flushCmdParaStack(NEXT_TOKEN(tokenBuffer));
 	return tokenBuffer;
 }
@@ -2231,7 +2239,7 @@ char *cmdExtension( struct nativeCommand *cmd, char *tokenBuffer )
 	}
 	else
 	{
-		printf("*** warning extensions not yet supported, extention %d, token %04x ****\n", ext-> ext, ext-> token);
+		printf("*** warning extensions not yet supported, extention %d, token %04x at line %d ****\n", ext-> ext, ext-> token,getLineFromPointer( tokenBuffer ));
 		stackCmdNormal( cmdFlushStack, tokenBuffer );
 	}
 
