@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "config.h"
 
@@ -14,7 +15,6 @@
 #ifdef __linux__
 #include <retromode.h>
 #include <retromode_lib.h>
-#include <stdint.h>
 #include <unistd.h>
 #endif
 
@@ -185,9 +185,6 @@ void freeBank( int banknr )
 
 					if (bank_is_object(bank,sprite)) sprite = NULL;
 					retroFreeSprite( (struct retroSprite *) bank -> object_ptr );
-
-					getchar();
-
 					break;
 
 				case bank_type_icons:
@@ -541,7 +538,6 @@ char *cmdListBank(nativeCommand *cmd, char *tokenBuffer)
 		next_print_line_feed = true;
 	}
 
-
 	return tokenBuffer;
 }
 
@@ -572,9 +568,9 @@ char *cmdBsave(nativeCommand *cmd, char *tokenBuffer)
 
 struct bankItemDisk
 {
-	unsigned short bank;
-	unsigned short type;
-	unsigned int length;
+	uint16_t bank;
+	uint16_t type;
+	uint32_t length;
 	char name[8];
 } __attribute__((packed)) ;
 
@@ -595,6 +591,12 @@ void __save_work_data__(FILE *fd,int bankno,struct kittyBank *bank)
 	item.length = (bank -> length + 8) | flags;
 	memcpy( item.name, bank->start-8, 8 );
 
+#ifdef __LITTLE_ENDIAN__
+		item.bank = __bswap_16(item.bank);
+		item.type = __bswap_16(item.type);
+		item.length = __bswap_32(item.length);
+#endif
+
 	fwrite( &item, sizeof(struct bankItemDisk), 1, fd );
 	fwrite( bank -> start, bank -> length, 1, fd );
 }
@@ -607,6 +609,12 @@ void __load_work_data__(FILE *fd,int bank)
 
 	if (fread( &item, sizeof(struct bankItemDisk), 1, fd )==1)
 	{
+#ifdef __LITTLE_ENDIAN__
+		item.bank = __bswap_16(item.bank);
+		item.type = __bswap_16(item.type);
+		item.length = __bswap_32(item.length);
+#endif
+
 		if (bank>0) item.bank = bank;
 
 		if (item.length & 0x80000000) item.type += 8;
@@ -634,6 +642,11 @@ void __load_work_data_mem__(struct retroMemFd &fd)
 
 	if (mread( &item, sizeof(struct bankItemDisk), 1, fd )==1)
 	{
+
+#ifdef __LITTLE_ENDIAN__
+		item.length = __bswap_32(item.length);
+#endif
+
 		if (item.length & 0x80000000) item.type += 8;
 		item.length = (item.length & 0x7FFFFFF) -8;
 
@@ -694,6 +707,8 @@ void init_banks( char *data , int size)
 	int type = -1;
 	struct kittyBank *bank = NULL;
 
+	id[4]=0;	// null terminate id string.
+
 	if (data)
 	{
 		fd.mem = data;
@@ -703,7 +718,7 @@ void init_banks( char *data , int size)
 				if (mread( &id, 4, 1, fd )==1)
 				{	
 					printf("ID: %c%c%c%c\n",id[0],id[1],id[2],id[3]);
-					if (strcmp(id,"AmBs")==0)
+					if (strncmp(id,"AmBs",4)==0)
 					{
 						mread( &banks, 2, 1, fd);
 #ifdef __LITTLE_ENDIAN__
@@ -730,12 +745,24 @@ void init_banks( char *data , int size)
 
 						for (idp = amos_file_ids; *idp ; idp++)
 						{
-							if (strcmp(id,*idp)==0) { type = cnt; break; }
+							if (strncmp(id,*idp,4)==0) { type = cnt; break; }
 							cnt++;
 						}
 
-						if (type != -1) 	printf("ID: %c%c%c%c\n",id[0],id[1],id[2],id[3]);
+						if (type == -1) 
+						{
+							printf("oh no!!... unexpected id: '%c%c%c%c'\n",id[0],id[1],id[2],id[3]);
+							printf("ID: %c%c%c%c\n",id[0],id[1],id[2],id[3]);
+							getchar();
+						}
+						else printf("ID: %c%c%c%c\n",id[0],id[1],id[2],id[3]);
 					}
+					else 
+					{
+						// clear id.
+						memset(id,' ',4);
+					}
+
 
 					switch (type)
 					{
@@ -782,11 +809,9 @@ void init_banks( char *data , int size)
 							break;
 
 						default:
-							printf("oh no!!... unexpected id: '%c%c%c%c'\n",id[0],id[1],id[2],id[3]);
 							n = banks; // exit for loop.
 
 					}
-					getchar();
 				}
 	}
 }
@@ -807,7 +832,7 @@ void __load_bank__(const char *name, int bankNr )
 			{
 				if (fread( &id, 4, 1, fd )==1)
 				{	
-					if (strcmp(id,"AmBs")==0)
+					if (strncmp(id,"AmBs",4)==0)
 					{
 						fread( &banks, 2, 1, fd);
 						clean_up_banks();		
@@ -834,6 +859,10 @@ void __load_bank__(const char *name, int bankNr )
 							if (strcmp(id,*idp)==0) { type = cnt; break; }
 							cnt++;
 						}
+					}
+					else
+					{
+						memset( id, ' ',4 );
 					}
 					
 					switch (type)
@@ -927,7 +956,7 @@ char *cmdLoad(nativeCommand *cmd, char *tokenBuffer)
 
 void __write_banks__( FILE *fd )
 {
-	int n=0;
+	unsigned int n=0;
 	struct kittyBank *bank = NULL;
 
 	for (n=0;n<kittyBankList.size();n++)
@@ -1070,6 +1099,94 @@ char *_bankBankSwap( struct glueCommands *data, int nextToken )
 char *bankBankSwap(nativeCommand *cmd, char *tokenBuffer)
 {
 	stackCmdNormal( _bankBankSwap, tokenBuffer );
+	return tokenBuffer;
+}
+
+struct kittyBank *ResourceBank = NULL;
+
+char *_bankResourceBank( struct glueCommands *data, int nextToken )
+{
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	int args = stack - data->stack +1 ;
+	int b1;
+
+	switch (args)
+	{
+		case 1:	b1 = getStackNum(stack-1);
+				ResourceBank = findBank(b1);
+				break;
+		default:
+				setError(22,data->tokenBuffer);
+	}
+
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *bankResourceBank(nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _bankResourceBank, tokenBuffer );
+	return tokenBuffer;
+}
+
+const char *AmosKittensSystem = "AmosKittens:System/";
+
+const char *DefaultFileNames[] =
+{
+	"",	// 0		(-1 to -9)
+	"",	// 1
+	"",	// 2
+	"",	// 3
+	"",	// 4
+	"",	// 5
+	"",	// 6
+	"",	// 7
+	"",	// 8
+	NULL
+};
+
+char *_bankResourceStr( struct glueCommands *data, int nextToken )
+{
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	int args = stack - data->stack +1 ;
+	int id;
+	const char *ret = NULL;
+
+	switch (args)
+	{
+		case 1:	id = getStackNum(stack-1);
+
+				if (id>0)
+				{
+					Printf("Looking for stuff in resource\n");
+				}
+				else if (id == 0)
+				{
+					ret = AmosKittensSystem;
+				}
+				if ((id >=-1 )&&(id <=-9))	// Default file names
+				{
+					ret = DefaultFileNames[ (-id)-1];
+				}
+				else if ((id >=-10 )&&(id <=-36))	// name of extentions
+				{
+
+				}
+
+				break;
+		default:
+				setError(22,data->tokenBuffer);
+	}
+
+	popStack( stack - data->stack );
+	setStackStrDup( ret ? ret : "" );
+
+	return NULL;
+}
+
+char *bankResourceStr(nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _bankResourceStr, tokenBuffer );
 	return tokenBuffer;
 }
 

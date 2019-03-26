@@ -291,10 +291,12 @@ char *_discExist( struct glueCommands *data, int nextToken )
 	char *_str;
 	BPTR lock = 0;
 
-	_str = getStackString( stack );
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
+		_str = getStackString( stack );
+
 		lock = Lock( _str, SHARED_LOCK );
 
 		if (lock)
@@ -305,7 +307,8 @@ char *_discExist( struct glueCommands *data, int nextToken )
 	}
 
 	popStack( stack - cmdTmp[cmdStack-1].stack  );
-	setStackNum( lock ? true : false );
+
+	setStackNum( lock ? ~0 : 0 );
 
 	return NULL;
 }
@@ -549,7 +552,7 @@ char *_discDir( struct glueCommands *data, int nextToken )
 
 	split_path_pattern(str, &_path, &_pattern);
 	
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if (_path == NULL) return NULL;
 
@@ -769,13 +772,13 @@ char *discRename(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *discFselStr(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdNormal( _discFselStr, tokenBuffer );
+	stackCmdParm( _discFselStr, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *discExist(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdNormal( _discExist, tokenBuffer );
+	stackCmdParm( _discExist, tokenBuffer );
 	return tokenBuffer;
 }
 
@@ -1113,7 +1116,7 @@ void file_line_input( struct nativeCommand *cmd, char *tokenBuffer )
 	bool valid = false;
 	FILE *fd;
 
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if (cmd == NULL)
 	{

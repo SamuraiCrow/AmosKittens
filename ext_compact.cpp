@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
@@ -12,7 +13,6 @@
 
 #ifdef __linux__
 #include <string.h>
-#include <stdint.h>
 #include "os/linux/stuff.h"
 #include <retromode.h>
 #include <retromode_lib.h>
@@ -77,7 +77,18 @@ void openUnpackedScreen(int screen_num, int bytesPerRow, int height, int depth, 
 	struct retroScreen *screen = NULL;
 	struct retroTextWindow *textWindow = NULL;
 
-	if (mode & 0x8000) videomode = retroHires; 
+	videomode = 0;
+
+	if (mode & 0x8000)
+	{
+		 videomode |= retroHires; 
+	}
+	else
+	{
+		 videomode |= retroLowres_pixeld; 
+	}
+
+	if (mode % 0x2000) videomode |= retroHam6;
 
 	engine_lock();
 
@@ -250,8 +261,6 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 		s = getStackNum(stack);
 
 		printf("unpack %d to %d\n",n,s);
-
-		dump_banks();
 
 		bank = findBank(n);
 		if (bank)

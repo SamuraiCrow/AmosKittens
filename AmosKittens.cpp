@@ -7,6 +7,8 @@
 #include <vector>
 #include <math.h>
 
+#include <signal.h>
+
 #include "config.h"
 
 #ifdef __amigaos4__
@@ -54,6 +56,7 @@
 #include "commandsAmal.h"
 #include "commandsMenu.h"
 #include "commandsFonts.h"
+#include "commandsgui.h"
 #include "debug.h"
 #include "errors.h"
 #include "pass1.h"
@@ -67,21 +70,23 @@
 #include "ext_compact.h"
 #include "ext_turbo.h"
 
-
 bool running = true;
 bool interpreter_running = false;
-
 
 int sig_main_vbl = 0;
 int proc_stack_frame = 0;
 
-#define enable_vars_crc
+bool ext_crc();
 
-#ifdef enable_vars_crc
+#ifdef enable_vars_crc_yes
 unsigned int _vars_crc = 0;
 unsigned int str_crc( char *name );
 unsigned int vars_crc();
 #endif 
+
+#ifdef enable_bank_crc_yes
+uint32_t bank_crc = 0;
+#endif
 
 char *var_param_str = NULL;
 int var_param_num;
@@ -90,6 +95,7 @@ double var_param_decimal;
 char *_file_start_ = NULL;
 char *_file_pos_  = NULL;		// the problem of not knowing when stacked commands are executed.
 char *_file_end_ = NULL;
+uint32_t _file_bank_size = 0;
 
 struct retroVideo *video = NULL;
 struct retroScreen *screens[8] ;
@@ -116,6 +122,8 @@ char *(*do_var_index) ( glueCommands *self, int nextToken ) = _get_var_index;
 char *(**do_to) ( struct nativeCommand *, char * ) ;
 void (**do_input) ( struct nativeCommand *, char * ) ;
 void (*do_breakdata) ( struct nativeCommand *, char * ) = NULL;
+
+extern char *_errTrap( struct glueCommands *data, int nextToken );
 
 int tokenMode = mode_standard;
 
@@ -160,6 +168,8 @@ const char *str_hint = "hint ";
 const char *str_show_var = "show var ";
 const char *str_dump_banks = "dump banks";
 const char *str_dump_screen_info = "dump screen info"; 
+const char *str_time_start = "time start";
+const char *str_time_end = "time end";
 
 int findVar( char *name, bool  is_first_token, int type, int _proc );
 
@@ -195,9 +205,12 @@ void free_video()
 	}
 }
 
+struct timeval debug_time_start,debug_time_end;
+
 char *cmdRem(nativeCommand *cmd, char *ptr)
 {
 	int length = *((short *) ptr);
+	int length_in_bytes = length + (length&1);		// round up to 2.
 
 	if (length>4)
 	{
@@ -283,11 +296,28 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 				printf("**********************************\n");
 			}
 
+			if (strncmp(txt,str_time_start,strlen(str_time_start))==0)
+			{
+				printf("time recorded\n");
+				gettimeofday(&debug_time_start, NULL);
+			}
+
+			if (strncmp(txt,str_time_end,strlen(str_time_end))==0)
+			{
+				gettimeofday(&debug_time_end, NULL);
+				printf("total time %f seconds\n",	(double) (debug_time_end.tv_usec - debug_time_start.tv_usec) / 1000000 +
+											(double) (debug_time_end.tv_sec - debug_time_start.tv_sec)  );
+
+//				getchar();
+			}
+
 			free(txt);
 		}
 	}
 	
-	return ptr + length;
+	setStackNum(0);
+
+	return ptr + length_in_bytes;
 }
 
 
@@ -302,10 +332,15 @@ char *nextCmd(nativeCommand *cmd, char *ptr)
 	{
 		flags = cmdTmp[cmdStack-1].flag;
 
-		if  ( flags & (cmd_loop | cmd_never | cmd_onEol | cmd_proc )) break;
+		printf("flags %08x\n",flags);
+		if  ( ! (flags & cmd_onNextCmd) ) break;		// needs to be include tags, (if commands be excuted on endOfLine or Next command)
 		ret = cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
 
-		if (cmdTmp[cmdStack].flag & cmd_normal) break;
+		if (cmdTmp[cmdStack].flag & cmd_normal)
+		{
+			if (!cmdStack) break;
+			if (cmdTmp[cmdStack-1].cmd != _errTrap ) break;
+		}
 		if (ret) break;
 	}
 
@@ -626,6 +661,57 @@ char *cmdQuote(nativeCommand *cmd, char *ptr)
 char *cmdNumber(nativeCommand *cmd, char *ptr)
 {
 	unsigned short next_token = *((short *) (ptr+4) );
+	proc_names_printf("%s:%s:%d \n",__FILE__,__FUNCTION__,__LINE__);
+
+	// check if - or + comes before *, / or ; symbols
+
+	if ( correct_order( last_tokens[parenthesis_count],  next_token ) == false )
+	{
+		dprintf("---hidden ( symbol \n");
+
+		// hidden ( condition.
+		kittyStack[stack].str = NULL;
+		kittyStack[stack].value = 0;
+		kittyStack[stack].state = state_hidden_subData;
+		stack++;
+	}
+
+	proc_names_printf("%s:%s:%d \n",__FILE__,__FUNCTION__,__LINE__);
+
+	setStackNum( *((int *) ptr) );
+	kittyStack[stack].state = state_none;
+	flushCmdParaStack( next_token );
+
+	proc_names_printf("%s:%s:%d \n",__FILE__,__FUNCTION__,__LINE__);
+
+	return ptr;
+}
+
+double _float[256];
+
+void make_float_lookup()
+{
+	double f;
+	unsigned int number1;
+	int n = 0;
+
+	proc_names_printf("%s:%s:%d \n",__FILE__,__FUNCTION__,__LINE__);
+
+	for (number1=0;number1<256;number1++)
+	{
+		f = 0.0f;
+		for (n=7;n>-1;n--)
+		{
+			if ((1<<n)&number1) f += 1.0f / (double) (1<<(7-n));
+		}
+		_float[number1]=f;
+	}
+}
+
+char *cmdFloat(nativeCommand *cmd,char *ptr)
+{
+	double f = 0.0f;
+	unsigned short next_token = *((short *) (ptr+4) );
 	proc_names_printf("%s:%d \n",__FUNCTION__,__LINE__);
 
 	// check if - or + comes before *, / or ; symbols
@@ -641,35 +727,32 @@ char *cmdNumber(nativeCommand *cmd, char *ptr)
 		stack++;
 	}
 
-	setStackNum( *((int *) ptr) );
+	{
+		unsigned int data = *((unsigned int *) ptr);
+		unsigned int number1 = data >> 8;
+		int e = (data & 0x3F) ;
 
-//	printf("num is %d\n",*((int *) ptr) );
+		if ( (data & 0x40)  == 0)	e = -(65 - e);
+
+#if 1
+		f = _float[ (number1 & 0xFF0000) >> 16 ] ;
+		f += (_float[ (number1  & 0xFF00) >> 8 ] ) / (double) (1<<8);
+		f += _float[ (number1  & 0xFF) ]  / (double) (1<<16);
+#else
+		for (int n=23;n>-1;n--)
+		{
+			if ((1<<n)&number1) f += 1.0f / (double) (1<<(23-n));
+		}
+#endif
+
+		if (e>0) { while (--e) { f *= 2.0; } }
+		if (e<0) { while (e) {  f /= 2.0f; e++; } }
+	}
+
+	setStackDecimal( f );
 
 	kittyStack[stack].state = state_none;
 	flushCmdParaStack( next_token );
-
-	return ptr;
-}
-
-char *cmdFloat(nativeCommand *cmd,char *ptr)
-{
-	unsigned int data = *((unsigned int *) ptr);
-	unsigned int number1 = data >> 8;
-	int e = (data & 0x3F) ;
-	int n;
-	double f = 0.0f;
-
-	if ( (data & 0x40)  == 0)	e = -(65 - e);
-
-	for (n=23;n>-1;n--)
-	{
-		if ((1<<n)&number1) f += 1.0f / (double) (1<<(23-n));
-	}
-
-	if (e>0) { while (--e) { f *= 2.0; } }
-	if (e<0) { while (e) {  f /= 2.0f; e++; } }
-
-	setStackDecimal( f );
 
 	return ptr;
 }
@@ -905,6 +988,7 @@ struct nativeCommand nativeCommands[]=
 	{0x0DDC,"Rainbow",0,gfxRainbow },
 	{0x0DF0,"Rain",0,gfxRain },
 	{0x0DFE,"Fade",0,gfxFade },
+	{0x0E16,"Physic",0,gfxPhysic },
 	{0x0E24,"Physic",0,gfxPhysic },
 	{0x0E2C, "Autoback", 0, gfxAutoback },
 	{0x0E3C,"Plot",0,gfxPlot },
@@ -1061,6 +1145,7 @@ struct nativeCommand nativeCommands[]=
 	{0x1954,"Fsel$",0,discFselStr },		// found in Help_72.amos
 	{0x196C,"Fsel$",0,discFselStr },
 	{0x1978,"Fsel$",0,discFselStr },
+	{0x1986,"Set Sprite Buffers",0,hsSetSpriteBuffer },
 	{0x199E,"Sprite Off",0,hsSpriteOff },
 	{0x1A72,"Sprite Base",0,hsSpriteBase },
 	{0x1A84,"Icon Base",0,bgIconBase },
@@ -1177,12 +1262,29 @@ struct nativeCommand nativeCommands[]=
 	{0x2578,"Set Accessory",0, cmdSetAccessory },
 	{0x259A,"Trap", 0, errTrap },
 	{0x25A4,"Else If", 2, cmdElseIf },
+	{0x2694,"Call Editor", 0, cmdCallEditor },
 	{0x26D8,"Erase All", 0, cmdEraseAll },
+	{0x26E8,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$)
+	{0x2704,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$,value,b$)
+	{0x2710,"Dialog Box",0,guiDialogBox },		// d=Dialog Box(a$,value,b$,n,n)
+	{0x2742,"Dialog Open",0,guiDialogOpen },
+	{0x2750,"Dialog Close",0,guiDialogClose },
+	{0x277E,"Dialog Run", 0, guiDialogRun },
+	{0x2796,"Dialog",0,guiDialog },
+	{0x27A4,"Vdialog",0,guiVdialog },
+	{0x27E6,"Dialog$",0,guiDialogStr },
+	{0x2812,"Dialog Clr",0,guiDialogClr },
+	{0x2866,"Dialog Freeze",0,guiDialogFreeze },
+	{0x2882,"Dialog Unfreeze",0,guiDialogUnfreeze },
 	{0x28A0,"Poke$",0,machinePokeStr },	// Poke$(adr, string)
 	{0x28AE,"Peek$",0,machinePeekStr },	// Peek$(adr, length)
 	{0x28BE,"Peek$",0,machinePeekStr },	// Peek$(adr, termChar) // returns string
+	{0x28CA,"Resource Bank", 0,bankResourceBank }, // AmosPro Command.
+	{0x28DE,"Resource$",0,bankResourceStr }, // Resource$
+	{0x28EE,"Resource Screen Open",0,guiResourceScreenOpen},
 	{0x2962,"Errtrap",0,errErrTrap },	// AmosPro command
 	{0x2A4A,"Lvo", 6, machineLvo },	// AmosPro command. (should look up string in pass1 says docs), maybe 16bit BOOL, 32bit offset
+	{0x2AB0,"Prg Under",0,cmdPrgUnder },
 	{0x2B3E,"Exec",0,cmdExec },
 	{0x2B58,"Screen Mode",0,gfxScreenMode },
 	{0x2B72,"Kill Editor",0,cmdKillEditor },
@@ -1227,6 +1329,8 @@ const char *TokenName( unsigned short token )
 	return noName;
 }
 
+#ifdef enable_fast_execution_no
+
 char *executeToken( char *ptr, unsigned short token )
 {
 	struct nativeCommand *cmd;
@@ -1257,7 +1361,63 @@ char *executeToken( char *ptr, unsigned short token )
 	return NULL;
 }
 
-#define enable_vars_crc
+#endif
+
+#ifdef enable_fast_execution_yes
+
+char fast_lookup[0xFFFF];
+
+void init_fast_lookup()
+{
+	int token;
+	struct nativeCommand *cmd;
+
+	for (cmd = nativeCommands ; cmd < nativeCommands + nativeCommandsSize ; cmd++ )
+	{
+		token = (int) ((unsigned short) cmd->id) ;
+
+		*((void **) (fast_lookup + token)) = (void *) cmd -> fn;
+		*((uint16_t *) (fast_lookup + token + sizeof(void *))) = (uint16_t) cmd -> size;
+	}
+}
+
+// should be faster, draw back, no token name can be printed.
+
+struct nativeCommand _cmd;
+
+char *executeToken( char *ptr, unsigned short token )
+{
+	char *(*fn) (struct nativeCommand *cmd, char *tokenBuffer);
+	uint16_t size;
+
+	char *ret;
+
+	fn = (char* (*)(nativeCommand*, char*)) *((void **) (fast_lookup + token)) ;
+	size = *((uint16_t *) (fast_lookup + token + sizeof(void *)));
+
+	if (fn)
+	{
+		_cmd.id = token;
+		_cmd.size = size;
+		ret = fn( &_cmd, ptr ) ;
+		if (ret) ret += size;
+		return ret;
+	}
+
+	token_not_found = token;
+	currentLine = getLineFromPointer( ptr );
+	setError(23, ptr);
+	printf("Addr %08x, token not found %04X at line %d\n", 
+				(unsigned int) ptr, 
+				(unsigned int) token_not_found, 
+				getLineFromPointer( ptr));
+
+	return NULL;
+}
+#endif
+
+
+char *_for( struct glueCommands *data, int nextToken );
 
 char *token_reader( char *start, char *ptr, unsigned short lastToken, unsigned short token, int tokenlength )
 {
@@ -1269,10 +1429,17 @@ char *token_reader( char *start, char *ptr, unsigned short lastToken, unsigned s
 		return NULL;
 	}
 
-#ifdef enable_vars_crc
+#ifdef enable_ext_crc_yes
+
+	if (ext_crc()) setError(23,ptr);
+
+#endif
+
+#ifdef enable_vars_crc_yes
 	if (_vars_crc != vars_crc())
 	{
 		printf("vars are corrupted at line: %d\n", getLineFromPointer(ptr));
+		setError(22,ptr);
 	}
 #endif
 
@@ -1281,7 +1448,7 @@ char *token_reader( char *start, char *ptr, unsigned short lastToken, unsigned s
 	return ptr;
 }
 
-void code_reader( char *start, int tokenlength )
+char *code_reader( char *start, int tokenlength )
 {
 	char *ptr;
 	int token = 0;
@@ -1337,11 +1504,50 @@ void code_reader( char *start, int tokenlength )
 	}
 
 	interpreter_running = false;
+
+	return ptr;
 }
 
 char *filename = NULL;
 
 #define DLINE printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+bool ext_crc()
+{
+	int n;
+
+	for(n=0;n<32;n++)
+	{
+		if (kitty_extensions[n].lookup)
+		{
+			kitty_extensions[n].crc != mem_crc( kitty_extensions[12].lookup, 0xFFFF );
+			return false;
+		}
+	}
+	return true;
+}
+
+#ifdef __linux__
+
+static void ctrl_c_handler(int signum)
+{
+	printf("CTRL C\n");
+}
+
+#endif
+
+#ifdef __amigaos4__
+
+ULONG exceptCode ( struct ExecBase *SysBase, ULONG signals, ULONG exceptData)
+{
+	if (exceptData & SIGBREAKF_CTRL_C)
+	{
+		SetSignal( 0L, SIGBREAKF_CTRL_C);
+		Printf("CTRL C\n");
+	}
+}
+
+#endif
 
 int main(int args, char **arg)
 {
@@ -1352,12 +1558,45 @@ int main(int args, char **arg)
 	char *data;
 	int n;
 
+#ifdef __amigaos__
+	struct Task *me;
+	APTR oldException;
+	ULONG oldSigExcept;
+
+	me = FindTask(NULL);	// don't need forbid, not looking for name.
+	oldException = me -> tc_ExceptCode;
+	me -> tc_ExceptCode = (APTR) exceptCode;
+
+	oldSigExcept = SetExcept(0,0 );
+	SetExcept( SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C );
+#endif
+
+#ifdef  __linux__
+	struct sigaction sa;
+
+	sa.sa_handler = ctrl_c_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+
+	if (sigaction(SIGINT, &sa, NULL) ==-1)
+	{
+		printf("CTRL C signal handler not working\n");
+	}
+
+#endif
+
 	if (args == 2)
 	{
 		filename = strdup(arg[1]);
 	}
 
 	amosid[16] = 0;	// /0 string.
+
+#ifdef enable_fast_execution_yes
+
+	init_fast_lookup();
+
+#endif
 
 	stack = 0;
 	cmdStack = 0;
@@ -1379,10 +1618,14 @@ int main(int args, char **arg)
 		bobs[n].image = -1;
 	}
 
+	make_float_lookup();
+
 	channels = new ChannelTableClass();
 
 	if (init() && channels)
 	{
+		bool init_error = false;
+
 		// set up a fake extention lookup
 
 		// set default values.
@@ -1408,6 +1651,11 @@ int main(int args, char **arg)
 			*((void **) (kitty_extensions[12].lookup + 0x0A08)) = (void *) ext_cmd_range;
 		}
 
+		for(n=0;n<32;n++)
+		{
+			if (kitty_extensions[n].lookup) kitty_extensions[n].crc = mem_crc( kitty_extensions[12].lookup, 0xFFFF ) ;
+		}
+
 		do_input = (void (**)(nativeCommand*, char*)) malloc( sizeof(void *) * MAX_PARENTHESIS_COUNT );
 		do_to = (char *(**)(nativeCommand*, char*)) malloc( sizeof(void *) * MAX_PARENTHESIS_COUNT );
 
@@ -1422,7 +1670,7 @@ int main(int args, char **arg)
 		if (video) start_engine();
 
 		fd = filename ? fopen(filename,"r") : NULL;
-		if ((fd)&&(video))
+		if ((fd)&&(video)&&(init_error == false))
 		{
 			fseek(fd, 0, SEEK_END);
 			amos_filesize = ftell(fd);
@@ -1444,6 +1692,11 @@ int main(int args, char **arg)
 
 				fread(data,amos_filesize - _file_code_start_ ,1,fd);
 
+#ifdef enable_bank_crc
+				bank_crc = mem_crc( _file_end_ , amos_filesize - tokenlength - _file_code_start_  );
+#endif 
+
+
 #ifdef __LITTLE_ENDIAN__
 				token_littleendian_fixer( data, _file_end_ );
 #endif
@@ -1463,12 +1716,14 @@ int main(int args, char **arg)
 
 					// init banks
 
-					init_banks( _file_end_ , amos_filesize - tokenlength - _file_code_start_ );
+					_file_bank_size = amos_filesize - tokenlength - _file_code_start_;
 
+					init_banks( _file_end_ ,  _file_bank_size );
+
+#ifdef run_program_yes
 					gfxDefault(NULL, NULL);
-
-					//  execute the code.
 					code_reader( data, tokenlength );
+#endif
 				}
 
 				if (kittyError.newError)
@@ -1532,6 +1787,14 @@ int main(int args, char **arg)
 	
 	if (filename) free(filename);
 
+#ifdef __amigaos__
+	if ( me )
+	{
+		SetExcept( oldSigExcept,oldSigExcept | SIGBREAKF_CTRL_C );
+		me -> tc_ExceptCode = oldException;
+		Printf("Old exception handler restored\n");
+	}
+#endif
 
 	return 0;
 }

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
@@ -13,7 +14,6 @@
 
 #ifdef __linux__
 #include <string.h>
-#include <stdint.h>
 #include "os/linux/stuff.h"
 #include <retromode.h>
 #include <retromode_lib.h>
@@ -84,6 +84,10 @@ char *_endProc (struct glueCommands *data, int nextToken);
 char *_len (struct glueCommands *data, int nextToken);
 char *_lessOrEqualData (struct glueCommands *data, int nextToken);
 char *_moreOrEqualData (struct glueCommands *data, int nextToken);
+char *_discExist( struct glueCommands *data, int nextToken );
+char *_not_equal( struct glueCommands *data, int nextToken );
+char *_exit( struct glueCommands *data, int nextToken );
+char *_errTrap( struct glueCommands *data, int nextToken );
 
 struct stackDebugSymbol
 {
@@ -133,7 +137,10 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_lessOrEqualData,"<="},
 	{_moreOrEqualData,">="},
 	{_cmdNot,"Not"},
-
+	{_discExist,"Exist"},
+	{_not_equal,"<>"},
+	{_exit,"exit loop"},
+	{_errTrap,"Trap"},
 	{NULL, NULL}
 };
 
@@ -185,6 +192,14 @@ unsigned int vars_crc()
 		if (globalVars[n].varName == NULL) return 0;
 		crc ^= str_crc( globalVars[n].varName );
 	}
+	return crc;
+}
+
+unsigned int mem_crc( char *mem, uint32_t size )
+{
+	uint32_t n;
+	unsigned int crc = 0;
+	for (n=0;n<size;n++) crc ^= mem[n] << (n % 24);
 	return crc;
 }
 

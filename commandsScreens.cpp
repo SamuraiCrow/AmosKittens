@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
@@ -13,7 +14,6 @@
 #endif
 
 #ifdef __linux__
-#include <stdint.h>
 #include "os/linux/stuff.h"
 #include <retromode.h>
 #include <retromode_lib.h>
@@ -98,16 +98,15 @@ char *_gfxScreenOpen( struct glueCommands *data, int nextToken )
 
 			engine_lock();
 			if (screens[screen_num]) retroCloseScreen(&screens[screen_num]);
-			screens[screen_num] = retroOpenScreen(getStackNum( stack-3 ),getStackNum( stack-2 ),getStackNum( stack ));
-	
+
+			screens[screen_num] = retroOpenScreen(getStackNum( stack-3 ),getStackNum( stack-2 ),(colors == 4096 ? retroHam6 : 0) | getStackNum( stack ));
 			if (screen = screens[screen_num])
 			{
 				init_amos_kittens_screen_default_text_window(screen, colors);
 				init_amos_kittens_screen_default_colors(screen);
 				draw_cursor(screen);
+				retroApplyScreen( screen, video, 0, 0, screen -> realWidth,screen->realHeight );
 			}
-
-			retroApplyScreen( screen, video, 0, 0, screen -> realWidth,screen->realHeight );
 			engine_unlock();
 
 			success = true;
@@ -135,7 +134,7 @@ bool kitten_screen_close(int screen_num)
 		if (screen_num == current_screen)
 		{
 			int n;
-			for (n=8; n>-1;n--)
+			for (n=7; n>-1;n--)
 			{
 				if (screens[n])
 				{
@@ -351,7 +350,7 @@ char *_gfxScin( struct glueCommands *data, int nextToken )
 
 	if (args==2)
 	{
-		int mx = getStackNum( stack-1 );
+//		int mx = getStackNum( stack-1 );
 		int my = getStackNum( stack );
 
 		if ((my>-1)&&(my<480))
@@ -413,8 +412,6 @@ char *gfxScreenDisplay(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-
-
 char *gfxScreenOffset(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	stackCmdNormal( _gfxScreenOffset, tokenBuffer );
@@ -423,7 +420,23 @@ char *gfxScreenOffset(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *gfxScreen(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdNormal( _gfxScreen, tokenBuffer );
+	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	switch (last_tokens[parenthesis_count])
+	{
+		case 0x0000:
+		case 0x0054:
+				stackCmdNormal( _gfxScreen, tokenBuffer );
+				break;
+		default:
+				{
+					unsigned short next_token = *((short *) (tokenBuffer) );
+					setStackNum( screens[current_screen] ? current_screen : -1 );		// returns -1 if no screen is open.	
+					kittyStack[stack].state = state_none;
+					flushCmdParaStack( next_token );
+				}
+	}
+
 	return tokenBuffer;
 }
 
@@ -626,8 +639,13 @@ char *_gfxScreenCopy( struct glueCommands *data, int nextToken )
 
 				if ((src_screen>-1)&&(src_screen<8)&&(dest_screen>-1)&&(dest_screen<8))
 				{
-					retroScreenBlit( screens[src_screen],src_mode, 0, 0, screens[src_screen]->realWidth, screens[src_screen]->realHeight,
-							screens[dest_screen],dest_mode, 0, 0);
+					if ((screens[src_screen])&&(screens[dest_screen]))
+					{
+						retroScreenBlit( screens[src_screen],src_mode, 0, 0, screens[src_screen]->realWidth, screens[src_screen]->realHeight,
+								screens[dest_screen],dest_mode, 0, 0);
+
+					}
+					else setError(47,data->tokenBuffer);
 				}
 			}
 			break;
@@ -650,8 +668,13 @@ char *_gfxScreenCopy( struct glueCommands *data, int nextToken )
 
 				if ((src_screen>-1)&&(src_screen<8)&&(dest_screen>-1)&&(dest_screen<8))
 				{
-					retroScreenBlit( screens[src_screen], src_mode ,src_x0, src_y0, src_x1-src_x0, src_y1-src_y0,
-							screens[dest_screen], dest_mode, dest_x, dest_y);
+
+					if ((screens[src_screen])&&(screens[dest_screen]))
+					{
+						retroScreenBlit( screens[src_screen], src_mode ,src_x0, src_y0, src_x1-src_x0, src_y1-src_y0,
+								screens[dest_screen], dest_mode, dest_x, dest_y);
+					}
+					else setError(47,data->tokenBuffer);
 				}
 			}
 			break;

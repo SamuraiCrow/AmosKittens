@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
@@ -28,11 +29,11 @@ bool dropProgStackToProc( char *(*fn) (struct glueCommands *data, int nextToken)
 	return false;
 }
 
-bool dropProgStackToType( int type )
+bool dropProgStackToFlag( int flag )
 {
 	while (cmdStack > 0)
 	{
-		if (cmdTmp[cmdStack-1].flag == type) return true;
+		if (cmdTmp[cmdStack-1].flag & flag) return true;
 		cmdStack--;
 	}
 	return false;
@@ -92,7 +93,7 @@ char *flushCmdParaStack( int nextToken )
 
 	if (cmdStack)
 	{
-		 while ( (cmdStack>0) && (cmdTmp[cmdStack-1].flag == cmd_para)) 
+		 while ( (cmdStack>0) && (cmdTmp[cmdStack-1].flag & cmd_para)) 
 		{
 			cmd = &cmdTmp[cmdStack-1];
 
@@ -106,7 +107,7 @@ char *flushCmdParaStack( int nextToken )
 
 				if ( correct_order( last_tokens[parenthesis_count] ,  nextToken ) == false )
 				{
-					printf("**** Looks like I need to exit here, not the correct order ***\n");
+//					printf("**** Looks like I need to exit here, not the correct order ***\n");
 					return ret;		// exit here.
 				}
 			}

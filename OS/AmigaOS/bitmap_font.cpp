@@ -98,7 +98,7 @@ struct retroTextWindow *newTextWindow( struct retroScreen *screen, int id )
 			screen -> textWindows = NULL;
 		}
 
-		printf("store at %d\n",_to_alloc_-1);
+//		printf("window store at %d\n",_to_alloc_-1);
 
 		_new_tab_[_to_alloc_-1] = new_text_window( id ) ;
 		screen -> textWindows = _new_tab_;
@@ -584,8 +584,6 @@ int strlen_no_esc(const char *txt)
 	const char *c;
 	char buffer[1000];
 
-	printf("****** START STRLEN ***\n");
-
 	for (c=txt;*c;c++)
 	{
 		switch (*c)
@@ -625,10 +623,6 @@ int strlen_no_esc(const char *txt)
 		}
 	}
 	buffer[_l] = 0;
-
-	printf("text '%s' strlen %d\n",buffer, _l);
-	printf("****** END STRLEN ***\n");
-
 
 	return _l;
 }

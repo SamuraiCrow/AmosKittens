@@ -7,6 +7,8 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
+#include <intuition/imageclass.h>
+#include <intuition/gadgetclass.h>
 #include <proto/graphics.h>
 #include <proto/diskfont.h>
 #include <proto/layers.h>
@@ -30,8 +32,14 @@ extern bool interpreter_running;	// interprenter is really running.
 extern int keyState[256];
 extern char *F1_keys[20];
 
-extern struct Menu *amiga_menu;
+enum
+{
+	GID_ICONIFY = 1,
+	GID_PREFS
+};
 
+
+extern struct Menu *amiga_menu;
 extern struct retroSprite *sprite;
 
 struct Process *EngineTask = NULL;
@@ -52,14 +60,14 @@ std::vector<struct amos_selected> amosSelected;
 int engine_mouse_key = 0;
 int engine_mouse_x = 0;
 int engine_mouse_y = 0;
-
 int autoView = 1;
 int bobUpdate = 1;
-
 int cursor_color = 3;
 
 void clearBobs();
 void drawBobs();
+struct Gadeget *IcoGad = NULL;
+struct Image * IcoImg = NULL;
 
 extern void channel_amal( struct kittyChannel *self );
 extern void channel_anim( struct kittyChannel *self );
@@ -106,37 +114,92 @@ struct retroRGB DefaultPalette[256] =
 
 #define IDCMP_COMMON IDCMP_MOUSEBUTTONS | IDCMP_INACTIVEWINDOW | IDCMP_ACTIVEWINDOW  | \
 	IDCMP_CHANGEWINDOW | IDCMP_MOUSEMOVE | IDCMP_REFRESHWINDOW | IDCMP_RAWKEY | \
-	IDCMP_EXTENDEDMOUSE | IDCMP_CLOSEWINDOW | IDCMP_NEWSIZE | IDCMP_INTUITICKS | IDCMP_MENUPICK
+	IDCMP_EXTENDEDMOUSE | IDCMP_CLOSEWINDOW | IDCMP_NEWSIZE | IDCMP_INTUITICKS | IDCMP_MENUPICK | IDCMP_GADGETUP
 
 extern BOOL open_lib( const char *name, int ver , const char *iname, int iver, struct Library **base, struct Interface **interface);
 
-
-bool open_window( int window_width, int window_height )
+struct Gadeget *add_window_button(struct Image *img, ULONG id)
 {
-		My_Window = OpenWindowTags( NULL,
+	struct Gadeget *retGad;
 
-			WA_Title,         "Amos Kittens",
+	if (img)
+	{
+		retGad = (struct Gadeget *) NewObject(NULL , "buttongclass", 
+			GA_ID, id, 
+			GA_RelVerify, TRUE, 
+			GA_Image, img, 
+			GA_TopBorder, TRUE, 
+			GA_RelRight, 0, 
+			GA_Titlebar, TRUE, 
+			TAG_END);
 
-			WA_InnerWidth,      window_width,
-			WA_InnerHeight,     window_height,
+		if (retGad)
+		{
+			AddGadget( My_Window, (struct Gadget *) retGad, ~0 );
+		}
+	}
 
-			WA_SimpleRefresh,		FALSE,
-			WA_CloseGadget,     TRUE,
-			WA_DepthGadget,     TRUE,
+	return retGad;
+}
 
-			WA_DragBar,         TRUE,
-			WA_Borderless,      FALSE,
-			WA_SizeGadget,      FALSE,
-			WA_SizeBBottom,	FALSE,
-			WA_Activate, TRUE,
 
-			WA_IDCMP,           IDCMP_COMMON,
-			WA_Flags,           WFLG_REPORTMOUSE | WFLG_RMBTRAP |  WFLG_NEWLOOKMENUS ,
+bool open_engine_window( int window_left, int window_top, int window_width, int window_height )
+{
+	My_Window = OpenWindowTags( NULL,
+				WA_Left,			window_left,
+				WA_Top,			window_top,
+				WA_InnerWidth,	window_width,
+				WA_InnerHeight,	window_height,
+				WA_SimpleRefresh,	TRUE,
+				WA_CloseGadget,	TRUE,
+				WA_DepthGadget,	TRUE,
+				WA_DragBar,		TRUE,
+				WA_Borderless,	FALSE,
+				WA_SizeGadget,	TRUE,
+				WA_SizeBBottom,	TRUE,
+				WA_NewLookMenus,	TRUE,
+				WA_Title, "Amos Kittens",
+				WA_Activate,        TRUE,
+				WA_Flags, WFLG_RMBTRAP| WFLG_REPORTMOUSE,
+				WA_IDCMP,           IDCMP_COMMON,
 			TAG_DONE);
 
+	if (My_Window)
+	{
+		struct DrawInfo *dri = GetScreenDrawInfo(My_Window -> WScreen);
 
+		if (dri)
+		{
+			IcoImg = (struct Image *) NewObject(NULL, "sysiclass", SYSIA_DrawInfo, dri, SYSIA_Which, ICONIFYIMAGE, TAG_END );
+			if (IcoImg)
+			{
+				IcoGad = add_window_button(IcoImg, GID_ICONIFY);
+			}
+		}
+	}
 
 	return (My_Window != NULL) ;
+}
+
+void close_engine_window( )
+{
+	if (My_Window)
+	{
+		if (IcoGad)
+		{
+			RemoveGadget( My_Window, (struct Gadget *) IcoGad );
+			IcoGad = NULL;
+		}
+
+		if (IcoImg)
+		{
+			DisposeObject( (Object *) IcoImg );
+			IcoImg = NULL;
+		}
+
+		CloseWindow(My_Window);
+		My_Window = NULL;
+	}
 }
 
 struct TextFont *topaz8_font = NULL;
@@ -145,7 +208,7 @@ struct retroEngine *engine = NULL;
 
 bool init_engine()
 {
-	if ( ! open_window(640,480) ) return false;
+	if ( ! open_engine_window( 0, 0, 640,480) ) return false;
 
 	topaz8_font =  open_font( "topaz.font" ,  8);
 	if ( ! topaz8_font ) return FALSE;
@@ -179,7 +242,7 @@ void close_engine()
 		font_render_rp.BitMap = NULL;
 	}
 
-	if (My_Window) CloseWindow(My_Window);
+	close_engine_window();
 
 	if (engine)
 	{
@@ -284,6 +347,8 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 			struct retroRGB *opal = screen -> orgPalette;
 			struct retroRGB *rpal = screen -> rowPalette;
 			struct retroRGB *npal = screen -> fadePalette;
+
+			Printf("doing a fade\n");
 
 			for (n=0;n<256;n++)
 			{
@@ -403,66 +468,42 @@ void DrawSprite(
 	}
 }
 
-void main_engine()
-{
-	struct IntuiMessage *msg;
+extern void enable_Iconify();
+extern void disable_Iconify();
+
+
+	UWORD Code;
+	ULONG GadgetID;
+	UWORD Qualifier;
 	struct MenuItem *item;
 	UWORD menuNumber;
-
 	struct amos_selected selected;
 
-	Printf("init engine\n");
+void empty_que( struct MsgPort *port )
+{
+	struct IntuiMessage *msg;
 
-	if (init_engine())		// libs open her.
+	while (msg = (IntuiMessage *) GetMsg( engine -> window -> UserPort) )
 	{
-		Printf("init engine done..\n");
-		
-		struct retroScreen *screen = NULL;
-		ULONG Class;
-		UWORD Code;
-		UWORD Qualifier;
-		ULONG sigs;
-		ULONG joy_sig;
-		ULONG ret;
-		int n;
-		
-		Signal( &main_task->pr_Task, SIGF_CHILD );
+		ReplyMsg( (Message*) msg );
+	}
+}
 
-		Printf("clear video\n");
-		retroClearVideo(video);
-
-		Printf("init joysticks..\n");
-		init_joysticks();
-
-		joy_sig = 1L << (joystick_msgport -> mp_SigBit);
-
-		sigs = SIGBREAKF_CTRL_C;
-		sigs |= joy_sig;
-
-		Printf("main loop\n");
-
-		while (running)
-		{
-			ret = SetSignal(0L, sigs);
-
-			if ( ret & SIGBREAKF_CTRL_C) running = false;
-
-			if ( ret & joy_sig )
-			{
-				for (n=0;n<4;n++)
-				{
-					if (joysticks[n].id>0)
-					{
-						joy_stick(n,joysticks[n].controller);
-					}
-				}
-			}
+void handel_window()
+{
+	ULONG Class;
+	struct IntuiMessage *msg;
+	int mouse_x, mouse_y;
 
 			while (msg = (IntuiMessage *) GetMsg( engine -> window -> UserPort) )
 			{
 				Qualifier = msg -> Qualifier;
 				Class = msg -> Class;
 				Code = msg -> Code;
+				GadgetID = (Class == IDCMP_GADGETUP) ? ((struct Gadget *) ( msg -> IAddress)) -> GadgetID : 0;
+				mouse_x = msg -> MouseX;
+				mouse_y = msg -> MouseX;
+				ReplyMsg( (Message*) msg );
 
 				switch (Class) 
 				{
@@ -470,7 +511,14 @@ void main_engine()
 							running = false;
 							break;
 
+					case IDCMP_GADGETUP:
+							empty_que( engine -> window -> UserPort );
+							enable_Iconify(); 
+							engine -> window = NULL;
+							return;
+
 					case IDCMP_MOUSEBUTTONS:
+
 							switch (Code)
 							{
 								case SELECTDOWN:	engine_mouse_key |= 1; break;
@@ -481,13 +529,14 @@ void main_engine()
 							break;
 
 					case IDCMP_MOUSEMOVE:
-							engine_mouse_x = msg -> MouseX - engine -> window -> BorderLeft;
-							engine_mouse_y = msg -> MouseY - engine -> window -> BorderTop;
+
+							engine_mouse_x = mouse_x - engine -> window -> BorderLeft;
+							engine_mouse_y = mouse_y - engine -> window -> BorderTop;
 							break;
 
 					case IDCMP_MENUPICK:
 
-							menuNumber = msg -> Code;
+							menuNumber =  Code;
 							while (menuNumber != MENUNULL)
 							{
 								item = ItemAddress(amiga_menu, menuNumber);
@@ -510,7 +559,6 @@ void main_engine()
 					case IDCMP_RAWKEY:
 
 							_keyshift = Qualifier;
-
 							if (Qualifier & IEQUALIFIER_REPEAT)
 							{
 								Printf("we have a repeat key\n");
@@ -524,6 +572,7 @@ void main_engine()
 
 							if ((Code & IECODE_UP_PREFIX) || (Qualifier & IEQUALIFIER_REPEAT))
 							{
+
 								engine_wait_key = false;
 								Code = Code & ~IECODE_UP_PREFIX;
 
@@ -544,22 +593,92 @@ void main_engine()
 							}
 							break;
 				}
-
-				ReplyMsg( (Message*) msg );
 			}
+}
+
+extern struct MsgPort *iconifyPort;
+
+void handel_iconify()
+{
+	struct Message *msg;
+	bool disabled = false;
+
+	while (msg = (Message *) GetMsg( iconifyPort ) )
+	{
+		ReplyMsg( (Message*) msg );
+		disabled = true;
+	}
+
+	if (disabled)
+	{
+		disable_Iconify();
+		engine -> window = My_Window;
+	}
+}
+
+
+void main_engine()
+{
+	Printf("init engine\n");
+
+	if (init_engine())		// libs open her.
+	{
+		Printf("init engine done..\n");
+		
+		struct retroScreen *screen = NULL;
+
+		ULONG sigs;
+		ULONG joy_sig;
+		ULONG ret;
+		int n;
+		
+		Signal( &main_task->pr_Task, SIGF_CHILD );
+
+		Printf("clear video\n");
+		retroClearVideo(video);
+
+		Printf("init joysticks..\n");
+		init_joysticks();
+
+		joy_sig = 1L << (joystick_msgport -> mp_SigBit);
+
+		sigs = SIGBREAKF_CTRL_C;
+		sigs |= joy_sig;
+
+		while (running)
+		{
+			ret = SetSignal(0L, sigs);
+
+			if ( ret & SIGBREAKF_CTRL_C) running = false;
+
+			if ( ret & joy_sig )
+			{
+				for (n=0;n<4;n++)
+				{
+					if (joysticks[n].id>0)
+					{
+						joy_stick(n,joysticks[n].controller);
+					}
+				}
+			}
+
+			if (My_Window) handel_window();
+
+			if (iconifyPort) handel_iconify();
 
 			if (autoView)
 			{
 				retroClearVideo( video );
-
 				engine_lock();
 
+#if 1
 				if ((bobUpdate==1)||(screen -> force_swap))
 				{
-					Printf("drawBobs()\n");
 					drawBobs();
 				}
+#endif
 
+#if 1
 				for (n=0; n<8;n++)
 				{
 					screen = screens[n];
@@ -571,13 +690,10 @@ void main_engine()
 						if (screen -> Memory[1]) 	// has double buffer
 						{
 							Printf_iso("screen %d - force swap %s\n", n, screen -> force_swap ? "Yes" : "No" );
-							Printf("Trying to swap\n");
 
 							if ((screen -> autoback!=0) || (screen -> force_swap))
 							{
 								screen -> force_swap = FALSE;
-
-								Printf("swapping\n");
 
 								memcpy( 
 									screen -> Memory[1 - screen -> double_buffer_draw_frame], 
@@ -588,20 +704,26 @@ void main_engine()
 							}
 						}
 					}
-				}
+				}	// next
+#endif
 
+#if 1
 				retroDrawVideo( video );
+#endif
 
+#if 1
 				if ((bobUpdate==1)||(screen -> force_swap))
 				{
 					clearBobs();
-					Printf("Clear bobs\n");
 				}
+#endif
 
+#if 1
 				if (channels)
 				{
 					struct kittyChannel *item;
 					int i;
+
 					for (i=0;i<channels -> _size();i++)
 					{
 						if (item = channels -> item(i))
@@ -613,10 +735,13 @@ void main_engine()
 						}
 					}
 				}
+#endif
 
+#if 1
 				if ((sprite)&&(video -> sprites))
 				{
 					struct retroSpriteObject *item;
+
 					for (n=0;n<64;n++)
 					{
 						item = &video -> sprites[n];
@@ -628,18 +753,22 @@ void main_engine()
 						}
 					}
 				}
-		
+#endif		
 				engine_unlock();
-			}
 
-			AfterEffectScanline( video );
-//			AfterEffectAdjustRGB( video , 8, 0 , 4);
-			retroDmaVideo( video, engine );
 
-			WaitTOF();
-			if (sig_main_vbl) Signal( &main_task->pr_Task, 1<<sig_main_vbl );
+			}	// end if (autoView)
 
-			BltBitMapTags(BLITA_SrcType, BLITT_BITMAP,
+			if (My_Window)
+			{
+				AfterEffectScanline( video );
+//				AfterEffectAdjustRGB( video , 8, 0 , 4);
+				retroDmaVideo( video, engine );
+
+				WaitTOF();
+				if (sig_main_vbl) Signal( &main_task->pr_Task, 1<<sig_main_vbl );
+
+				BltBitMapTags(BLITA_SrcType, BLITT_BITMAP,
 						BLITA_Source, engine->rp.BitMap,
 						BLITA_SrcX, 0,
 						BLITA_SrcY, 0,
@@ -650,9 +779,14 @@ void main_engine()
 						BLITA_DestX, My_Window->BorderLeft,
 						BLITA_DestY, My_Window->BorderTop,
 						TAG_END);
+			}
+			else
+			{
+				if (sig_main_vbl) Signal( &main_task->pr_Task, 1<<sig_main_vbl );
+			}
 
-			Delay(1);
-		}
+			Delay(4);
+		} // while
 	}
 	else
 	{
@@ -677,3 +811,4 @@ void engine_unlock()
 {
 	MutexRelease(engine_mx);
 }
+

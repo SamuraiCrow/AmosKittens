@@ -180,8 +180,11 @@ char *_instr( struct glueCommands *data, int nextToken )
 
 				if ((_str)&&(_find))
 				{
-					ret = strstr( _str, _find );
-					_pos = ret ? (unsigned int) (ret - _str) +1 : 0;
+					if ((_str[0]) &&(_find[0]))		// not empty
+					{
+						ret = strstr( _str, _find );
+						_pos = ret ? (unsigned int) (ret - _str) +1 : 0;
+					}
 				}
 				break;
 		case 3:
@@ -191,12 +194,15 @@ char *_instr( struct glueCommands *data, int nextToken )
 
 				if ((_str)&&(_find)&&(_start>-1) )
 				{
-					int str_len = kittyStack[stack-2].len;
+					if ((_str[0]) &&(_find[0]))		// not empty
+					{
+						int str_len = kittyStack[stack-2].len;
 
-					if (_start >= str_len) _start = str_len-1;
+						if (_start >= str_len) _start = str_len-1;
 
-					ret = strstr( _str + _start, _find );
-					_pos = ret ? (unsigned int) (ret - _str) +1 + _start : 0;
+						ret = strstr( _str + _start, _find );
+						_pos = ret ? (unsigned int) (ret - _str) +1 + _start : 0;
+					}
 				}
 				break;
 		default:
@@ -348,7 +354,7 @@ char *_string( struct glueCommands *data, int nextToken )
 	char *str = NULL;
 	char *_str;
 
-	proc_names_printf("%s:%s:%n\n",__FILE__,__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
@@ -372,37 +378,150 @@ char *_string( struct glueCommands *data, int nextToken )
 
 char *_asc( struct glueCommands *data, int nextToken )
 {
-//	int args = stack - data->stack + 1 ;
+	int args = stack - data->stack + 1 ;
 	char *_str;
+	int ret = 0;
 
-	proc_names_printf("%s:%s:%n\n",__FILE__,__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	_str = getStackString( stack  );
+	if (args==1)
+	{
+		_str = getStackString( stack  );
+		if (_str) ret = *_str;
+	}
+	else setError(22,data->tokenBuffer);
 
 	popStack(stack - data->stack);
 
-	setStackNum( _str ? *_str : 0 );
+	setStackNum( ret );
 
 	return NULL;
 }
 
+
+static bool get_bin(char *str, int &num)
+{
+	char *c = str;
+	num = 0;
+
+	while (*c == ' ') c++;
+	if (*c!='%') return false;
+	c++;
+	while ((*c=='0')||(*c=='1'))
+	{
+		num = num << 1;
+		num += *c - '0';
+		c++;
+	}
+
+	return true;
+}
+
+static bool get_hex(char *str, int &num)
+{
+	char *c = str;
+	num = 0;
+
+	while (*c == ' ') c++;
+	if (*c!='$') return false;
+	c++;
+	while ( (*c) &&  (*c != ' ')  )
+	{
+		num = num * 16;
+
+		if ((*c>='0')&&(*c<='9'))
+		{
+			num += *c -'0';
+		}
+		else if ((*c>='a')&&(*c<='f'))
+		{
+			num += *c -'a' +10;
+		}
+		else if ((*c>='A')&&(*c<='F'))
+		{
+			num += *c -'A' +10;
+		}
+		else break;
+
+		c++;
+	}
+
+	return true;
+}
+
+
 char *_val( struct glueCommands *data, int nextToken )
 {
-//	int args = stack - data->stack  + 1;
-	double num = 0.0f;
+	int num = 0;
+	double numf = 0.0f;
+	char *c;
 	char *_str;
+	int type_count = 0;
+	int type = 0;
+	bool success = false;
 
-	proc_names_printf("%s:%s:%n\n",__FILE__,__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_str = getStackString( stack  );
 	if (_str)
 	{
-		if (sscanf(_str,"%lf",&num)==0) num=0.0f;
+		c = _str;
+		// skip spaces in the start of the string.
+		while (*c == ' ') c++;
+
+		printf("%s\n",c);
+
+		// check for symbol until first space or end of string.
+		for (; (*c)  && (*c != ' ') ;c++)
+		{
+			switch (*c)
+			{
+				case '.':	type= 1; type_count++; break;
+				case '$':	type= 2; type_count++; break;
+				case '%':	type= 3; type_count++; break;
+			}
+		}	
+
+		if (type_count<2)
+		{
+			success = true;
+
+			printf("type %d\n",type);
+
+			switch (type)
+			{
+				case 0:	if (sscanf(_str,"%d",&num)==0) num=0.0f;
+						break;
+				case 1:	if (sscanf(_str,"%lf",&numf)==0) numf=0.0f;
+						break;
+				case 2:	success = get_hex(_str,num);
+						break;
+				case 3:	success = get_bin(_str,num) ;
+						break;
+
+				default: success = false;
+			}
+		}
+		else printf("type_count %d\n",type_count);
 	}
 
 	popStack(stack - data->stack);
 
-	setStackDecimal( num );
+	if (success == true)
+	{
+		if (type == 1)
+		{
+			setStackDecimal( numf );
+		}
+		else
+		{
+			setStackNum( num );
+		}
+	}
+	else
+	{
+		setError(22, data -> tokenBuffer);
+	}
 
 	return NULL;
 }

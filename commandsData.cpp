@@ -815,7 +815,7 @@ char *_addDataToText( struct glueCommands *data, int nextToken )
 
 bool _subStr( void )
 {
-	proc_names_printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s%s:%d stack is %d cmd stack is %d state %d\n",__FILE__,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
 
 	char *string;
 	char *remove;
@@ -855,7 +855,7 @@ bool _subStr( void )
 
 char *_subData( struct glueCommands *data, int nextToken )
 {
-	proc_names_printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d stack is %d cmd stack is %d state %d\n",__FILE__,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
 
 	struct kittyData *item0;
 	struct kittyData *item1;
@@ -881,6 +881,7 @@ char *_subData( struct glueCommands *data, int nextToken )
 		if (type1 == type_int)
 		{
 			setStackNum( - item1->value );
+			dprintf(" 0 - %d = %d\n",  item1->value, - item1->value );
 			success = TRUE;
 		}
 		else if (type1 == type_float)
@@ -1315,16 +1316,16 @@ char *_not_equal( struct glueCommands *data, int nextToken )
 		return NULL;
 	}
 
-	stack --;
-
-	item0 = kittyStack + stack;
-	item1 = kittyStack + stack+1;
+	item0 = kittyStack + stack-1;
+	item1 = kittyStack + stack;
 
 	type0 = item0 -> type & 7;
 	type1 = item1 -> type & 7;
 
 	if (type0 == type_float) 
 	{
+		stack --;	
+
 		if (type1 == type_int)
 		{
 			setStackNum( item0->decimal != (double) item1->value ? ~0 : 0 );
@@ -1338,9 +1339,12 @@ char *_not_equal( struct glueCommands *data, int nextToken )
 	}
 	else if (type0 == type_int) 
 	{
+		stack--;
+
 		if (type1 == type_int)
 		{
-			printf ("( %d != %d ) = %d \n", item0->value , item1->value , item0->value =! item1->value);
+			dprintf ("( %d != %d ) = %d \n", item0->value , item1->value , item0->value != item1->value);
+
 			setStackNum( item0->value != item1->value  ? ~0 : 0);
 			success = TRUE;
 		}

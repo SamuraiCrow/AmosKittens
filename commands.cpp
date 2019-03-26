@@ -65,6 +65,12 @@ char *dupRef( struct reference *ref );
 char *_setVar( struct glueCommands *data, int nextToken );
 
 // dummy not used, see code in cmdNext
+char *_exit( struct glueCommands *data, int nextToken )
+{
+	return NULL;
+}
+
+// dummy not used, see code in cmdNext
 char *_for( struct glueCommands *data, int nextToken )
 {
 	return NULL;
@@ -894,7 +900,6 @@ char *cmdGosub(struct nativeCommand *cmd, char *tokenBuffer)
 					break;
 
 		default:
-
 				printf("bad token: %04x\n", next_token);
 				setError(22, tokenBuffer);
 	}
@@ -928,8 +933,13 @@ char *cmdLoop(struct nativeCommand *cmd, char *tokenBuffer)
 		{
 			tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
 		}
-		else setError(23,tokenBuffer);
+		else 	if (cmdTmp[cmdStack-1].cmd == _exit)
+		{
+			cmdStack--;
+		}
+		else	setError(23,tokenBuffer);
 	}
+	else	setError(23,tokenBuffer);
 
 	return tokenBuffer;
 }
@@ -948,7 +958,20 @@ char *cmdWend(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _while ) tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+	if (cmdStack)
+	{
+		if (cmdTmp[cmdStack-1].cmd == _while ) 
+		{
+			tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+		}
+		else 	if (cmdTmp[cmdStack-1].cmd == _exit)
+		{
+			cmdStack--;
+		}
+		else	setError(23,tokenBuffer);
+	}
+	else	setError(23,tokenBuffer);
+
 	return tokenBuffer;
 }
 
@@ -959,7 +982,20 @@ char *cmdUntil(struct nativeCommand *cmd, char *tokenBuffer)
 	// we are changin the stack from loop to normal, so when get to end of line or next command, it be executed after the logical tests.
 
 	tokenMode = mode_logical;
-	if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _repeat ) cmdTmp[cmdStack-1].flag = cmd_normal;
+	if (cmdStack)
+	{
+		if (cmdTmp[cmdStack-1].cmd == _repeat )
+		{
+			cmdTmp[cmdStack-1].flag = cmd_normal;
+		}
+		else if (cmdTmp[cmdStack-1].cmd == _exit)
+		{
+			cmdStack--;
+		}
+		else	setError(23,tokenBuffer);
+	}
+	else	setError(23,tokenBuffer);
+
 	return tokenBuffer;
 }
 
@@ -1006,7 +1042,7 @@ char *do_for_to( struct nativeCommand *cmd, char *tokenBuffer)
 	{
 		// We loop back to "TO" not "FOR", we are not reseting COUNTER var.
 
-		if (( cmdTmp[cmdStack-1].cmd == _for ) && (cmdTmp[cmdStack-1].flag == cmd_normal ))
+		if (( cmdTmp[cmdStack-1].cmd == _for ) && (cmdTmp[cmdStack-1].flag & cmd_normal ))
 		{
 			cmdTmp[cmdStack-1].tokenBuffer2 = tokenBuffer ;
 			cmdTmp[cmdStack-1].cmd_type = cmd_loop;
@@ -1071,6 +1107,7 @@ int FOR_NEXT_INT( char *tokenBuffer , char **new_ptr )
 {
 	unsigned short token;
 	char *ptr = tokenBuffer;
+	int cmdStack_start = cmdStack;
 
 	token = *( (unsigned short *) ptr);
 	ptr +=2;
@@ -1093,6 +1130,13 @@ int FOR_NEXT_INT( char *tokenBuffer , char **new_ptr )
 
 	*new_ptr = ptr - 2;
 
+	// forcefully flush all cmds
+
+	while ( cmdStack > cmdStack_start ) 
+	{
+		cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
+	}
+
 	return getStackNum(stack);
 }
 
@@ -1100,39 +1144,38 @@ char *cmdNext(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	char *ptr = tokenBuffer ;
 	char *new_ptr = NULL;
-	int idx_var = -1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (NEXT_TOKEN(ptr) == 0x0006 )	// Next var
+	if ( cmdTmp[cmdStack-1].cmd == _for )
 	{
-		struct reference *ref = (struct reference *) (ptr + 2);
-		idx_var = ref -> ref -1;
-	}
-	else 	// For var=
-	{
-		if (( cmdTmp[cmdStack-1].cmd == _for ) && (cmdTmp[cmdStack-1].flag == cmd_loop ))
-		{
-			char *ptr = cmdTmp[cmdStack-1].tokenBuffer + 2  ;	// first short is JMP address, next after is token.
+		int idx_var = -1;
 
-			if (NEXT_TOKEN(ptr) == 0x0006 )	// next is variable
+		if (NEXT_TOKEN(ptr) == 0x0006 )	// Next var
+		{
+			struct reference *ref = (struct reference *) (ptr + 2);
+			idx_var = ref -> ref -1;
+		}
+		else 	// For var=
+		{
+			if (( cmdTmp[cmdStack-1].cmd == _for ) && (cmdTmp[cmdStack-1].flag == cmd_loop ))
 			{
-				struct reference *ref = (struct reference *) (ptr + 2);
-				idx_var = ref -> ref -1;
+				char *ptr = cmdTmp[cmdStack-1].tokenBuffer + 2  ;	// first short is JMP address, next after is token.
+	
+				if (NEXT_TOKEN(ptr) == 0x0006 )	// next is variable
+				{
+					struct reference *ref = (struct reference *) (ptr + 2);
+					idx_var = ref -> ref -1;
+				}
 			}
 		}
-	}
 		
-	if (idx_var>-1)
-	{
-		if (( cmdTmp[cmdStack-1].cmd == _for ) && (cmdTmp[cmdStack-1].flag == cmd_loop ))
+		if (idx_var>-1)
 		{
 			unsigned short next_num;
 
 			ptr = cmdTmp[cmdStack-1].FOR_NUM_TOKENBUFFER;
-
 			globalVars[idx_var].var.value +=cmdTmp[cmdStack-1].step; 
-
 			next_num = FOR_NEXT_INT(ptr, &new_ptr);
 
 			if (cmdTmp[cmdStack-1].step > 0)
@@ -1157,8 +1200,26 @@ char *cmdNext(struct nativeCommand *cmd, char *tokenBuffer )
 					cmdStack--;
 				}
 			}
+			else setError(23,tokenBuffer);
+		}
+		else
+		{
+			setError(22,tokenBuffer);	
 		}
 	}
+	else	if (cmdTmp[cmdStack-1].cmd == _exit )
+	{
+		cmdStack --;
+	}
+	else
+	{
+		dump_prog_stack();	// wtf unexpected....
+		setError(22,tokenBuffer);
+	}
+
+	dump_prog_stack();
+
+	getchar();
 
 	return tokenBuffer;
 }
@@ -1305,6 +1366,11 @@ char *cmdEndProc(struct nativeCommand *cmd, char *tokenBuffer )
 				tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
 				proc_stack_frame--;		// move stack frame down.
 			}
+			else
+			{
+				dump_prog_stack();
+				setError(23,tokenBuffer);
+			}
 		}
 	}
 
@@ -1442,7 +1508,16 @@ char *cmdBracket(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *cmdBracketEnd(struct nativeCommand *cmd, char *tokenBuffer )
 {
+	unsigned int flags;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	while (cmdStack)
+	{
+		flags = cmdTmp[cmdStack-1].flag;
+
+		if  ( flags & (cmd_loop | cmd_never | cmd_onEol | cmd_proc | cmd_normal)) break;
+		cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
+	}
 
 	if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _procAndArgs )
 	{
@@ -1847,11 +1922,11 @@ char *_cmdExit(struct glueCommands *data, int nextToken )
 
 	while (exit_loops>1)
 	{
-		if (dropProgStackToType( cmd_loop )) cmdStack--;
+		if (dropProgStackToFlag( cmd_loop )) cmdStack--;
 		exit_loops--;
 	}
 
-	if (dropProgStackToType( cmd_loop ))
+	if (dropProgStackToFlag( cmd_loop ))
 	{
 		ptr = cmdTmp[cmdStack-1].tokenBuffer;
 		token = *((unsigned short *) (ptr - 2)) ;
@@ -1863,7 +1938,11 @@ char *_cmdExit(struct glueCommands *data, int nextToken )
 			case 0x0268:	// While
 			case 0x027E:	// DO
 
-				cmdStack --;
+				cmdTmp[cmdStack-1].cmd = _exit;
+				cmdTmp[cmdStack-1].flag = cmd_never ;
+
+getchar();
+
 				return ptr + ( *((unsigned short *) ptr) * 2 )-2;
 				break;
 
@@ -1911,11 +1990,12 @@ char *_cmdExitIf(struct glueCommands *data, int nextToken)
 
 	while (exit_loops>1)
 	{
-		if (dropProgStackToType( cmd_loop )) cmdStack--;
+		if (dropProgStackToFlag( cmd_loop )) cmdStack--;
 		exit_loops--;
 	}
 
-	if (dropProgStackToType( cmd_loop ))
+	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	if (dropProgStackToFlag( cmd_loop ))
 	{
 		ptr = cmdTmp[cmdStack-1].tokenBuffer;
 		token = *((unsigned short *) (ptr - 2)) ;
@@ -1927,9 +2007,9 @@ char *_cmdExitIf(struct glueCommands *data, int nextToken)
 			case 0x0268:	// While
 			case 0x027E:	// DO
 
-				cmdStack --;
-				proc_names_printf("exit from loop %04x\n", token);
-				ptr =  ptr + ( *((unsigned short *) ptr) * 2 )   ;
+				cmdTmp[cmdStack-1].cmd = _exit;
+				cmdTmp[cmdStack-1].flag = cmd_never ;
+				ptr =  ptr + ( *((unsigned short *) ptr) * 2 )-2   ;
 				return ptr;
 				break;
 
@@ -2229,7 +2309,7 @@ char *cmdExtension( struct nativeCommand *cmd, char *tokenBuffer )
 	{
 		if (_this -> lookup)
 		{
-			ext_cmd = (char* (*)(nativeCommand*, char*)) *((void **) (kitty_extensions[2].lookup + ext -> token));
+			ext_cmd = (char* (*)(nativeCommand*, char*)) *((void **) (kitty_extensions[ext-> ext].lookup + ext -> token));
 		}
 	}
 
@@ -2322,5 +2402,30 @@ char *cmdExec( struct nativeCommand *cmd, char *tokenBuffer )
 char *cmdSetAccessory( struct nativeCommand *cmd, char *tokenBuffer )
 {
 	return tokenBuffer;
+}
+
+char *cmdPrgUnder( struct nativeCommand *cmd, char *tokenBuffer )
+{
+	setStackNum(1);
+	return tokenBuffer;
+}
+
+char *_cmdCallEditor( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data -> stack + 1;
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	switch (args)
+	{
+		default:
+				setError(22,data->tokenBuffer);
+	}
+
+	return NULL;
+}
+
+char *cmdCallEditor(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _cmdCallEditor, tokenBuffer );
 }
 

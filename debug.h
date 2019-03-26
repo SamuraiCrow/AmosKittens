@@ -5,16 +5,32 @@
 #endif
 #endif
 
-// --------- debug options ---------------
+// --------- debug options --------------- (most common debug options)
 
 #define show_error_at_file_no
 #define show_proc_names_no
 #define show_token_numbers_no
 #define show_debug_printf_no
 #define show_debug_amal_no
-#define show_pass1_tokens_no
 #define show_array_no
 #define enable_engine_debug_output_no
+
+// --------- debug options pass1 ----------- (most debug options for pretest)
+
+#define show_pass1_tokens_no
+#define show_pass1_procedure_fixes_no
+#define show_pass1_end_of_file_no
+
+// ------------- CRC options ------------------ (keep this to no, unless you need to find a memory corruption bug)
+
+#define enable_ext_crc_no
+#define enable_vars_crc_no
+#define enable_bank_crc_no			// can find memory corruption in pass1
+
+// ------------ optimizer ----------------------
+
+#define run_program_yes
+#define enable_fast_execution_yes		// Some debug option do not work when this enabled.
 
 //------------- end of options -----------------
 
@@ -29,6 +45,7 @@ void dumpLineAddress();
 void dump_680x0_regs();
 void dumpScreenInfo();
 int getLineFromPointer( char *address );
+uint32_t mem_crc( char *mem, uint32_t size );
 
 #ifdef show_debug_printf_yes
 #define dprintf printf

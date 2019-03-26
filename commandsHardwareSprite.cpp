@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
@@ -12,7 +13,6 @@
 #endif
 
 #ifdef __linux__
-#include <stdint.h>
 #include "os/linux/stuff.h"
 #include <retromode.h>
 #include <retromode_lib.h>
@@ -167,5 +167,27 @@ char *hsSpriteBase(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdParm( _hsSpriteBase, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_hsSetSpriteBuffer( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+	}
+	else setError(22, data->tokenBuffer);
+
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *hsSetSpriteBuffer(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdNormal( _hsSetSpriteBuffer, tokenBuffer );
 	return tokenBuffer;
 }
