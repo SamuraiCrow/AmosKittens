@@ -25,6 +25,7 @@
 #include "commands.h"
 #include "commandsErrors.h"
 #include "errors.h"
+#include "label.h"
 
 extern int last_var;
 extern struct globalVar globalVars[];
@@ -32,7 +33,6 @@ extern unsigned short last_token;
 extern int tokenMode;
 extern int tokenlength;
 
-extern char *findLabel( char *name );
 extern int findVarPublic( char *name, int type );
 extern std::vector<struct label> labels;
 
@@ -59,6 +59,7 @@ char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 {
 	char *name = NULL;
 	unsigned short next_token; 
+	struct label *label;
 
 	onError = onErrorBreak;	// default.
 
@@ -73,7 +74,8 @@ char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 				if (name)
 				{
 					printf("name %s\n",name);
-					on_error_goto_location = findLabel(name);
+					struct label *label =  findLabel(name, procStcakFrame[proc_stack_frame].id);
+					on_error_goto_location = label -> tokenLocation;
 					onError = onErrorGoto;
 					free(name);
 				}
@@ -185,6 +187,7 @@ char *onErrorProc(char *ptr)
 
 char *_errError( struct glueCommands *data, int nextToken )
 {
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	int args = stack - data->stack +1 ;
 
 	if (args == 1)
@@ -198,7 +201,7 @@ char *_errError( struct glueCommands *data, int nextToken )
 
 char *errError(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _errError, tokenBuffer );
 	return tokenBuffer;
 }
@@ -207,15 +210,17 @@ char *errError(struct nativeCommand *cmd, char *tokenBuffer)
 char *errResume(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	char *name = NULL;
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	name_from_ref(&tokenBuffer, &name);
 
 	if (name)	// has args
 	{
 		char *ret;
+		struct label *label =  findLabel(name, procStcakFrame[proc_stack_frame].id);
+		ret = label -> tokenLocation;
 
-		ret = findLabel(name);
 		free(name);
 
 		if (ret) 
@@ -243,16 +248,19 @@ char *errResume(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_errTrap( struct glueCommands *data, int nextToken )
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (onErrorTemp)
 	{
 		onError = onErrorTemp;
 		onErrorTemp = NULL;
 
-		kittyError.trapCode = kittyError.code;
-		kittyError.code = 0;
-		kittyError.newError = false;
+		if (kittyError.code)
+		{
+			kittyError.trapCode = kittyError.code;
+			kittyError.code = 0;
+			kittyError.newError = false;
+		}
 	}
 
 	return NULL;
@@ -260,27 +268,27 @@ char *_errTrap( struct glueCommands *data, int nextToken )
 
 char *errTrap(nativeCommand *err, char *tokenBuffer)
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
-
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	onErrorTemp = onError;
 	onError = onErrorIgnore;
 	stackCmdFlags( _errTrap, tokenBuffer, cmd_onNextCmd | cmd_onEol );
-
 	return tokenBuffer;
 }
 
 
 char *errErrn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	setStackNum( kittyError.code );
 	return tokenBuffer;
 }
 
 char *errErrTrap(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	setStackNum( kittyError.trapCode );
+	kittyError.trapCode = 0;
+
 	return tokenBuffer;
 }
 

@@ -11,6 +11,13 @@ extern void	setStackDecimal( double decimal );
 extern void	setStackStr( char *str );
 extern void	setStackStrDup(const char *str);
 extern void	setStackNone( void );
+extern unsigned short getLastProgStackToken();
+
+#define setStackHiddenCondition()			\
+			kittyStack[stack].str = NULL;		\
+			kittyStack[stack].value = 0;		\
+			kittyStack[stack].state = state_hidden_subData;	\
+			stack++;
 
 extern int		getStackNum( int n );
 extern double	getStackDecimal( int n );
@@ -35,6 +42,7 @@ extern void correct_for_hidden_sub_data();
 extern char *flushCmdParaStack( int nextToken );
 extern bool dropProgStackToProc( char *(*fn) (struct glueCommands *data, int nextToken ) );
 extern bool dropProgStackToFlag( int flag );
+extern bool dropProgStackAllFlag( int flag );
 
 extern void stack_get_if_int( int n, int *ret );
 

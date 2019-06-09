@@ -24,6 +24,7 @@ typedef void * APTR;
 #define token_power	0xFFF6
 #define token_or		0xFF4C
 #define token_and		0xFF58
+#define token_xor		0xFF3E
 #define token_mod		0xFFD4
 
 #define token_more_or_equal	0xFF8E
@@ -34,6 +35,8 @@ typedef void * APTR;
 #define token_equal			0xFFA2
 #define token_more			0xFFB6
 #define token_less				0xFFAC
+
+#define token_trap				0x259A
 
 #define joy_up 1
 #define joy_down 2
@@ -75,10 +78,12 @@ enum
 #define cmd_onBreak		256
 #define cmd_never			512
 #define cmd_exit			1024
-
+#define cmd_true			2048
+#define cmd_false			4096
 
 enum
 {
+	type_undefined = 0,
 	type_int = 0,
 	type_float,		// 1
 	type_string,		// 2
@@ -94,6 +99,25 @@ struct nativeCommand
 	const char *name;
 	int size;
 	char *(*fn) (struct nativeCommand *cmd, char *tokenBuffer);
+};
+
+enum 
+{
+	glue_option_for_int = 1,
+	glue_option_for_float
+};
+
+
+struct kittyForInt
+{
+	int step;	
+	int have_to;
+};
+
+struct kittyForDouble 
+{
+	double step;	
+	double have_to;
 };
 
 struct glueCommands
@@ -114,13 +138,11 @@ struct glueCommands
 	};
 
 	int lastVar;
-	int lastToken;
+	int token;
 
-	union
-	{
-		int step;	
-		int have_to;
-	};
+	int optionsType;
+	struct kittyForInt optionsInt;
+	struct kittyForDouble optionsFloat;
 
 	int stack;
 	int parenthesis_count;
@@ -173,7 +195,12 @@ struct kittyData
 		char *tokenBufferPos;	
 	};
 
-	int index;
+	union		// we don't need to wast space.
+	{
+		int index;
+		int prev_last_token;
+	};
+
 	int cells;
 
 	union
@@ -189,6 +216,8 @@ struct kittyData
 
 struct label
 {
+	int proc;
+	char *loopLocation;
 	char *tokenLocation;
 	char *name;
 };
@@ -200,6 +229,13 @@ struct globalVar
 	int proc;	// so vars can be attached to proc.
 	int pass1_shared_to;	// pass1 should only use this, as it will change.
 	bool isGlobal;
+};
+
+struct stackFrame
+{
+	int id;
+//	struct kittyData *var;
+	char *dataPointer;
 };
 
 struct defFn
@@ -247,16 +283,26 @@ struct zone
 	int y1;
 };
 
+struct PacPicContext
+{
+	int w;
+	int h;
+	int ll;
+	int d;
+	unsigned char* raw;
+	unsigned short mode;
+};
+
 #define stackIfSuccess()					\
 	cmdTmp[cmdStack].cmd = _ifSuccess;		\
 	cmdTmp[cmdStack].tokenBuffer = NULL;	\
-	cmdTmp[cmdStack].flag = cmd_never;	\
+	cmdTmp[cmdStack].flag = cmd_never | cmd_true;	\
 	cmdStack++; \
 
 #define stackIfNotSuccess()					\
 	cmdTmp[cmdStack].cmd = _ifNotSuccess;		\
 	cmdTmp[cmdStack].tokenBuffer = NULL;	\
-	cmdTmp[cmdStack].flag = cmd_never;	\
+	cmdTmp[cmdStack].flag = cmd_never | cmd_false;	\
 	cmdStack++; \
 
 #define stackCmdNormal( fn, buf )				\
@@ -266,7 +312,9 @@ struct zone
 	cmdTmp[cmdStack].lastVar = last_var;	\
 	cmdTmp[cmdStack].stack = stack; \
 	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
+	cmdTmp[cmdStack].token = 0; \
 	cmdStack++; \
+	token_is_fresh = false; 
 
 #define stackCmdLoop( fn, buf )				\
 	cmdTmp[cmdStack].cmd = fn;		\
@@ -298,7 +346,7 @@ struct zone
 	cmdTmp[cmdStack].flag = cmd_index ;	\
 	cmdTmp[cmdStack].lastVar = last_var;	\
 	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].lastToken = last_tokens[parenthesis_count]; \
+	cmdTmp[cmdStack].token = 0; \
 	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
 	cmdStack++; } \
 
@@ -308,16 +356,28 @@ struct zone
 	cmdTmp[cmdStack].flag = cmd_para | cmd_onComma | cmd_onNextCmd | cmd_onEol;	\
 	cmdTmp[cmdStack].lastVar = last_var;	\
 	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].lastToken = last_tokens[parenthesis_count]; \
+	cmdTmp[cmdStack].token = 0; \
+	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
+	cmdStack++; \
+	token_is_fresh = false; 
+
+#define stackCmdMathOperator(fn,_buffer,_token)				\
+	cmdTmp[cmdStack].cmd = fn;		\
+	cmdTmp[cmdStack].tokenBuffer = _buffer;	\
+	cmdTmp[cmdStack].flag = cmd_para | cmd_onComma | cmd_onNextCmd | cmd_onEol; \
+	cmdTmp[cmdStack].lastVar = last_var;	\
+	cmdTmp[cmdStack].stack = stack; \
+	cmdTmp[cmdStack].token = _token; \
 	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
 	cmdStack++; \
 
-#define stackCmdOnBreakOrNewCmd( fn, buf )				\
+#define stackCmdOnBreakOrNewCmd(fn,buf,_token)				\
 	cmdTmp[cmdStack].cmd = fn;		\
 	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = cmd_onBreak | cmd_onComma | cmd_onNextCmd | cmd_onEol;	\
+	cmdTmp[cmdStack].flag = cmd_para | cmd_onBreak | cmd_onComma | cmd_onNextCmd | cmd_onEol;	\
 	cmdTmp[cmdStack].lastVar = last_var;	\
 	cmdTmp[cmdStack].stack = stack; \
+	cmdTmp[cmdStack].token = _token; \
 	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
 	cmdStack++; \
 
@@ -344,7 +404,7 @@ extern int stack;
 extern int cmdStack;
 extern int procStackCount;
 
-extern unsigned short last_tokens[MAX_PARENTHESIS_COUNT];
+//extern unsigned short last_tokens[MAX_PARENTHESIS_COUNT];
 
 extern char *(*jump_mode) (struct reference *ref, char *ptr);
 extern char *jump_mode_goto (struct reference *ref, char *ptr);
@@ -355,7 +415,9 @@ extern int var_param_num;
 extern double var_param_decimal;
 
 extern int proc_stack_frame;
-extern char *data_read_pointers[PROC_STACK_SIZE];
+
+extern struct stackFrame procStcakFrame[PROC_STACK_SIZE];
+
 extern char *_file_start_;
 extern char *_file_end_;
 
@@ -370,8 +432,7 @@ extern void (**do_input) ( struct nativeCommand *cmd, char *tokenBuffer );
 extern char *(**do_to) ( struct nativeCommand *cmd, char *tokenBuffer );
 
 extern void (*do_breakdata) ( struct nativeCommand *cmd, char *tokenBuffer );
-
-
+extern bool token_is_fresh;
 extern struct glueCommands input_cmd_context;
 
 #endif

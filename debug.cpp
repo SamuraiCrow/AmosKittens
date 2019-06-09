@@ -67,7 +67,7 @@ char *_andData (struct glueCommands *data, int nextToken);
 char *_ifSuccess (struct glueCommands *data, int nextToken);
 char *_ifThenSuccess (struct glueCommands *data, int nextToken);
 char *_machinePeek(struct glueCommands *data, int nextToken);
-char *_cmdStart(struct glueCommands *data, int nextToken);
+char *_bankStart(struct glueCommands *data, int nextToken);
 char *_chr(struct glueCommands *data, int nextToken);
 char *_gfxPoint(struct glueCommands *data, int nextToken);
 char *_mid(struct glueCommands *data, int nextToken);
@@ -113,7 +113,7 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_ifSuccess,"If Success" },
 	{_ifThenSuccess,"If Then Success" },
 	{_machinePeek,"Peek" },
-	{_cmdStart,"Start" },
+	{_bankStart,"Start" },
 	{_chr,"Chr$" },
 	{_gfxPoint,"Point" },
 	{_mid,"Mid" },
@@ -162,7 +162,9 @@ void dump_labels()
 
 	for (n=0;n<labels.size();n++)
 	{
-		printf("%d: tokenLocation: %08x, Name: %s\n" ,n, labels[n].tokenLocation, labels[n].name);
+		printf("%d: tokenLocation: %08x, Name: %s - in proc %d\n" ,n, 
+				labels[n].tokenLocation, 
+				labels[n].name, labels[n].proc);
 
 	}
 }
@@ -351,7 +353,7 @@ void dump_prog_stack()
 		printf("cmdTmp[%d].tokenBuffer = %08x  - at line: %d \n", n, cmdTmp[n].tokenBuffer, getLineFromPointer(cmdTmp[n].tokenBuffer));
 		printf("cmdTmp[%d].flag = %08x\n", n, cmdTmp[n].flag);
 		printf("cmdTmp[%d].lastVar = %d\n", n, cmdTmp[n].lastVar);
-		printf("cmdTmp[%d].lastToken = %04x\n", n, cmdTmp[n].lastToken);
+		printf("cmdTmp[%d].token = %04x\n", n, cmdTmp[n].token);
 		printf("cmdTmp[%d].stack = %d\n\n", n, cmdTmp[n].stack);
 	}
 }

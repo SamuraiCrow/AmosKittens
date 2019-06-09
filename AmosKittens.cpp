@@ -66,6 +66,7 @@
 #include "AmalCompiler.h"
 #include "channel.h"
 #include "spawn.h"
+#include "label.h"
 
 #include "ext_compact.h"
 #include "ext_turbo.h"
@@ -103,7 +104,6 @@ struct retroScreen *screens[8] ;
 int parenthesis_count = 0;
 int cmdStack = 0;
 int procStackCount = 0;
-unsigned short last_tokens[MAX_PARENTHESIS_COUNT];
 int last_var = 0;
 int32_t tokenlength;
 
@@ -114,7 +114,7 @@ struct extension_lib	kitty_extensions[32];
 
 unsigned short token_not_found = 0xFFFF;	// so we know its not a token, token 0 exists.
 
-char *data_read_pointers[PROC_STACK_SIZE];
+struct stackFrame procStcakFrame[PROC_STACK_SIZE];
 
 char *_get_var_index( glueCommands *self, int nextToken);
 
@@ -129,6 +129,7 @@ int tokenMode = mode_standard;
 
 struct retroSprite *icons = NULL;
 struct retroSprite *sprite = NULL;
+struct retroSprite *patterns = NULL;
 
 struct retroSpriteObject bobs[64];
 
@@ -157,17 +158,22 @@ struct glueCommands input_cmd_context;
 extern char *nextToken_pass1( char *ptr, unsigned short token );
 
 bool breakpoint = false;
+bool token_is_fresh = true;
 
 const char *str_dump_stack = "dump stack";
 const char *str_dump_prog_stack = "dump prog stack";
+const char *str_dump_vars = "dump vars";
+const char *str_dump_banks = "dump banks";
+const char *str_dump_screen_info = "dump screen info"; 
+
 const char *str_breakpoint_on = "breakpoint on";
 const char *str_breakpoint_off = "breakpoint off";
+
 const char *str_warning = "warning";
 const char *str_pause = "pause";
 const char *str_hint = "hint ";
 const char *str_show_var = "show var ";
-const char *str_dump_banks = "dump banks";
-const char *str_dump_screen_info = "dump screen info"; 
+
 const char *str_time_start = "time start";
 const char *str_time_end = "time end";
 
@@ -207,6 +213,29 @@ void free_video()
 
 struct timeval debug_time_start,debug_time_end;
 
+bool show_var ( char *ptr, char *var_name, int proc )
+{
+	int ref = findVar( var_name, false, type_int, proc );
+
+	if (ref)
+	{
+		printf("line %d, int var: [%s]=%d\n",getLineFromPointer( ptr ), var_name, globalVars[ref-1].var.value);
+		return true;
+	}
+	else
+	{
+		ref = findVar( var_name, false, type_string, proc );
+
+		if (ref)
+		{
+			printf("line %d, string var: [%s]=%s\n",getLineFromPointer( ptr ), var_name, globalVars[ref-1].var.str);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 char *cmdRem(nativeCommand *cmd, char *ptr)
 {
 	int length = *((short *) ptr);
@@ -217,98 +246,77 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 		char *txt = strndup( ptr + 3, length );
 		if (txt)
 		{
-			if (strncmp(txt,str_dump_screen_info,strlen(str_dump_screen_info))==0)
+			if (strncmp(txt,str_dump_vars,strlen(str_dump_vars))==0)
+			{
+				dump_global();
+			}
+			else if (strncmp(txt,str_dump_screen_info,strlen(str_dump_screen_info))==0)
 			{
 				dumpScreenInfo();
 			}
-
-			if (strncmp(txt,str_dump_banks,strlen(str_dump_banks))==0)
+			else if (strncmp(txt,str_dump_banks,strlen(str_dump_banks))==0)
 			{
 				dump_banks();
 			}
-
-			if (strncmp(txt,str_hint,strlen(str_hint))==0)
+			else if (strncmp(txt,str_hint,strlen(str_hint))==0)
 			{
 				printf("stack %d at line %d, hint: %s\n",stack, getLineFromPointer( ptr ), txt+strlen(str_hint));
 			}
-
-			if (strncmp(txt,str_dump_stack,strlen(str_dump_stack))==0)
+			else if (strncmp(txt,str_dump_stack,strlen(str_dump_stack))==0)
 			{
 				printf("stack %d at line %d\n",stack, getLineFromPointer( ptr ));
 			}
-
-			if (strncmp(txt,str_dump_prog_stack,strlen(str_dump_stack))==0)
+			else if (strncmp(txt,str_dump_prog_stack,strlen(str_dump_stack))==0)
 			{
 				dump_prog_stack();
 				printf("<press enter to continue>\n");
 				getchar();
 			}
-
-			if (strncmp(txt,str_pause,strlen(str_pause))==0)
+			else if (strncmp(txt,str_pause,strlen(str_pause))==0)
 			{
 				printf("line %d -- <press enter to continue>\n", getLineFromPointer( ptr ));
 				getchar();
 			}
-
-			if (strncmp(txt,str_show_var,strlen(str_show_var))==0)
+			else if (strncmp(txt,str_show_var,strlen(str_show_var))==0)
 			{
 				char *var_name = txt +strlen(str_show_var);
 				char *c;
-				int ref;
 
 				for (c=var_name;*c;c++) if (*c==' ') *c = 0;
 
-				ref = findVar( var_name, false, type_int, 0 );
-
-				if (ref)
+				if (show_var( ptr, var_name, procStcakFrame[ proc_stack_frame].id ) == false )
 				{
-					printf("line %d, int var: [%s]=%d\n",getLineFromPointer( ptr ), var_name, globalVars[ref-1].var.value);
-				}
-				else
-				{
-					ref = findVar( var_name, false, type_string, 0 );
-
-					if (ref)
+					if (show_var( ptr, var_name, 0) == false )
 					{
-						printf("line %d, int var: [%s]=%s\n",getLineFromPointer( ptr ), var_name, globalVars[ref-1].var.str);
-					}
-					else
-					{
-						printf("line %d, int var: [%s] is not found\n",getLineFromPointer( ptr ), var_name);
+						printf("line %d, var: [%s] not found\n", getLineFromPointer( ptr ), var_name);
 					}
 				}
+				getchar();
 			}
-
-			if (strncmp(txt,str_breakpoint_on,strlen(str_breakpoint_on))==0)
+			else if (strncmp(txt,str_breakpoint_on,strlen(str_breakpoint_on))==0)
 			{
 				breakpoint = true;
 			}
-
-			if (strncmp(txt,str_breakpoint_off,strlen(str_breakpoint_off))==0)
+			else if (strncmp(txt,str_breakpoint_off,strlen(str_breakpoint_off))==0)
 			{
 				breakpoint = false;
 			}
-
-			if (strncmp(txt,str_warning,strlen(str_warning))==0)
+			else if (strncmp(txt,str_warning,strlen(str_warning))==0)
 			{
 				printf("**********************************\n");
 				printf(" %s\n",txt+strlen(str_warning));
 				printf("**********************************\n");
 			}
-
-			if (strncmp(txt,str_time_start,strlen(str_time_start))==0)
+			else if (strncmp(txt,str_time_start,strlen(str_time_start))==0)
 			{
 				printf("time recorded\n");
 				gettimeofday(&debug_time_start, NULL);
 			}
-
-			if (strncmp(txt,str_time_end,strlen(str_time_end))==0)
+			else if (strncmp(txt,str_time_end,strlen(str_time_end))==0)
 			{
 				gettimeofday(&debug_time_end, NULL);
 				printf("total time %f seconds\n",	(double) (debug_time_end.tv_usec - debug_time_start.tv_usec) / 1000000 +
 											(double) (debug_time_end.tv_sec - debug_time_start.tv_sec)  );
-
-//				getchar();
 			}
 
 			free(txt);
@@ -333,6 +341,7 @@ char *nextCmd(nativeCommand *cmd, char *ptr)
 		flags = cmdTmp[cmdStack-1].flag;
 
 		printf("flags %08x\n",flags);
+
 		if  ( ! (flags & cmd_onNextCmd) ) break;		// needs to be include tags, (if commands be excuted on endOfLine or Next command)
 		ret = cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
 
@@ -346,6 +355,7 @@ char *nextCmd(nativeCommand *cmd, char *ptr)
 
 	do_to[parenthesis_count] = do_to_default;
 	tokenMode = mode_standard;
+	token_is_fresh = true;
 
 	if (ret) return ret -2;		// when exit +2 token 
 
@@ -373,13 +383,11 @@ char *cmdNewLine(nativeCommand *cmd, char *ptr)
 
 	do_to[parenthesis_count] = do_to_default;
 	tokenMode = mode_standard;
+	token_is_fresh = true;
 
 	if (breakpoint)
 	{
 		printf("breakpoint at line %d - <press enter for next line>\n",getLineFromPointer( ptr ) );
-
-//		dump_stack();
-//		dump_global();
 		getchar();
 	}
 
@@ -441,15 +449,10 @@ char *_get_var_index( glueCommands *self , int nextToken )
 
 		if ((_last_var_index >= 0)  && (_last_var_index<var->count))
 		{
-			if ( correct_order( self -> lastToken,  nextToken ) == false )
+			if ( correct_order( getLastProgStackToken(),  nextToken ) == false )
 			{
 				dprintf("---hidden ( symbol \n");
-
-				// hidden ( condition.
-				kittyStack[stack].str = NULL;
-				kittyStack[stack].value = 0;
-				kittyStack[stack].state = state_hidden_subData;
-				stack++;
+				setStackHiddenCondition();
 			}
 
 			switch (var -> type & 3)
@@ -570,8 +573,6 @@ char *cmdLabelOnLine(nativeCommand *cmd, char *ptr)
 	return ptr + ref -> length ;
 }
 
-extern char *findLabel( char *name );
-
 
 char *cmdVar(nativeCommand *cmd, char *ptr)
 {
@@ -579,6 +580,8 @@ char *cmdVar(nativeCommand *cmd, char *ptr)
 	unsigned short next_token = *((short *) (ptr+sizeof(struct reference)+ref->length));
 	
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	token_is_fresh = false;
 
 	last_var = ref -> ref;
 
@@ -588,13 +591,10 @@ char *cmdVar(nativeCommand *cmd, char *ptr)
 	}
 	else
 	{
-		if ( correct_order( last_tokens[parenthesis_count],  next_token ) == false )
+		if ( correct_order( getLastProgStackToken(),  next_token ) == false )
 		{
-			// hidden ( condition.
-			kittyStack[stack].str = NULL;
-			kittyStack[stack].value = 0;
-			kittyStack[stack].state = state_hidden_subData;
-			stack++;
+			dprintf(" hidden ( condition.\n");
+			setStackHiddenCondition();
 		}
 
 		if (ref -> ref)
@@ -637,13 +637,10 @@ char *cmdQuote(nativeCommand *cmd, char *ptr)
 	length2 += (length & 1);		// align to 2 bytes
 	next_token = *((short *) (ptr+2+length2) );
 
-	if ( correct_order( last_tokens[parenthesis_count],  next_token ) == false )
+	if ( correct_order( getLastProgStackToken(),  next_token ) == false )
 	{
 		// hidden ( condition.
-		kittyStack[stack].str = NULL;
-		kittyStack[stack].value = 0;
-		kittyStack[stack].state = state_hidden_subData;
-		stack++;
+		setStackHiddenCondition();
 	}
 
 	if (kittyStack[stack].str) free(kittyStack[stack].str);
@@ -665,35 +662,35 @@ char *cmdNumber(nativeCommand *cmd, char *ptr)
 
 	// check if - or + comes before *, / or ; symbols
 
-	if ( correct_order( last_tokens[parenthesis_count],  next_token ) == false )
+	if ( correct_order( getLastProgStackToken(),  next_token ) == false )
 	{
 		dprintf("---hidden ( symbol \n");
-
-		// hidden ( condition.
-		kittyStack[stack].str = NULL;
-		kittyStack[stack].value = 0;
-		kittyStack[stack].state = state_hidden_subData;
-		stack++;
+		setStackHiddenCondition();
 	}
-
-	proc_names_printf("%s:%s:%d \n",__FILE__,__FUNCTION__,__LINE__);
 
 	setStackNum( *((int *) ptr) );
 	kittyStack[stack].state = state_none;
 	flushCmdParaStack( next_token );
 
-	proc_names_printf("%s:%s:%d \n",__FILE__,__FUNCTION__,__LINE__);
-
 	return ptr;
 }
 
+
+#define fast_float_yes
+#define fast_exp_yes
+
+#ifdef fast_float_yes
+
 double _float[256];
+double _exp[0x7F];
 
 void make_float_lookup()
 {
-	double f;
 	unsigned int number1;
 	int n = 0;
+	int e;
+	int ee;
+	double f;
 
 	proc_names_printf("%s:%s:%d \n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -706,47 +703,70 @@ void make_float_lookup()
 		}
 		_float[number1]=f;
 	}
+
+
+	for (n=0;n<=0x7F;n++)
+	{
+		f = 1.0f;
+		e = n & 0x3F;
+		if ( ( n & 0x40)  == 0)	e = -(65 - e);
+
+		ee = e;
+
+		if (e==0) { f/=2.0; }
+		else if (e<0) { while (e) {  f /= 2.0f; e++; } }
+		else if (e>0) { while (--e) { f *= 2.0; } }
+
+		_exp[n]=f;
+
+	}
 }
+
+#endif
 
 char *cmdFloat(nativeCommand *cmd,char *ptr)
 {
 	double f = 0.0f;
-	unsigned short next_token = *((short *) (ptr+4) );
+	unsigned short next_token = *((short *) (ptr+4 ));
 	proc_names_printf("%s:%d \n",__FUNCTION__,__LINE__);
 
 	// check if - or + comes before *, / or ; symbols
 
-	if ( correct_order( last_tokens[parenthesis_count],  next_token ) == false )
+	if ( correct_order( getLastProgStackToken(),  next_token ) == false )
 	{
 		dprintf("---hidden ( symbol \n");
-
-		// hidden ( condition.
-		kittyStack[stack].str = NULL;
-		kittyStack[stack].value = 0;
-		kittyStack[stack].state = state_hidden_subData;
-		stack++;
+		setStackHiddenCondition();
 	}
 
 	{
 		unsigned int data = *((unsigned int *) ptr);
 		unsigned int number1 = data >> 8;
+
+#ifdef fast_exp_no
 		int e = (data & 0x3F) ;
-
 		if ( (data & 0x40)  == 0)	e = -(65 - e);
+#endif
 
-#if 1
+#ifdef fast_float_yes
 		f = _float[ (number1 & 0xFF0000) >> 16 ] ;
 		f += (_float[ (number1  & 0xFF00) >> 8 ] ) / (double) (1<<8);
 		f += _float[ (number1  & 0xFF) ]  / (double) (1<<16);
 #else
+
 		for (int n=23;n>-1;n--)
 		{
-			if ((1<<n)&number1) f += 1.0f / (double) (1<<(23-n));
+			if ((1<<n) & number1) f += 1.0f / (double) (1<<(23-n));
 		}
 #endif
 
-		if (e>0) { while (--e) { f *= 2.0; } }
-		if (e<0) { while (e) {  f /= 2.0f; e++; } }
+#if defined(fast_float_yes) && defined(fast_exp_yes)
+		f *= _exp[ data & 0x7F ];
+#else
+		if (e==0) { f/=2.0; }
+		else if (e<0) { while (e) {  f /= 2.0f; e++; } }
+		else if (e>0) { while (--e) { f *= 2.0; } }
+#endif
+
 	}
 
 	setStackDecimal( f );
@@ -789,8 +809,8 @@ struct nativeCommand nativeCommands[]=
 	{0x010E,"Zone$", 0, ocZoneStr },
 	{0x011C,"Border$", 0, textBorderStr },			// needs more work.
 	{0x012C,"Double Buffer",0,gfxDoubleBuffer },
-	{0x0140, "Start", 0, cmdStart },
-	{0x014C, "Length", 0, cmdLength },
+	{0x0140, "Start", 0, bankStart },
+	{0x014C, "Length", 0, bankLength },
 	{0x015A,"Doke",0,machineDoke},
 	{0x019C, "Every On", 0, cmdEveryOn },
 	{0x01AA, "Every Off", 0, cmdEveryOff },
@@ -949,7 +969,8 @@ struct nativeCommand nativeCommands[]=
 	{0x0B20,"Auto View Off", 0, ocAutoViewOff },
 	{0x0B34,"Auto View On", 0, ocAutoViewOn },
 	{0x0B58,"Screen Width", 0, gfxScreenWidth },
-	{0x0B74,"Screen Height", 0, gfxScreenHeight },
+	{0x0B88,"Screen Height", 0, gfxScreenHeight },		// =Screen Height(screen nr)
+	{0x0B74,"Screen Height", 0, gfxScreenHeight },		// =Screen Height
 	{0x0B90,"Get Palette",0,gfxGetPalette },
 	{0x0BAE,"Cls",0,gfxCls},
 	{0x0BB8,"Cls color",0,gfxCls},
@@ -1005,13 +1026,14 @@ struct nativeCommand nativeCommands[]=
 	{0x0EE8,"Paint",0, gfxPaint },
 	{0x0EF8,"Paint",0,gfxPaint },		// Paint n,n,n
 	{0x0F04,"Gr Locate",0,gfxGrLocate },
-	{0x0F16,"Text Length",0,gfxTextLength },
-	{0x0F3A,"Text Base",0,gfxTextBase },
-	{0x0F4A,"Text",0,gfxText },
-	{0x0F5A,"Set Text",0,gfxSetText },
+	{0x0F16,"Text Length",0,textTextLength },
+	{0x0F28,"Text Styles",0,textTextStyles },
+	{0x0F3A,"Text Base",0,textTextBase },
+	{0x0F4A,"Text",0,textText },
+	{0x0F5A,"Set Text",0,textSetText },
 	{0x0F6A,"Set Paint",0,gfxSetPaint },			// dummy function
-	{0x0F7A,"Get Fonts",0,fontsGetRomFonts },
-	{0x0F8A,"Get Disc Fonts",0,fontsGetRomFonts },
+	{0x0F7A,"Get Fonts",0,fontsGetAllFonts },
+	{0x0F8A,"Get Disc Fonts",0,fontsGetDiscFonts },
 	{0x0F9E,"Get Rom Fonts",0,fontsGetRomFonts },
 	{0x0FB2,"Set Font",0,fontsSetFont },
 	{0x0FC2,"Fonts$",0,fontsFontsStr },
@@ -1023,12 +1045,13 @@ struct nativeCommand nativeCommands[]=
 	{0x1044,"Ink",0,gfxInk },
 	{0x1050,"Ink",0,gfxInk },
 	{0x105A,"Ink n,n,n",0,gfxInk },
-	{0x1066,"Gr Writing",0,gfxGrWriting },			// needs more work.
+	{0x1066,"Gr Writing",0,textGrWriting },			// needs more work.
 	{0x1078,"Clip",0,gfxClip },					// dummy function
 	{0x1084,"Clip",0,gfxClip },					// dummy function
 	{0x10AC,"Set Tempras",0,gfxSetTempras },		// dummy function
 	{0x10B6,"Appear",0,gfxAppear },
 	{0x10D6,"zoom",0,gfxZoom },
+	{0x10F4,"Get CBlock",0,bgGetCBlock },
 	{0x1146,"Get Block",0,bgGetBlock },
 	{0x1160,"Get Block [n,x,y,w,h,?] ",0,bgGetBlock },
 	{0x1172,"Put Block",0,bgPutBlock },	// Put Block (Num)
@@ -1070,8 +1093,11 @@ struct nativeCommand nativeCommands[]=
 	{0x13D2,"Pen",0,textPen },
 	{0x13DC,"Paper",0,textPaper },
 	{0x13E8,"Centre",0,textCentre },
+	{0x13F6,"Border",0,textBorder },
 	{0x1408,"Writing",0,textWriting },
+	{0x1418,"Writing",0,textWriting },
 	{0x1422,"Title Top",0,textTitleTop },
+	{0x1432,"Title Bottom",0,textTitleBottom },
 	{0x1446,"Curs Off",0,textCursOff },
 	{0x1454,"Curs On",0,textCursOn },
 	{0x1462,"textInverseOff",0,textInverseOff },
@@ -1120,13 +1146,13 @@ struct nativeCommand nativeCommands[]=
 	{0x17C4,"Set Dir",0,discSetDir },
 	{0x17D4,"Load iff",0, gfxLoadIff },
 	{0x17E4,"Load Iff",0, gfxLoadIff },
-	{0x180C, "Bload",0,cmdBload },
-	{0x181A, "Bsave", 0, cmdBsave },
+	{0x180C, "Bload",0,bankBload },
+	{0x181A, "Bsave", 0, bankBsave },
 	{0x182A,"PLoad",0,machinePload},
-	{0x1838,"Save",0,cmdSave },
-	{0x1844,"Save",0,cmdSave },	// save name,bank
-	{0x184E,"Load",0,cmdLoad },
-	{0x185A,"Load",0,cmdLoad },
+	{0x1838,"Save",0,bankSave },
+	{0x1844,"Save",0,bankSave },	// save name,bank
+	{0x184E,"Load",0,bankLoad },
+	{0x185A,"Load",0,bankLoad },
 	{0x1864,"Dfree",0,discDfree },
 	{0x1870,"Makedir",0,discMakedir },
 	{0x187C,"Lof(f)", 0, discLof },
@@ -1161,17 +1187,20 @@ struct nativeCommand nativeCommands[]=
 	{0x1B8A,"Set Bob",0,boSetBob },
 	{0x1B9E,"Bob",0,boBob },
 	{0x1BAE,"Get Sprite Palette",0,hsGetSpritePalette },
-	{0x1BD0,"Get Sprite",0,hsGetSprite },
+	{0x1BD0,"Get Sprite",0,boGetBob },	//  GetBob and GetSprite is the same.
 	{0x1BFC,"Get Bob",0,boGetBob },
 	{0x1C14,"Get Bob",0,boGetBob },	// get bob 0,0,0,0 to 0,0
 	{0x1C42,"Del Bob",0,boDelBob },
+	{0x1C5C,"Del Icon",0,bgDelIcon },
+	{0x1C6C,"Del Icon",0,bgDelIcon },
 	{0x1CA6,"Get Icon Palette", 0, bgGetIconPalette },
 	{0x1CC6,"Get Icon", 0, bgGetIcon },
 	{0x1CF0,"Put Bob",0,boPutBob },
 	{0x1CFE,"Paste Bob",0,boPasteBob },
 	{0x1D12,"Paste Icon", 0, bgPasteIcon },
 	{0x1D28,"Make Mask", 0, ocMakeMask },
-	{0x1D56,"Icon Make Mask", 0, ocIconMakeMask },
+	{0x1D56,"Make Icon Mask", 0, bgMakeIconMask },
+	{0x1D6C,"Make Icon Mask", 0, bgMakeIconMask },
 	{0x1DA2,"Hot Spot", 0, boHotSpot },
 	{0x1DAE,"Priority On",0,ocPriorityOn },
 	{0x1DC0,"Priority Off",0,ocPriorityOff },
@@ -1213,12 +1242,12 @@ struct nativeCommand nativeCommands[]=
 	{0x20AE,"Update",0,ocUpdate },
 	{0x20BA,"X Bob",0,boXBob},
 	{0x20C6,"Y Bob",0,boYBob},
-	{0x20F2,"Reserve As Work",0,cmdReserveAsWork },
-	{0x210A,"Reserve As Chip Work",0,cmdReserveAsChipWork },
-	{0x2128,"Reserve As Data",0, cmdReserveAsData },
-	{0x2140,"Reserve As Chip Data", 0, cmdReserveAsChipData },
-	{0x215E, "Erase", 0, cmdErase },
-	{0x216A,"List Bank", 0, cmdListBank },
+	{0x20F2,"Reserve As Work",0,bankReserveAsWork },
+	{0x210A,"Reserve As Chip Work",0,bankReserveAsChipWork },
+	{0x2128,"Reserve As Data",0, bankReserveAsData },
+	{0x2140,"Reserve As Chip Data", 0, bankReserveAsChipData },
+	{0x215E, "Erase", 0, bankErase },
+	{0x216A,"List Bank", 0, bankListBank },
 	{0x217A,"Chip Free",0,cmdChipFree },
 	{0x218A,"Fast Free",0,cmdFastFree },
 	{0x219A,"Fill",0,machineFill},
@@ -1250,6 +1279,7 @@ struct nativeCommand nativeCommands[]=
 	{0x2416,"Priority Reverse Off",0,ocPriorityReverseOff },
 	{0x2430,"Dev First$",0,discDevFirstStr },
 	{0x2442,"Dev Next$",0,discDevNextStr },
+	{0x2464,"Vrev Block",0,bgVrevBlock },
 	{0x2476,"Hrev(n)",0,boHrev},
 	{0x2482,"Vrev(n)",0,boVrev},
 	{0x248e,"Rev(n)",0,boRev},
@@ -1263,16 +1293,21 @@ struct nativeCommand nativeCommands[]=
 	{0x259A,"Trap", 0, errTrap },
 	{0x25A4,"Else If", 2, cmdElseIf },
 	{0x2694,"Call Editor", 0, cmdCallEditor },
-	{0x26D8,"Erase All", 0, cmdEraseAll },
+	{0x26D8,"Erase All", 0, bankEraseAll },
 	{0x26E8,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$)
 	{0x2704,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$,value,b$)
 	{0x2710,"Dialog Box",0,guiDialogBox },		// d=Dialog Box(a$,value,b$,n,n)
+	{0x2720,"Dialog Open",0,guiDialogOpen },		// d=Dialog Open n,a$
 	{0x2742,"Dialog Open",0,guiDialogOpen },
 	{0x2750,"Dialog Close",0,guiDialogClose },
+	{0x2764,"Dialog Close",0,guiDialogClose },	// Dialog Close <NR>
+	{0x276C,"Dialog Run", 0, guiDialogRun },
 	{0x277E,"Dialog Run", 0, guiDialogRun },
 	{0x2796,"Dialog",0,guiDialog },
 	{0x27A4,"Vdialog",0,guiVdialog },
+	{0x27B6,"Vdialog$",0,guiVdialogStr },
 	{0x27E6,"Dialog$",0,guiDialogStr },
+	{0x2804,"EDialog",0,guiEDialog },
 	{0x2812,"Dialog Clr",0,guiDialogClr },
 	{0x2866,"Dialog Freeze",0,guiDialogFreeze },
 	{0x2882,"Dialog Unfreeze",0,guiDialogUnfreeze },
@@ -1282,8 +1317,10 @@ struct nativeCommand nativeCommands[]=
 	{0x28CA,"Resource Bank", 0,bankResourceBank }, // AmosPro Command.
 	{0x28DE,"Resource$",0,bankResourceStr }, // Resource$
 	{0x28EE,"Resource Screen Open",0,guiResourceScreenOpen},
+	{0x2952,"Assign",0,discAssign },
 	{0x2962,"Errtrap",0,errErrTrap },	// AmosPro command
 	{0x2A4A,"Lvo", 6, machineLvo },	// AmosPro command. (should look up string in pass1 says docs), maybe 16bit BOOL, 32bit offset
+	{0x2A90,"Bsend",0, NULL }, 
 	{0x2AB0,"Prg Under",0,cmdPrgUnder },
 	{0x2B3E,"Exec",0,cmdExec },
 	{0x2B58,"Screen Mode",0,gfxScreenMode },
@@ -1327,6 +1364,24 @@ const char *TokenName( unsigned short token )
 		}
 	}
 	return noName;
+}
+
+
+char *skipToken( char *ptr, unsigned short token )
+{
+	struct nativeCommand *cmd;
+	char *ret;
+
+	for (cmd = nativeCommands ; cmd < nativeCommands + nativeCommandsSize ; cmd++ )
+	{
+		if (token == cmd->id ) 
+		{
+			if (ret) ret += cmd -> size;
+			return ret;
+		}
+	}
+
+	return NULL;
 }
 
 #ifdef enable_fast_execution_no
@@ -1389,7 +1444,6 @@ char *executeToken( char *ptr, unsigned short token )
 {
 	char *(*fn) (struct nativeCommand *cmd, char *tokenBuffer);
 	uint16_t size;
-
 	char *ret;
 
 	fn = (char* (*)(nativeCommand*, char*)) *((void **) (fast_lookup + token)) ;
@@ -1401,6 +1455,7 @@ char *executeToken( char *ptr, unsigned short token )
 		_cmd.size = size;
 		ret = fn( &_cmd, ptr ) ;
 		if (ret) ret += size;
+
 		return ret;
 	}
 
@@ -1419,7 +1474,7 @@ char *executeToken( char *ptr, unsigned short token )
 
 char *_for( struct glueCommands *data, int nextToken );
 
-char *token_reader( char *start, char *ptr, unsigned short lastToken, unsigned short token, int tokenlength )
+char *token_reader( char *start, char *ptr, unsigned short token, int tokenlength )
 {
 	ptr = executeToken( ptr, token );
 
@@ -1452,13 +1507,12 @@ char *code_reader( char *start, int tokenlength )
 {
 	char *ptr;
 	int token = 0;
-	last_tokens[parenthesis_count] = 0;
 	
 	interpreter_running = true;
 
 	currentLine = 0;
 	ptr = start;
-	while ( ptr = token_reader(  start, ptr,  last_tokens[parenthesis_count], token, tokenlength ) )
+	while ( ptr = token_reader(  start, ptr,  token, tokenlength ) )
 	{
 		// this basic for now, need to handel "on error " commands as well.
 
@@ -1496,7 +1550,6 @@ char *code_reader( char *start, int tokenlength )
 			}
 		}
 
-		last_tokens[parenthesis_count] = token;
 		token = *((short *) ptr);
 		ptr += 2;	// next token.		
 
@@ -1593,9 +1646,7 @@ int main(int args, char **arg)
 	amosid[16] = 0;	// /0 string.
 
 #ifdef enable_fast_execution_yes
-
 	init_fast_lookup();
-
 #endif
 
 	stack = 0;
@@ -1625,6 +1676,9 @@ int main(int args, char **arg)
 	if (init() && channels)
 	{
 		bool init_error = false;
+
+		__load_bank__( "AmosPro_System:APSystem/AMOSPro_Default_Resource.Abk",-2);
+		__load_bank__("Amos-the-creator:AMOS_System/mouse.abk",-3);
 
 		// set up a fake extention lookup
 

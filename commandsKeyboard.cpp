@@ -51,12 +51,15 @@ char *_setVar( struct glueCommands *data,int nextToken );
 
 void _input_arg( struct nativeCommand *cmd, char *tokenBuffer );
 void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer );
-void __print_text(const char *txt, int maxchars);
+void __print_text( struct retroScreen *screen, const char *txt, int maxchars);
 
 int input_count = 0;
 std::string input_str;
 
 using namespace std;
+
+int keyboardLag = 20*1000/50;	// ms
+int keyboardSpeed = 10*1000/50;	// ms
 
 
 #ifdef __linux__
@@ -70,54 +73,84 @@ void atomic_get_char( char *buf)
 
 #ifdef __amigaos4__
 
+struct keyboard_buffer current_key;
+
+void handel_key( char *buf )
+{
+	ULONG actual;
+	char buffer[20];
+	struct InputEvent event;
+	bzero(&event,sizeof(struct InputEvent));
+
+	event.ie_NextEvent	=	0;
+	event.ie_Class		=	IECLASS_RAWKEY;
+	event.ie_SubClass	=	0;
+
+	if (current_key.Code)
+	{
+		_scancode = current_key.Code;
+
+		event.ie_Code = current_key.Code;
+		event.ie_Qualifier = current_key.Qualifier;
+		actual = MapRawKey(&event, buffer, 20, 0);
+
+		if (actual)
+		{
+			buf[0] = buffer[0];
+			buf[1]=0;
+		}
+	}
+	else
+	{
+		buf[0] = keyboardBuffer[0].Char;
+		buf[1]=0;
+	}
+}
+
+
+struct timeval key_press_time;
+struct timeval repeat_time;
+
+#define delta_time_ms(t1,t2) (((t2.tv_sec - t1.tv_sec) *1000)+((t2.tv_usec - t1.tv_usec) /1000))
+
 void atomic_get_char( char *buf)
 {
+	struct timeval ctime;
 	buf[0]=0;
+	buf[1]=1;
 
-	if (engine_started)
+	if (engine_ready())
 	{
-		struct InputEvent event;
-		bzero(&event,sizeof(struct InputEvent));
-
-		event.ie_NextEvent = 0;
-       		event.ie_Class     = IECLASS_RAWKEY;
-		event.ie_SubClass  = 0;
-
 		engine_lock();
-		if (! keyboardBuffer.empty() )
+		if ( ! keyboardBuffer.empty() )
 		{
-
-			ULONG actual;
-			ULONG code;
-			char buffer[20];
-
-			if (code = keyboardBuffer[0].Code)
+			current_key = keyboardBuffer[0];
+			if (current_key.event == kitty_key_down )
 			{
-				if ((code & IECODE_UP_PREFIX) == 0)	// button pressed.
-				{
-					_scancode = code;
-
-					event.ie_Code = keyboardBuffer[0].Code;
-					event.ie_Qualifier = keyboardBuffer[0].Qualifier;
-					actual = MapRawKey(&event, buffer, 20, 0);
-
-
-					if (actual)
-					{
-						buf[0] = buffer[0];
-						buf[1]=0;
-//						if (buf[0]==13) buf[0]=10;
-					}
-				}
-			}
-			else
-			{
-				buf[0] = keyboardBuffer[0].Char;
-//				if (buf[0]==13) buf[0]=10;
+				handel_key( buf );
+				gettimeofday(&key_press_time, NULL);
+				gettimeofday(&repeat_time, NULL);
 			}
 
 			keyboardBuffer.erase(keyboardBuffer.begin());
 		}
+		else
+		{
+			if (current_key.event == kitty_key_down )
+			{
+				gettimeofday(&ctime, NULL);
+	
+				if (delta_time_ms(key_press_time,ctime) > (keyboardLag+keyboardSpeed))
+				{
+					if (delta_time_ms(repeat_time,ctime) > keyboardSpeed  )
+					{
+						handel_key( buf );
+						gettimeofday(&repeat_time, NULL);
+					}
+				}
+			}
+		}
+
 		engine_unlock();
 	}
 }
@@ -136,7 +169,7 @@ void kitty_getline(string &input)
 	int cursx = 0;
 	int scrollx = 0;
 
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	input = "";
 	
@@ -148,7 +181,7 @@ void kitty_getline(string &input)
 		textWindow = screen -> currentTextWindow;
 	}
 
-	if ((engine_started)&&(textWindow))
+	if ((engine_ready())&&(textWindow))
 	{
 		draw_cursor( screen );
 		rightx = textWindow -> locateX;
@@ -190,14 +223,14 @@ void kitty_getline(string &input)
 
 						if (cursx - scrollx < 0) scrollx--;
 
-						__print_text(input.c_str() + scrollx,charspace);
+						__print_text( screens[current_screen], input.c_str() + scrollx,charspace);
 						clear_cursor( screens[current_screen] );
 						draw_cursor( screens[current_screen] );
 					}
 
 					break;
 
-				case 10:
+				case 13:
 					printf("<enter>\n");
 					done=true;
 					break;
@@ -212,7 +245,7 @@ void kitty_getline(string &input)
 
 
 					if (cursx - scrollx > charspace) scrollx++;
-					__print_text(input.c_str() + scrollx,charspace);
+					__print_text( screen, input.c_str() + scrollx,charspace);
 
 
 					draw_cursor( screens[current_screen] );
@@ -232,20 +265,16 @@ void kitty_getline(string &input)
 char *cmdWaitKey(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	char buf[2];
 
-	if (engine_started)
+	do
 	{
-		engine_wait_key = true;
-		do
-		{
-			Delay(1);
-		} while ((engine_wait_key == true) && (engine_stopped==false));
-	}
-	else
-	{
-		printf("<engine has stoped press enter>");
-		getchar();
-	}
+		atomic_get_char(buf);
+		Delay(1);
+
+		if (engine_ready() == false) break;
+
+	} while (buf[0]==0);
 
 	return tokenBuffer;
 }
@@ -260,6 +289,7 @@ char *cmdInkey(struct nativeCommand *cmd, char *tokenBuffer )
 	_scancode = 0;
 
 	atomic_get_char(buf);
+
 
 	setStackStrDup(buf);
 	return tokenBuffer;
@@ -392,6 +422,7 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	bool success = false;
 	int num;
 	double des;
+	struct retroScreen *screen = screens[current_screen];
 
 	if (cmd == NULL)
 	{
@@ -408,18 +439,18 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	if ((input_count == 0)&&(stack))		// should be one arg.
 	{
 		char *str = getStackString( stack-args+1 );
-		if (str)  __print_text( str ,0 );
+		if (str)  __print_text( screen, str ,0 );
 	}
 	else if (input_str.empty())
 	{
-		__print_text("??? ",0);
+		__print_text( screen, "??? ",0);
 	}
 
 	do
 	{
 		do
 		{
-			while (input_str.empty() && engine_started ) kitty_getline( input_str);
+			while (input_str.empty() && engine_ready() ) kitty_getline( input_str);
 
 			i = input_str.find(",");	
 			if (i != std::string::npos)
@@ -431,7 +462,7 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 				arg = input_str; input_str = "";
 			}
 		}
-		while ( arg.empty() && engine_started );
+		while ( arg.empty() && engine_ready() );
 
 		if (last_var)
 		{
@@ -446,13 +477,11 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 			}
 		}
 	}
-	while (!success && engine_started);
+	while (!success && engine_ready());
 
-	engine_lock();
 	clear_cursor( screens[current_screen] );
-	engine_unlock();
 
-	__print_text( "\n" ,0 );
+	__print_text( screen, "\n" ,0 );
 
 	if (last_var)
 	{
@@ -482,6 +511,7 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	bool success = false;
 	int num;
 	double des;
+	struct retroScreen *screen = screens[current_screen];
 
 	if (cmd == NULL)
 	{
@@ -502,18 +532,18 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 
 		if (str) if (str[0])
 		{
-			__print_text( str ,0 );
+			__print_text( screen, str ,0 );
 			have_question = true;
 		}
 
 		if (have_question == false)
 		{
-			__print_text("? ",0);
+			__print_text( screen, "? ",0);
 		}
 	}
 	else if (input_str.empty())
 	{
-		__print_text("?? ",0);
+		__print_text( screen, "?? ",0);
 	}
 
 	engine_lock();
@@ -524,15 +554,13 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	{
 		do
 		{
-			while (input_str.empty() && engine_started ) kitty_getline(input_str);
+			while (input_str.empty() && engine_ready() ) kitty_getline(input_str);
 
-			engine_lock();
 			clear_cursor( screens[current_screen] );
-			engine_unlock();
 
 			arg = input_str; input_str = "";
 		}
-		while ( arg.empty() && engine_started );
+		while ( arg.empty() && engine_ready() );
 
 		if (last_var)
 		{
@@ -550,9 +578,9 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 		printf("%s:%d -- success = %s\n",__FUNCTION__,__LINE__, success ? "True" : "False");
 
 	}
-	while (!success && (engine_started) );
+	while ( (!success) && engine_ready() );
 
-	__print_text( "\n" ,0 );
+	__print_text( screen, "\n" ,0 );
 
 	switch (globalVars[last_var -1].var.type & 7)
 	{	
@@ -580,11 +608,12 @@ char *cmdInput(nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
+	struct retroScreen *screen = screens[current_screen];
 	input_count = 0;
 	input_str = "";
 
-	if (screens[current_screen]) clear_cursor(screens[current_screen]);
-	if (next_print_line_feed == true) __print_text("\n",0);
+	if (screen) clear_cursor(screen);
+	if (next_print_line_feed == true) __print_text( screen, "\n",0);
 	next_print_line_feed = true;
 
 	do_input[parenthesis_count] = _input_arg;
@@ -611,14 +640,11 @@ char *cmdInputStrN(struct nativeCommand *cmd, char *tokenBuffer)
 char *cmdLineInput(nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	struct retroScreen *screen = screens[current_screen];
 
-	engine_lock();
-
-	if (screens[current_screen]) clear_cursor(screens[current_screen]);
-	if (next_print_line_feed == true) __print_text("\n",0);
+	if (screen) clear_cursor(screen);
+	if (next_print_line_feed == true) __print_text(screen,"\n",0);
 	next_print_line_feed = true;
-
-	engine_unlock();
 
 	input_count = 0;
 	input_str = "";
@@ -642,7 +668,8 @@ char *_cmdPutKey( struct glueCommands *data,int nextToken )
 			char *c;
 			for (c = str; *c; c++)
 			{
-				atomic_add_to_keyboard_queue( 0, 0, *c );
+				atomic_add_key( kitty_key_down, 0,0, *c );
+				atomic_add_key( kitty_key_up, 0,0, *c );
 			}
 		}
 	}
@@ -667,13 +694,20 @@ char *_cmdKeySpeed( struct glueCommands *data,int nextToken )
 {
 	int args = stack - data -> stack +1;
 
+	if (args==2)
+	{
+		keyboardLag = getStackNum(stack-1) * 1000 / 50;
+		keyboardSpeed = getStackNum(stack) * 1000 / 50;
+	}
+	else setError(22,data->tokenBuffer);
+
 	popStack( stack - data -> stack  );
 	return NULL;
 }
 
 char *cmdKeySpeed(struct nativeCommand *cmd, char *tokenBuffer)
 {
-		printf("%s:%d\n",__FUNCTION__,__LINE__);printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);printf("%s:%d\n",__FUNCTION__,__LINE__);
 	stackCmdNormal( _cmdKeySpeed, tokenBuffer );
 	return tokenBuffer;
 }
@@ -684,11 +718,8 @@ int keyStr_index =0;
 
 char *_set_keyStr( struct glueCommands *data, int nextToken )
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
-	printf("keyStr_index %d\n",keyStr_index);
-	dump_stack();
-	getchar();
 
 	if ((keyStr_index>=1)&&(keyStr_index<=20))
 	{
@@ -709,7 +740,7 @@ char *_cmdKeyStr( struct glueCommands *data,int nextToken )
 {
 	int args = stack - data -> stack +1;
 
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	keyStr_index = getStackNum( stack );
 	_do_set = _set_keyStr;
@@ -720,7 +751,7 @@ char *_cmdKeyStr( struct glueCommands *data,int nextToken )
 
 char *cmdKeyStr(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 	stackCmdIndex( _cmdKeyStr, tokenBuffer );
 	return tokenBuffer;
 }

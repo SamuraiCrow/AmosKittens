@@ -23,6 +23,7 @@
 #include "errors.h"
 #include "var_helper.h"
 #include "pass1.h"
+#include "label.h"
 
 const char *types[]={"","#","$",""};
 
@@ -47,11 +48,15 @@ int currentLine = 0;
 int pass1_bracket_for;
 int pass1_token_count = 0;
 
+int nest_loop_count = 0;
+
 extern uint32_t _file_bank_size;
 
 #ifdef enable_bank_crc_yes
 extern uint32_t bank_crc;
 #endif
+
+unsigned short last_tokens[MAX_PARENTHESIS_COUNT];
 
 enum
 {
@@ -90,6 +95,24 @@ void dump_nest()
 			i, nested_command[ i ].cmd,
 			nest_names[ nested_command[ i ].cmd ] );
 	}
+}
+
+struct nested *find_nest_loop()
+{
+	int n;
+
+	for (n = nested_count -1 ; n>=0;n--)
+	{
+		switch (nested_command[ n ].cmd )
+		{
+			case nested_while:
+			case nested_repeat:
+			case nested_do:
+			case nested_for:
+					return &nested_command[ n ];
+		} 
+	}
+	return NULL;
 }
 
 char *FinderTokenInBuffer( char *ptr, unsigned short token , unsigned short token_eof1, unsigned short token_eof2, char *_eof_ );
@@ -203,29 +226,45 @@ int findVar( char *name, bool is_first_token, int type, int _proc )
 }
 
 
-char *findLabel( char *name )
+struct label *findLabel( char *name, int _proc )
 {
 	unsigned int n;
+	struct label *label;
+
+	printf("%s(%s,%d)\n",__FUNCTION__,name,_proc);
 
 	for (n=0;n<labels.size();n++)
 	{
-		if (strcasecmp( labels[n].name, name)==0)
+		label = &labels[n];
+
+		if (label -> proc == _proc)
 		{
-			return labels[n].tokenLocation;
+			if (strcasecmp( label -> name, name)==0)
+			{
+				return &labels[n];
+			}
 		}
 	}
 	return NULL;
 }
 
-int findLabelRef( char *name )
+int findLabelRef( char *name, int _proc )
 {
 	unsigned int n;
+	struct label *label;
+
+	printf("%s(%s,%d)\n",__FUNCTION__,name,_proc);
 
 	for (n=0;n<labels.size();n++)
 	{
-		if (strcasecmp( labels[n].name, name)==0)
+		label = &labels[n];
+
+		if (label -> proc == _proc)
 		{
-			return n+1;
+			if (strcasecmp( label -> name, name)==0)
+			{
+				return n+1;
+			}
 		}
 	}
 	return 0;
@@ -255,6 +294,7 @@ struct globalVar *add_var_from_ref( struct reference *ref, char **tmp, int type 
 	{
 		global_var_count ++;
 		ref -> ref = global_var_count;
+		ref -> flags = type;
 
 		_new = &globalVars[global_var_count-1];
 		_new -> varName = *tmp;	// tmp is alloced and used here.
@@ -357,6 +397,23 @@ char *pass1DefFn( char *ptr )
 	return ptr;
 }
 
+uint32_t getTrueVarType( char *varname, uint32_t type )
+{
+	if ( ( type & 7) == type_undefined )		// type_int is also not defined.
+	{
+		int tl = strlen(varname);
+
+		if (tl)
+		{
+			switch (varname[tl-1])
+			{
+				case '#' : type |= type_float; break;
+				case '$': type |= type_string; break;
+			}
+		}
+	}
+	return type;
+}
 
 struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool is_procedure )
 {
@@ -370,7 +427,7 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 	if (tmp)
 	{
 		int type = ref -> flags & 7;
-			short next_token = *((short *) (ptr + sizeof(struct reference) + ReferenceByteLength( ptr )));
+		short next_token = *((short *) (ptr + sizeof(struct reference) + ReferenceByteLength( ptr )));
 
 		if (first_token)
 		{
@@ -397,9 +454,11 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 		{
 			char *next_ptr = ptr + sizeof(struct reference) + ref -> length;	
 			if  (*((unsigned short *) next_ptr)  == 0x0074) type |= type_array;
+			type = getTrueVarType( tmp, type );
 		}
 
 		found = findVar(tmp, first_token, type, ( is_proc_call | is_procedure )  ? 0 : (pass1_inside_proc ? procCount : 0) );
+
 		if (found)
 		{
 			ref -> ref = found;
@@ -486,7 +545,7 @@ void pass1label(char *ptr)
 
 		if (last_tokens[parenthesis_count]  == 0)
 		{
-			found_ref = findLabelRef(tmpName);
+			found_ref = findLabelRef(tmpName, (pass1_inside_proc ? procCount : 0));
 
 			if (found_ref>0)
 			{
@@ -497,13 +556,26 @@ void pass1label(char *ptr)
 			else
 			{
 				label tmp;
+				struct nested *thisNest;
 				next = ptr + sizeof(struct reference) + ref->length ; // next token after label
 
 				// skip all new lines..
 				while ( (*(unsigned short *) next) == 0x0000 ) next += 4;	// token and newline code
 
+				tmp.proc = (pass1_inside_proc ? procCount : 0);
 				tmp.name = tmpName;
 				tmp.tokenLocation = next +2 ;
+
+				tmp.loopLocation = NULL;
+
+				if (thisNest = find_nest_loop())
+				{
+					printf("label inside %s at %08x\n", nest_names[thisNest -> cmd], thisNest -> ptr);
+
+					tmp.loopLocation = thisNest -> ptr;
+
+					getchar();
+				}
 
 				labels.push_back(tmp);
 				ref -> ref = labels.size();
@@ -512,7 +584,7 @@ void pass1label(char *ptr)
 		}
 		else
 		{
-			found_ref = findLabelRef(tmpName);
+			found_ref = findLabelRef(tmpName,(pass1_inside_proc ? procCount : 0));
 			if (found_ref>0)
 			{
 				ref -> ref = found_ref;
@@ -622,6 +694,8 @@ char *pass1_global( char *ptr )
 
 							if ( next_token == 0x0074 ) type |= type_array;
 
+							type = getTrueVarType( tmp, type );
+							
 							var = findVarPublic(tmp, type );
 							if (var)
 							{
@@ -630,7 +704,7 @@ char *pass1_global( char *ptr )
 							}
 							else
 							{
-								add_var_from_ref( ref, &tmp, FALSE );
+								add_var_from_ref( ref, &tmp, type );
 								globalVars[global_var_count-1].isGlobal = TRUE;
 							}
 							
@@ -877,13 +951,14 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 				case 0x064A:	ret += QuoteByteLength(ptr); break;	// skip strings.
 				case 0x0652:	ret += QuoteByteLength(ptr); break;	// skip strings.
 
-				case 0x027E:	addNest( nested_do );
+				case 0x027E:	addNestLoop( nested_do );
 							break;
 
 				// loop
 				case 0x0286:	if IS_LAST_NEST_TOKEN(do)
 							{
 								fix_token_short( nested_do, ptr+2 );
+								nest_loop_count--;
 							}
 							else
 							{
@@ -892,32 +967,35 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							}
 							break;
 
-				case 0x023C: addNest( nested_for );
+				case 0x023C:  addNestLoop( nested_for );
 							break;
 
 				// next
-				case 0x0246:	if IS_LAST_NEST_TOKEN(for)
+				case 0x0246:	if IS_LAST_NEST_TOKEN(for) {
 								fix_token_short( nested_for, ptr+2 );
-							else
+								nest_loop_count--;
+							} else
 								setError( 34,ptr );
 							break;
 
-				case 0x0250:	addNest( nested_repeat );
+				case 0x0250:	addNestLoop( nested_repeat );
 							break;
 
 				// until
-				case 0x025C:	if IS_LAST_NEST_TOKEN(repeat)
+				case 0x025C:	if IS_LAST_NEST_TOKEN(repeat) {
 								fix_token_short( nested_repeat, ptr+2 );
-							else
+								nest_loop_count--;
+							} else
 								setError( 32,ptr );
 							break;
 
-				case 0x0268:	addNest( nested_while );
+				case 0x0268:	addNestLoop( nested_while );
 							break;
 				// Wend
-				case 0x0274:	if IS_LAST_NEST_TOKEN(while)
+				case 0x0274:	if IS_LAST_NEST_TOKEN(while) {
 								fix_token_short( nested_while, ptr+2 );
-							else
+								nest_loop_count--;
+							} else
 								setError( 30,ptr );
 							break;
 				// if
@@ -1055,7 +1133,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							{
 								if (current_proc -> procDataPointer == NULL) current_proc -> procDataPointer = ptr + 2;
 							}
-							else 	if (data_read_pointers[0] == NULL) data_read_pointers[0] = ptr + 2;
+							else 	if (procStcakFrame[0].dataPointer == NULL) procStcakFrame[0].dataPointer = ptr + 2;
 
 							addNest( nested_data );
 

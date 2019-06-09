@@ -46,6 +46,8 @@ struct Process *EngineTask = NULL;
 
 bool engine_wait_key = false;
 bool engine_stopped = false;
+bool engine_key_repeat = false;
+bool engine_key_down = false;
 
 extern bool curs_on;
 extern int _keyshift;
@@ -120,7 +122,7 @@ extern BOOL open_lib( const char *name, int ver , const char *iname, int iver, s
 
 struct Gadeget *add_window_button(struct Image *img, ULONG id)
 {
-	struct Gadeget *retGad;
+	struct Gadeget *retGad = NULL;
 
 	if (img)
 	{
@@ -202,16 +204,12 @@ void close_engine_window( )
 	}
 }
 
-struct TextFont *topaz8_font = NULL;
 struct RastPort font_render_rp;
 struct retroEngine *engine = NULL;
 
 bool init_engine()
 {
 	if ( ! open_engine_window( 0, 0, 640,480) ) return false;
-
-	topaz8_font =  open_font( "topaz.font" ,  8);
-	if ( ! topaz8_font ) return FALSE;
 
 	InitRastPort(&font_render_rp);
 	font_render_rp.BitMap = AllocBitMapTags( 800, 50, 256, 
@@ -232,10 +230,15 @@ bool init_engine()
 	return TRUE;
 }
 
+bool engine_ready()
+{
+	if (engine == NULL) return false; 
+	if ( font_render_rp.BitMap == NULL ) return false;
+	return true;
+}
+
 void close_engine()
 {
-	if (topaz8_font) CloseFont(topaz8_font); topaz8_font=0;
-
 	if ( font_render_rp.BitMap )
 	{
 		FreeBitMap( font_render_rp.BitMap );
@@ -249,7 +252,6 @@ void close_engine()
 		retroFreeEngine( engine );
 		engine = NULL;
 	}
-
 }
 
 void main_engine();
@@ -277,47 +279,12 @@ void set_default_colors( struct retroScreen *screen )
 		retroScreenColor( screen, n,DefaultPalette[n].r,DefaultPalette[n].g,DefaultPalette[n].b);
 }
 
-void clear_cursor( struct retroScreen *screen )
-{
-	if (screen)
-	{
-		struct retroTextWindow *textWindow = screen -> currentTextWindow;
-
-		if ((curs_on)&&(textWindow))
-		{
-			int gx,gy;
-			int x = (textWindow -> x + textWindow -> locateX) + (textWindow -> border ? 1 : 0);
-			int y = (textWindow -> y + textWindow -> locateY) + (textWindow -> border ? 1 : 0);
-			gx=8*x;	gy=8*y;
-
-			retroBAR( screen, gx,gy,gx+7,gy+7, screen->paper);
-		}
-	}
-}
-
-void draw_cursor(struct retroScreen *screen)
-{
-	if (screen)
-	{
-		struct retroTextWindow *textWindow = screen -> currentTextWindow;
-
-		if ((curs_on)&&(textWindow))
-		{
-			int gx,gy;
-			int x = (textWindow -> x + textWindow -> locateX) + (textWindow -> border ? 1 : 0);
-			int y = (textWindow -> y + textWindow -> locateY) + (textWindow -> border ? 1 : 0);
-			gx=8*x;	gy=8*y;
-
-			retroBAR( screen, gx,gy+6,gx+6,gy+7, cursor_color);
-		}
-	}
-}
-
-void atomic_add_to_keyboard_queue( ULONG Code, ULONG Qualifier, char Char )
+void atomic_add_key( ULONG eventCode, ULONG Code, ULONG Qualifier, char Char )
 {
 	struct keyboard_buffer event;
 
 	engine_lock();
+	event.event = eventCode;
 	event.Code = Code;
 	event.Qualifier = Qualifier;
 	event.Char = Char;
@@ -408,8 +375,8 @@ void DrawSprite(
 
 	struct retroFrameHeader *frame = sprite -> frames + image;
 
-	width = frame -> Width ;
-	height = frame -> Height ;
+	width = frame -> width ;
+	height = frame -> height ;
 
 	x = (item -> x / 2) -  frame -> XHotSpot;
 	y = (item -> y / 2) - frame -> YHotSpot;	
@@ -494,6 +461,7 @@ void handel_window()
 	ULONG Class;
 	struct IntuiMessage *msg;
 	int mouse_x, mouse_y;
+	int ccode;
 
 			while (msg = (IntuiMessage *) GetMsg( engine -> window -> UserPort) )
 			{
@@ -502,7 +470,7 @@ void handel_window()
 				Code = msg -> Code;
 				GadgetID = (Class == IDCMP_GADGETUP) ? ((struct Gadget *) ( msg -> IAddress)) -> GadgetID : 0;
 				mouse_x = msg -> MouseX;
-				mouse_y = msg -> MouseX;
+				mouse_y = msg -> MouseY;
 				ReplyMsg( (Message*) msg );
 
 				switch (Class) 
@@ -559,37 +527,39 @@ void handel_window()
 					case IDCMP_RAWKEY:
 
 							_keyshift = Qualifier;
-							if (Qualifier & IEQUALIFIER_REPEAT)
-							{
-								Printf("we have a repeat key\n");
-							}
+							if (Qualifier & IEQUALIFIER_REPEAT) break;		// repeat done by Amos KIttens...
 							 
+							ccode = Code & ~IECODE_UP_PREFIX;
+
 							{
 								int emu_code = Code &~ IECODE_UP_PREFIX;
 								if (emu_code==75) emu_code = 95;
 								keyState[ emu_code ] = (Code & IECODE_UP_PREFIX) ? 0 : -1;
 							}
 
-							if ((Code & IECODE_UP_PREFIX) || (Qualifier & IEQUALIFIER_REPEAT))
+							engine_wait_key = false;
+
+
+							if ((ccode >= RAWKEY_F1) && (ccode <= RAWKEY_F10))
 							{
+								int idx = ccode - RAWKEY_F1 + (Qualifier & IEQUALIFIER_RCOMMAND ? 10 : 0);
 
-								engine_wait_key = false;
-								Code = Code & ~IECODE_UP_PREFIX;
-
-								if ((Qualifier & IEQUALIFIER_LCOMMAND) || (Qualifier & IEQUALIFIER_RCOMMAND))
+								if (F1_keys[idx])
 								{
-									if ((Code >= RAWKEY_F1) && (Code <= RAWKEY_F10))
-									{
-										int idx = Code - RAWKEY_F1 + (Qualifier & IEQUALIFIER_RCOMMAND ? 10 : 0);
-
-										if (F1_keys[idx])
-										{
-											char *p;
-											for (p=F1_keys[idx];*p;p++) atomic_add_to_keyboard_queue( 0, 0, *p );
-										}
-									}
+									char *p;
+									for (p=F1_keys[idx];*p;p++) atomic_add_key( (Code & IECODE_UP_PREFIX) ? kitty_key_up : kitty_key_down, ccode, 0, *p );
 								}
-								else	atomic_add_to_keyboard_queue( Code, Qualifier, 0 );
+							}
+							else
+							{
+								if (Code & IECODE_UP_PREFIX)
+								{
+									atomic_add_key( kitty_key_up, ccode, Qualifier, 0 );
+								}
+								else
+								{
+									atomic_add_key( kitty_key_down, ccode, Qualifier, 0 );
+								}
 							}
 							break;
 				}
@@ -794,7 +764,11 @@ void main_engine()
 	}
 
 	close_joysticks();
+
+	engine_lock();
 	close_engine();
+	engine_unlock();
+
 
 	if (sig_main_vbl) Signal( &main_task->pr_Task, 1<<sig_main_vbl );	// signal in case we got stuck in a waitVBL.
 

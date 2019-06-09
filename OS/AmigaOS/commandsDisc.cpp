@@ -239,6 +239,18 @@ char *_discFselStr( struct glueCommands *data, int nextToken )
 
 		switch (args)
 		{
+			case 1:
+					_path_ = getStackString( stack );
+
+					amigaPattern = amos_to_amiga_pattern( (char *) _path_);
+
+					success = AslRequestTags( (void *) filereq, 
+						ASLFR_DrawersOnly, FALSE,	
+						ASLFR_InitialPattern, amigaPattern ? amigaPattern : "",
+						ASLFR_DoPatterns, TRUE,
+						TAG_DONE );
+					break;
+
 			case 3:
 					_path_ = getStackString( stack -2 );
 					_default_ = getStackString( stack -1 );
@@ -442,6 +454,14 @@ char *amos_to_amiga_pattern(const char *amosPattern)
 	char *amigaPattern;
 	const char *s;
 	char *d;
+	const char *end_of_path = NULL;
+
+	for (s = amosPattern; *s ;  s++) 
+	{
+		if ((*s=='/') || (*s==':')) end_of_path=s;
+	}
+
+	if (end_of_path) amosPattern=end_of_path+1;
 
 	for (s = amosPattern; *s ;  s++) _new_len += (*s == '*') ? 2 : 1;
 
@@ -685,12 +705,12 @@ char *discDirStr(struct nativeCommand *cmd, char *tokenBuffer)
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if ( (( last_tokens[parenthesis_count] == 0x0000) || (last_tokens[parenthesis_count] == 0x0054)) && (NEXT_TOKEN(tokenBuffer) == 0xFFA2 ))
+	if ( (token_is_fresh) && (NEXT_TOKEN(tokenBuffer) == 0xFFA2 ))
 	{
 		tokenMode = mode_store;
 		_do_set = _set_dir_str;
 	}
-	else if ( (( last_tokens[parenthesis_count]== 0x0000) || ( last_tokens[parenthesis_count] == 0x0054)) && (NEXT_TOKEN( tokenBuffer ) == 0xFFA2)) 
+	else if ( (token_is_fresh) && (NEXT_TOKEN( tokenBuffer ) == 0xFFA2)) 
 	{
 		printf("%s:%d\n",__FUNCTION__,__LINE__);
 		stackCmdNormal( _discDirStr, tokenBuffer );
@@ -1598,7 +1618,6 @@ char *discField(struct nativeCommand *cmd, char *ptr)
 				break;
 		}
 
-		last_tokens[parenthesis_count] = token;
 		token = *( (short *) ptr);
 		ptr += 2;
 
@@ -1655,3 +1674,36 @@ char *discMakedir(struct nativeCommand *cmd, char *tokenBuffer)
 	stackCmdNormal( _discMakedir, tokenBuffer );
 	return tokenBuffer;
 }
+
+char *_discAssign( struct glueCommands *data, int nextToken )
+{
+	int args = stack - cmdTmp[cmdStack-1].stack +1;
+	bool success = false;
+
+	if (args==2)
+	{
+		char *_volume = getStackString( stack-1 );
+		char *_path = getStackString( stack );
+
+		if ((_volume)&&(_path))
+		{
+			int vl = strlen (_volume);
+			if (vl)	 if (_volume[ vl -1 ]==':') _volume[ vl -1 ]=0 ;
+
+			if (AssignLate(_volume,_path)) success = true;
+		}
+	}
+
+	if (success == false )setError( 22, data -> tokenBuffer );
+
+	popStack( stack - cmdTmp[cmdStack-1].stack  );
+	return NULL;
+}
+
+char *discAssign(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdNormal( _discAssign, tokenBuffer );
+	return tokenBuffer;
+}
+

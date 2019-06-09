@@ -27,6 +27,7 @@
 #include "commandsBlitterObject.h"
 #include "errors.h"
 #include "engine.h"
+#include "commandsBanks.h"
 
 extern int sig_main_vbl;
 
@@ -237,8 +238,8 @@ void drawBobs()
 
 				clear -> x = bob -> x - frame -> XHotSpot;
 				clear -> y = bob -> y - frame -> YHotSpot;
-				clear -> w = frame -> Width;
-				clear -> h = frame -> Height;
+				clear -> w = frame -> width;
+				clear -> h = frame -> height;
 				clear -> image = bob -> image;
 				clear -> drawn = 1;
 
@@ -435,10 +436,7 @@ char *_boGetBob( struct glueCommands *data, int nextToken )
 	int x1 = 0;
 	int y1 = 0;
 
-
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-	printf("stack is %d\n",stack);
 
 	switch (args)
 	{
@@ -467,21 +465,28 @@ char *_boGetBob( struct glueCommands *data, int nextToken )
 
 	if (screen)
 	{
-		engine_lock();
-
 		if (sprite==NULL)
 		{
-			printf("no srpite found\n");
+			struct kittyBank *bank1;
 			sprite = (struct retroSprite *) sys_public_alloc_clear( sizeof(struct retroSprite) );
+
+			bank1 = findBank(1);
+			if (!bank1) 
+			{
+				if (bank1 = __ReserveAs( bank_type_sprite, 1, sizeof(void *),NULL, NULL))							
+				{
+					bank1 -> object_ptr = (char *) sprite;
+				} 
+			}
 		}
 
 		if (sprite)
 		{
+			engine_lock();
 			retroGetSprite(screen,sprite,image-1,x0,y0,x1,y1);
+			engine_unlock();
 		}
 
-		printf("try engine unlock\n");
-		engine_unlock();
 	}
 	else setError(22,data->tokenBuffer);
 
@@ -565,8 +570,8 @@ char *_boHotSpot( struct glueCommands *data, int nextToken )
 						{
 							x = (p >> 4) & 0xF;
 							y = p & 0xF;
-							frame -> XHotSpot = (x * frame -> Width) >> 1;
-							frame -> YHotSpot = (y * frame -> Height) >> 1;
+							frame -> XHotSpot = (x * frame -> width) >> 1;
+							frame -> YHotSpot = (y * frame -> height) >> 1;
 							success = true;
 						}
 					}
@@ -753,6 +758,39 @@ char *boCol(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+bool del_sprite_object( struct retroSprite *objList, int del)
+{
+	printf("Del: %d Items %d\n",del, objList->number_of_frames);
+
+	if (objList == NULL)
+	{
+		printf("no object, so can't delete frame\n");
+		return false;
+	}
+
+	if ((del>-1)&&(del<objList->number_of_frames))
+	{
+		int f;
+
+		if (objList -> frames[del].data) 
+		{
+			sys_free(objList -> frames[del].data);
+			objList -> frames[del].data = NULL;
+		}
+
+		for (f=del+1;f<objList->number_of_frames;f++)
+		{
+			printf("move %d to %d\n",f,f-1);
+			objList -> frames[f-1] = objList -> frames[f];
+		}
+		objList->number_of_frames--;
+
+		return true;
+	}
+
+	return false;
+}
+
 char *_boDelBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
@@ -763,19 +801,7 @@ char *_boDelBob( struct glueCommands *data, int nextToken )
 	if (args==1)
 	{
 		del = getStackNum(stack);
-
-		if ((sprite->number_of_frames)&&(del<sprite->number_of_frames))
-		{
-			int f;
-
-			if (sprite -> frames[del].data) sys_free(sprite -> frames[del].data);
-
-			for (f=sprite->number_of_frames-1;f>del;f--)
-			{
-				sprite -> frames[f-1] = sprite -> frames[f];
-			}
-			sprite->number_of_frames--;
-		}
+		del_sprite_object(sprite, del-1);
 	}
 	else setError(22, data->tokenBuffer);
 
