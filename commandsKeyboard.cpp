@@ -32,6 +32,7 @@
 #include "commandsData.h"
 #include "errors.h"
 #include "engine.h"
+#include "amosstring.h"
 
 extern std::vector<struct keyboard_buffer> keyboardBuffer;
 
@@ -41,6 +42,10 @@ extern struct globalVar globalVars[];
 int _scancode;
 int _keyshift;
 int keyState[256];
+
+extern int bobDoUpdate ;
+extern int bobUpdateNextWait ;
+
 extern struct retroScreen *screens[8] ;
 extern int current_screen;
 
@@ -51,7 +56,8 @@ char *_setVar( struct glueCommands *data,int nextToken );
 
 void _input_arg( struct nativeCommand *cmd, char *tokenBuffer );
 void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer );
-void __print_text( struct retroScreen *screen, const char *txt, int maxchars);
+void __print_text( struct retroScreen *screen, struct stringData *txt, int maxchars);
+void __print_char_array( struct retroScreen *screen, const char *txt, int maxchars);
 
 int input_count = 0;
 std::string input_str;
@@ -212,7 +218,7 @@ void kitty_getline(string &input)
 
 					if (input.length()>0)
 					{
-						if (cursx == input.length())
+						if (cursx == (int) input.length())
 						{
 							cursx --;
 							input.erase(cursx,1);
@@ -223,7 +229,7 @@ void kitty_getline(string &input)
 
 						if (cursx - scrollx < 0) scrollx--;
 
-						__print_text( screens[current_screen], input.c_str() + scrollx,charspace);
+						__print_char_array( screens[current_screen], input.c_str() + scrollx,charspace);
 						clear_cursor( screens[current_screen] );
 						draw_cursor( screens[current_screen] );
 					}
@@ -245,7 +251,7 @@ void kitty_getline(string &input)
 
 
 					if (cursx - scrollx > charspace) scrollx++;
-					__print_text( screen, input.c_str() + scrollx,charspace);
+					__print_char_array( screen, input.c_str() + scrollx,charspace);
 
 
 					draw_cursor( screens[current_screen] );
@@ -269,6 +275,14 @@ char *cmdWaitKey(struct nativeCommand *cmd, char *tokenBuffer )
 
 	do
 	{
+		engine_lock();
+		if (bobUpdateNextWait)
+		{
+			bobDoUpdate = 1;
+			bobUpdateNextWait = 0;
+		}
+		engine_unlock();
+
 		atomic_get_char(buf);
 		Delay(1);
 
@@ -282,16 +296,14 @@ char *cmdWaitKey(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *cmdInkey(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	char buf[2];
+	struct stringData * str = alloc_amos_string( 1 );
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_scancode = 0;
+	atomic_get_char( &str->ptr );
 
-	atomic_get_char(buf);
-
-
-	setStackStrDup(buf);
+	setStackStr(str);
 	return tokenBuffer;
 }
 
@@ -325,7 +337,12 @@ char *_InputStrN( struct glueCommands *data, int nextToken )
 		setError(22,data->tokenBuffer);
 	}
 
-	setStackStrDup(tmp.c_str());
+	{
+		struct stringData *ret = alloc_amos_string( tmp.length() );
+		sprintf( &ret -> ptr, "%s", tmp.c_str()  );
+		setStackStr( ret ); 
+	}
+
 	return NULL;
 }
 
@@ -334,6 +351,19 @@ char *cmdScancode(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	setStackNum(_scancode);
+	return tokenBuffer;
+}
+
+char *cmdScanshift(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	// 0 no shift
+	// 1 Left shift
+	// 2 right shift
+	// 3 both shifts 
+
+	setStackNum(_keyshift & 3);
 	return tokenBuffer;
 }
 
@@ -413,6 +443,10 @@ char *_LineInput( struct glueCommands *data,int nextToken )
 	return NULL;
 }
 
+
+extern int _last_var_index;		// we need to know what index was to keep it.
+extern int _set_var_index;		// we need to resore index 
+
 void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 {
 	int args = 0;
@@ -438,12 +472,12 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	
 	if ((input_count == 0)&&(stack))		// should be one arg.
 	{
-		char *str = getStackString( stack-args+1 );
+		struct stringData *str = getStackString( stack-args+1 );
 		if (str)  __print_text( screen, str ,0 );
 	}
 	else if (input_str.empty())
 	{
-		__print_text( screen, "??? ",0);
+		__print_char_array( screen, "??? ",0);
 	}
 
 	do
@@ -481,24 +515,37 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 
 	clear_cursor( screens[current_screen] );
 
-	__print_text( screen, "\n" ,0 );
+	__print_char_array( screen, "\n" ,0 );
 
 	if (last_var)
 	{
 		switch (globalVars[last_var -1].var.type & 7)
 		{	
 			case type_string:
-				setStackStrDup(arg.c_str()); break;
+				{
+					struct stringData *ret = alloc_amos_string( arg.length() );
+					sprintf( &ret -> ptr, "%s", arg.c_str()  );
+					setStackStr( ret ); 
+				}
+				break;
 
 			case type_int:
-				sscanf(arg.c_str(),"%d",&num); setStackNum(num); break;
+				sscanf(arg.c_str(),"%d",&num); setStackNum(num); 
+				break;
 
 			case type_float:
-				sscanf(arg.c_str(),"%lf",&des); setStackDecimal(des); break;
+				sscanf(arg.c_str(),"%lf",&des); setStackDecimal(des); 
+				break;
 		}
 	}
 
+	printf (" last_var %d\n", last_var);
+	printf (" _last_var_index %d\n", _last_var_index );
+	dump_stack();
+
 	data.lastVar = last_var;
+	_set_var_index = _last_var_index;
+
 	_setVar( &data,0 );
 	input_count ++;
 }
@@ -527,10 +574,10 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	
 	if (input_count == 0)		// should be one arg.
 	{
-		char *str = getStackString( stack );
+		struct stringData *str = getStackString( stack );
 		bool have_question = false;
 
-		if (str) if (str[0])
+		if (str) if (str -> size)
 		{
 			__print_text( screen, str ,0 );
 			have_question = true;
@@ -538,12 +585,12 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 
 		if (have_question == false)
 		{
-			__print_text( screen, "? ",0);
+			__print_char_array( screen, "? ",0);
 		}
 	}
 	else if (input_str.empty())
 	{
-		__print_text( screen, "?? ",0);
+		__print_char_array( screen, "?? ",0);
 	}
 
 	engine_lock();
@@ -580,12 +627,17 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	}
 	while ( (!success) && engine_ready() );
 
-	__print_text( screen, "\n" ,0 );
+	__print_char_array( screen, "\n" ,0 );
 
 	switch (globalVars[last_var -1].var.type & 7)
 	{	
 		case type_string:
-			setStackStrDup(arg.c_str()); break;
+			{
+				struct stringData *ret = alloc_amos_string( arg.length() );
+				sprintf( &ret -> ptr, "%s", arg.c_str()  );
+				setStackStr( ret ); 
+			}
+			break;
 
 		case type_int:
 			sscanf(arg.c_str(),"%d",&num); setStackNum(num); break;
@@ -613,7 +665,7 @@ char *cmdInput(nativeCommand *cmd, char *tokenBuffer)
 	input_str = "";
 
 	if (screen) clear_cursor(screen);
-	if (next_print_line_feed == true) __print_text( screen, "\n",0);
+	if (next_print_line_feed == true) __print_char_array( screen, "\n",0);
 	next_print_line_feed = true;
 
 	do_input[parenthesis_count] = _input_arg;
@@ -643,7 +695,7 @@ char *cmdLineInput(nativeCommand *cmd, char *tokenBuffer)
 	struct retroScreen *screen = screens[current_screen];
 
 	if (screen) clear_cursor(screen);
-	if (next_print_line_feed == true) __print_text(screen,"\n",0);
+	if (next_print_line_feed == true) __print_char_array(screen,"\n",0);
 	next_print_line_feed = true;
 
 	input_count = 0;
@@ -662,11 +714,12 @@ char *_cmdPutKey( struct glueCommands *data,int nextToken )
 
 	if (args==1)
 	{
-		char *str = getStackString(stack);
+		struct stringData *str = getStackString(stack);
 		if (str)
 		{
 			char *c;
-			for (c = str; *c; c++)
+			char *se = &(str -> ptr) + str -> size;
+			for (c = &str -> ptr; c<se; c++)
 			{
 				atomic_add_key( kitty_key_down, 0,0, *c );
 				atomic_add_key( kitty_key_up, 0,0, *c );
@@ -712,7 +765,7 @@ char *cmdKeySpeed(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *F1_keys[20];
+struct stringData *F1_keys[20];
 
 int keyStr_index =0;
 
@@ -729,7 +782,7 @@ char *_set_keyStr( struct glueCommands *data, int nextToken )
 			F1_keys[keyStr_index-1] = NULL;
 		}
 
-		F1_keys[keyStr_index-1] = strdup(getStackString(stack));
+		F1_keys[keyStr_index-1] = amos_strdup(getStackString(stack));
 	}
 
 	_do_set = _setVar;

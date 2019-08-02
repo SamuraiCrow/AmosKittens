@@ -16,6 +16,8 @@
 #include <proto/dos.h>
 #include <libraries/retroMode.h>
 #include <proto/retroMode.h>
+
+extern char *asl();
 #endif
 
 #ifdef __linux__
@@ -67,6 +69,7 @@
 #include "channel.h"
 #include "spawn.h"
 #include "label.h"
+#include "amosstring.h"
 
 #include "ext_compact.h"
 #include "ext_turbo.h"
@@ -89,7 +92,7 @@ unsigned int vars_crc();
 uint32_t bank_crc = 0;
 #endif
 
-char *var_param_str = NULL;
+struct stringData *var_param_str = NULL;
 int var_param_num;
 double var_param_decimal;
 
@@ -107,6 +110,8 @@ int procStackCount = 0;
 int last_var = 0;
 int32_t tokenlength;
 
+bool startup = false;
+
 unsigned int amiga_joystick_dir[4];
 unsigned int amiga_joystick_button[4];
 
@@ -121,6 +126,7 @@ char *_get_var_index( glueCommands *self, int nextToken);
 char *(*do_var_index) ( glueCommands *self, int nextToken ) = _get_var_index;
 char *(**do_to) ( struct nativeCommand *, char * ) ;
 void (**do_input) ( struct nativeCommand *, char * ) ;
+// void (**do_parenthesisEnd) ( struct nativeCommand *, char * ) ;
 void (*do_breakdata) ( struct nativeCommand *, char * ) = NULL;
 
 extern char *_errTrap( struct glueCommands *data, int nextToken );
@@ -219,7 +225,7 @@ bool show_var ( char *ptr, char *var_name, int proc )
 
 	if (ref)
 	{
-		printf("line %d, int var: [%s]=%d\n",getLineFromPointer( ptr ), var_name, globalVars[ref-1].var.value);
+		printf("line %d, int var: [%s]=%d\n",getLineFromPointer( ptr ), var_name, globalVars[ref-1].var.integer.value);
 		return true;
 	}
 	else
@@ -340,8 +346,6 @@ char *nextCmd(nativeCommand *cmd, char *ptr)
 	{
 		flags = cmdTmp[cmdStack-1].flag;
 
-		printf("flags %08x\n",flags);
-
 		if  ( ! (flags & cmd_onNextCmd) ) break;		// needs to be include tags, (if commands be excuted on endOfLine or Next command)
 		ret = cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
 
@@ -440,7 +444,7 @@ char *_get_var_index( glueCommands *self , int nextToken )
 		mul  = 1;
 		for (n = self -> stack;n<=stack; n++ )
 		{
-			_last_var_index += (mul * kittyStack[n].value);
+			_last_var_index += (mul * kittyStack[n].integer.value);
 			mul *= var -> sizeTab[n- self -> stack];
 		}
 
@@ -458,15 +462,24 @@ char *_get_var_index( glueCommands *self , int nextToken )
 			switch (var -> type & 3)
 			{
 				case type_int: 
-					setStackNum( var -> int_array[_last_var_index] );	break;
+					setStackNum( (&(var -> int_array -> ptr) + _last_var_index) -> value );
+					break;
 
 				case type_float:
-					setStackDecimal( var -> float_array[_last_var_index] );	
+					setStackDecimal( (&(var -> float_array -> ptr) + _last_var_index) -> value );	
 					break;
 
 				case type_string:	
-					char *str = var -> str_array[_last_var_index];
-					setStackStrDup( str ? str : "" );
+					struct stringData *str = *(&(var -> str_array -> ptr) + _last_var_index);
+
+					if (str == NULL) 
+					{
+						setStackStr( toAmosString( "", 0) );
+					}
+					else
+					{
+						setStackStrDup( str );
+					}
 					break;
 			}
 
@@ -511,29 +524,47 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 		var -> count = 1;
 		for (n= 0; n<var -> cells; n++ ) 
 		{
-			var -> sizeTab[n] = kittyStack[cmd -> stack + n].value + 1;
+			var -> sizeTab[n] = kittyStack[cmd -> stack + n].integer.value + 1;
 			var -> count *= var -> sizeTab[n];
 		}
 
 		switch (var -> type)
 		{
 			case type_int | type_array:
-				size = var -> count * sizeof(int);
-				var -> int_array = (int *) malloc( size ) ;
+
+				size = var -> count * sizeof(valueData);
+
+				var -> int_array = (struct valueArrayData *) malloc( sizeof(struct valueArrayData) + size ) ;
+				var -> int_array -> type = type_int | type_array;
+				var -> int_array -> size = var -> count;
+				memset( &var -> int_array -> ptr, 0, size );
 				break;
+
 			case type_float | type_array:
-				size = var -> count * sizeof(double);
-				var -> float_array = (double *) malloc( size ) ;
+
+				size = var -> count * sizeof(desimalData);
+
+				var -> float_array = (struct desimalArrayData *) malloc( sizeof(struct desimalArrayData) + size ) ;
+				var -> float_array -> type = type_float | type_array;
+				var -> float_array -> size = var -> count;
+				memset( &var -> float_array -> ptr, 0, size );
 				break;
+
 			case type_string | type_array:
-				size = var -> count * sizeof(char *);
-				var -> str_array = (char **) malloc( size ) ;
+
+				size = var -> count * sizeof(struct stringData *);
+
+				var -> str_array = (struct stringArrayData *) malloc( sizeof(struct stringArrayData) + size ) ;
+				var -> str_array -> type = type_string | type_array;
+				var -> str_array -> size = var -> count;
+				memset( &var -> str_array -> ptr, 0, size );
 				break;
+
 			default: setError(22, cmd -> tokenBuffer);
 		}
 	}
 
-	if (var -> str) memset( var -> str, 0, size );	// str is a union :-)
+ 
 
 	popStack(stack - cmd -> stack);
 
@@ -604,10 +635,10 @@ char *cmdVar(nativeCommand *cmd, char *ptr)
 			switch (globalVars[idx].var.type & 7)
 			{
 				case type_int:
-					setStackNum(globalVars[idx].var.value);
+					setStackNum(globalVars[idx].var.integer.value);
 					break;
 				case type_float:
-					setStackDecimal(globalVars[idx].var.decimal);
+					setStackDecimal(globalVars[idx].var.decimal.value);
 					break;
 				case type_string:
 					setStackStrDup(globalVars[idx].var.str);		// always copy.
@@ -643,12 +674,8 @@ char *cmdQuote(nativeCommand *cmd, char *ptr)
 		setStackHiddenCondition();
 	}
 
-	if (kittyStack[stack].str) free(kittyStack[stack].str);
-	kittyStack[stack].str = strndup( ptr + 2, length );
-	kittyStack[stack].len = strlen( kittyStack[stack].str );
+	setStackStr( toAmosString( ptr + 2, length ) );
 	kittyStack[stack].state = state_none;
-	kittyStack[stack].type = 2;
-
 	flushCmdParaStack( (int) next_token );
 
 	return ptr + length2;
@@ -787,6 +814,7 @@ struct nativeCommand nativeCommands[]=
 	{0x0018, "<label>", sizeof(struct reference),cmdVar},	
 	{0x001E, "<Bin>",4,cmdNumber },		// binrary
 	{0x0026, "<Text>",2, cmdQuote },
+	{0x002E, "<Text2>",2,cmdQuote },
 	{0x0036, "<Hex>",4,cmdNumber },		// hex
 	{0x003E, "<number>",4,cmdNumber },
 	{0x0046, "<float>",4,cmdFloat },
@@ -877,6 +905,7 @@ struct nativeCommand nativeCommands[]=
 	{0x04BE, "Line Input #",0,discLineInputFile },
 	{0x04D0, "Input",0,cmdInput },
 	{0x04DC, "Line Input", 0, cmdLineInput },
+	{0x04F6, "Run", 0, discRun },
 	{0x04FE, "Set Buffers", 0, cmdSetBuffers },
 	{0x050E, "Mid$",0,cmdMid },
 	{0x051E, "Mid$(a$,start)",0, cmdMid },
@@ -965,10 +994,13 @@ struct nativeCommand nativeCommands[]=
 	{0x0AE2,"Screen Swap",0,gfxScreenSwap },	// screen swap
 	{0x0AF4,"Screen Swap",0,gfxScreenSwap },	// screen swap <screen num>
 	{0x0AFC,"Save Iff",0,gfxSaveIff },
+	{0x0B0C,"Save iff",0,gfxSaveIff },
 	{0x0B16,"View",0,ocView },
 	{0x0B20,"Auto View Off", 0, ocAutoViewOff },
 	{0x0B34,"Auto View On", 0, ocAutoViewOn },
+	{0x0B46,"Screen Base", 0, gfxScreenBase },
 	{0x0B58,"Screen Width", 0, gfxScreenWidth },
+	{0x0B6C,"Screen Width", 0, gfxScreenWidth },			// =Screen Width( screen nr)
 	{0x0B88,"Screen Height", 0, gfxScreenHeight },		// =Screen Height(screen nr)
 	{0x0B74,"Screen Height", 0, gfxScreenHeight },		// =Screen Height
 	{0x0B90,"Get Palette",0,gfxGetPalette },
@@ -1056,6 +1088,7 @@ struct nativeCommand nativeCommands[]=
 	{0x1160,"Get Block [n,x,y,w,h,?] ",0,bgGetBlock },
 	{0x1172,"Put Block",0,bgPutBlock },	// Put Block (Num)
 	{0x1184,"Put Block",0,bgPutBlock },
+	{0x11AE,"Del Block",0,bgDelBlock },	// Del Block (no args)
 	{0x11BE,"Del Block",0,bgDelBlock },
 	{0x11C6,"Key Speed",0,cmdKeySpeed },
 	{0x11D8,"Key State",0,cmdKeyState },
@@ -1070,6 +1103,7 @@ struct nativeCommand nativeCommands[]=
 	{0x1248,"FALSE",0, cmdFalse },
 	{0x1254,"Put Key",0,cmdPutKey },
 	{0x1262,"Scancode",0,cmdScancode },
+	{0x1270,"Scanshift",0,cmdScanshift },
 	{0x1280,"Clear Key",0,cmdClearKey },
 	{0x1290,"Wait Key",0,cmdWaitKey },
 	{0x129E, "Wait", 0, cmdWait },
@@ -1126,12 +1160,18 @@ struct nativeCommand nativeCommands[]=
 	{0x15F2,"Y Curs",0,textYCurs },
 	{0x15FE,"X Graphic",0,textXGraphic },
 	{0x160E,"Y Graphic",0,textYGraphic },
+	{0x161E,"xgr",0,gfxXGR },
+	{0x1628,"ygr",0,gfxYGR },
 	{0x1632,"Reserve Zone", 0, ocReserveZone },
 	{0x1646,"Reserve Zone", 0, ocReserveZone },
-	{0x164E,"Reset Zone", 0, ocResetZone },
+	{0x164E,"Reset Zone", 0, ocResetZone },	// Reset Zone
+	{0x1660,"Reset Zone", 0, ocResetZone },	// Reset Zone <n>
 	{0x1668,"Set Zone",0,ocSetZone },
+	{0x1680,"Zone",0,ocZone },			// Zone(x,y)
+	{0x168E,"Zone",0,ocZone },			// Zone(screen,x,y)
 	{0x16AA,"HZone",0,ocHZone },
 	{0x16B6,"Scin(x,y)",0,gfxScin },
+	{0x16D0,"Mouse Screen",0,ocMouseScreen },
 	{0x16E2,"Mouse Zone",0,ocMouseZone },
 	{0x16F2,"Set input", 0, discSetInput },
 	{0x1704, "Close Workbench", 0, cmdCloseWorkbench },
@@ -1179,7 +1219,10 @@ struct nativeCommand nativeCommands[]=
 	{0x1AA8,"Bob Off",0,boBobOff },
 	{0x1AB6,"Bob Off [number]",0,boBobOff },
 	{0x1ABE,"Bob Update Off",0,boBobUpdateOff },
+	{0x1AD2,"Bob Update On",0,boBobUpdateOn },
 	{0x1AE6,"Bob Update",0,boBobUpdate },
+	{0x1AF6,"Bob Clear",0,boBobClear },
+	{0x1B06,"Bob Draw",0,boBobDraw },
 	{0x1B36,"Bob Col",0,boBobCol },
 	{0x1B46,"Bob Col",0,boBobCol },
 	{0x1B52,"Col",0,boCol },
@@ -1199,6 +1242,7 @@ struct nativeCommand nativeCommands[]=
 	{0x1CFE,"Paste Bob",0,boPasteBob },
 	{0x1D12,"Paste Icon", 0, bgPasteIcon },
 	{0x1D28,"Make Mask", 0, ocMakeMask },
+	{0x1D4E,"No Mask",0,boNoMask },
 	{0x1D56,"Make Icon Mask", 0, bgMakeIconMask },
 	{0x1D6C,"Make Icon Mask", 0, bgMakeIconMask },
 	{0x1DA2,"Hot Spot", 0, boHotSpot },
@@ -1275,10 +1319,12 @@ struct nativeCommand nativeCommands[]=
 	{0x23B8,"Get f,n", 0, discGet },
 	{0x23D0,"Multi Wait",0,cmdMultiWait },		// dummy function.
 	{0x23C4,"System",0,cmdEnd },
+	{0x23E0,"Bob I",0,boIBob },
 	{0x23FC,"Priority Reverse On",0,ocPriorityReverseOn },
 	{0x2416,"Priority Reverse Off",0,ocPriorityReverseOff },
 	{0x2430,"Dev First$",0,discDevFirstStr },
 	{0x2442,"Dev Next$",0,discDevNextStr },
+	{0x2452,"Hrev Block",0,bgHrevBlock },
 	{0x2464,"Vrev Block",0,bgVrevBlock },
 	{0x2476,"Hrev(n)",0,boHrev},
 	{0x2482,"Vrev(n)",0,boVrev},
@@ -1289,38 +1335,77 @@ struct nativeCommand nativeCommands[]=
 	{0x2516,"Ntsc", 0, gfxNtsc },		// only reports false.
 	{0x2520,"Laced",0, gfxLaced },
 	{0x253C,"Command Line$", 0, cmdCommandLineStr },
+	{0x2550,"Disc Info$",0, cmdDiskInfoStr },
 	{0x2578,"Set Accessory",0, cmdSetAccessory },
 	{0x259A,"Trap", 0, errTrap },
 	{0x25A4,"Else If", 2, cmdElseIf },
-	{0x2694,"Call Editor", 0, cmdCallEditor },
+	{0x25C0,"Array",0,machineArray },
+//	{0x25CC,"Frame Load",0,gfxFrameLoad},
+//	{0x25E0,"Frame Load",0,gfxFrameLoad},		//	Frame Load(n To n,n)
+//	{0x25EC,"Frame Play",0,gfxFramePlay},		//	Frame Play n,n
+//	{0x2600,"Frame Play",0,gfxFramePlay},		//	Frame Play n,n,n
+//	{0x260C,"Iff Anim",0,gfxIffAnim },
+//	{0x261E,"Iff Anim",0,gfxIffAnim },
+	{0x260C,"Iff Anim",0,gfxIffAnim },
+	{0x261E,"Iff Anim",0,gfxIffAnim },
+//	{0x262A,"Frame Length",0,gfxFrameLength},	//	Frame Length(n)
+//	{0x263E,"Frame Length",0,gfxFrameLength},	//	Frame Length(n,n)
+//	{0x2664,"Wait Frame",0,gfxWaitFrame},		//	Wait Frame n
+//	{0x2676,"Call Editor", 0, cmdCallEditor },
+//	{0x268A,"Call Editor", 0, cmdCallEditor },
+//	{0x2694,"Call Editor", 0, cmdCallEditor },
+//	{0x26A0,"Ask Editor", 0, cmdAskEditor  },
+//	{0x26B2,"Ask Editor", 0, cmdAskEditor  },
+//	{0x26BC,"Ask Editor", 0, cmdAskEditor  },
+	{0x26C8,"Erase Temp",0,bankEraseTemp },
 	{0x26D8,"Erase All", 0, bankEraseAll },
 	{0x26E8,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$)
 	{0x2704,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$,value,b$)
 	{0x2710,"Dialog Box",0,guiDialogBox },		// d=Dialog Box(a$,value,b$,n,n)
-	{0x2720,"Dialog Open",0,guiDialogOpen },		// d=Dialog Open n,a$
+	{0x2720,"Dialog Open",0,guiDialogOpen },	// d=Dialog Open n,a$
+	{0x2736,"Dialog Open",0,guiDialogOpen },	//	Dialog Open n,n,n
 	{0x2742,"Dialog Open",0,guiDialogOpen },
 	{0x2750,"Dialog Close",0,guiDialogClose },
 	{0x2764,"Dialog Close",0,guiDialogClose },	// Dialog Close <NR>
 	{0x276C,"Dialog Run", 0, guiDialogRun },
 	{0x277E,"Dialog Run", 0, guiDialogRun },
+	{0x2788,"Dialog Run", 0, guiDialogRun },
 	{0x2796,"Dialog",0,guiDialog },
 	{0x27A4,"Vdialog",0,guiVdialog },
 	{0x27B6,"Vdialog$",0,guiVdialogStr },
+	{0x27C8,"Rdialog",0,guiRdialog },
+	{0x27DA,"Rdialog",0,guiRdialog },
 	{0x27E6,"Dialog$",0,guiDialogStr },
+	{0x27E6,"Rdialog$",0,guiRdialogStr },
+	{0x27F8,"Rdialog$",0,guiRdialogStr },
 	{0x2804,"EDialog",0,guiEDialog },
 	{0x2812,"Dialog Clr",0,guiDialogClr },
+	{0x2824,"Dialog Update", 0, guiDialogUpdate },
+	{0x283C,"Dialog Update", 0, guiDialogUpdate },
+	{0x2848,"Dialog Update", 0, guiDialogUpdate },
+	{0x2856,"Dialog Update", 0, guiDialogUpdate },
 	{0x2866,"Dialog Freeze",0,guiDialogFreeze },
+	{0x287A,"Dialog Freeze",0,guiDialogFreeze },
 	{0x2882,"Dialog Unfreeze",0,guiDialogUnfreeze },
-	{0x28A0,"Poke$",0,machinePokeStr },	// Poke$(adr, string)
-	{0x28AE,"Peek$",0,machinePeekStr },	// Peek$(adr, length)
-	{0x28BE,"Peek$",0,machinePeekStr },	// Peek$(adr, termChar) // returns string
-	{0x28CA,"Resource Bank", 0,bankResourceBank }, // AmosPro Command.
-	{0x28DE,"Resource$",0,bankResourceStr }, // Resource$
+	{0x2898,"Dialog Unfreeze",0,guiDialogUnfreeze },
+	{0x28A0,"Poke$",0,machinePokeStr },						// Poke$(adr, string)
+	{0x28AE,"Peek$",0,machinePeekStr },						// Peek$(adr, length)
+	{0x28BE,"Peek$",0,machinePeekStr },						// Peek$(adr, termChar) // returns string
+	{0x28CA,"Resource Bank", 0,bankResourceBank },			// AmosPro Command.
+	{0x28DE,"Resource$",0,bankResourceStr },					 // Resource$
 	{0x28EE,"Resource Screen Open",0,guiResourceScreenOpen},
+	{0x2910,"Resource Unpack",0,guiResourceUnpack},			// Resource Unpack n,n
+	{0x292A,"Read Text",0,discReadText},
+	{0x2946,"Err$" ,0, errErrStr},
 	{0x2952,"Assign",0,discAssign },
 	{0x2962,"Errtrap",0,errErrTrap },	// AmosPro command
-	{0x2A4A,"Lvo", 6, machineLvo },	// AmosPro command. (should look up string in pass1 says docs), maybe 16bit BOOL, 32bit offset
-	{0x2A90,"Bsend",0, NULL }, 
+	{0x2A40,"Equ",6,machineEqu },
+	{0x2A4A,"Lvo",6,machineLvo },	// AmosPro command. (should look up string in pass1 says docs), maybe 16bit BOOL, 32bit offset
+	{0x2A54,"Struc",6,machineStruc },
+	{0x2A74,"Bstart",0,bankBstart },
+	{0x2A82,"Blength",0,bankBlength },
+	{0x2A90,"Bsend",0,bankBsend}, 
+	{0x2A9C,"Bank Shrink",0, bankBankShrink },
 	{0x2AB0,"Prg Under",0,cmdPrgUnder },
 	{0x2B3E,"Exec",0,cmdExec },
 	{0x2B58,"Screen Mode",0,gfxScreenMode },
@@ -1345,8 +1430,7 @@ struct nativeCommand nativeCommands[]=
 	{0xFFF6,"^", 0, powerData },
 //	{0x0000,"GFXCALL",0,machineGFXCALL},	
 //	{0x0000,"INTCALL",0,machineINTCALL},	
-	{0x161E,"xgr",0,gfxXGR },
-	{0x1628,"ygr",0,gfxYGR },
+
 };
 
 int nativeCommandsSize = sizeof(nativeCommands)/sizeof(struct nativeCommand);
@@ -1366,11 +1450,11 @@ const char *TokenName( unsigned short token )
 	return noName;
 }
 
-
+/*
 char *skipToken( char *ptr, unsigned short token )
 {
 	struct nativeCommand *cmd;
-	char *ret;
+	char *ret = ptr;
 
 	for (cmd = nativeCommands ; cmd < nativeCommands + nativeCommandsSize ; cmd++ )
 	{
@@ -1383,6 +1467,7 @@ char *skipToken( char *ptr, unsigned short token )
 
 	return NULL;
 }
+*/
 
 #ifdef enable_fast_execution_no
 
@@ -1395,6 +1480,7 @@ char *executeToken( char *ptr, unsigned short token )
 	{
 		if (token == cmd->id ) 
 		{
+
 #ifdef show_token_numbers_yes
 			printf("%08d   %08X %20s:%08d stack is %d cmd stack is %d flag %d token %04x -- name %s\n",
 					getLineFromPointer(ptr), (unsigned int) ptr,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token , TokenName(token));	
@@ -1406,7 +1492,6 @@ char *executeToken( char *ptr, unsigned short token )
 	}
 
 	token_not_found = token;
-	currentLine = getLineFromPointer( ptr );
 	setError(23, ptr);
 	printf("Addr %08x, token not found %04X at line %d\n", 
 				(unsigned int) ptr, 
@@ -1460,7 +1545,6 @@ char *executeToken( char *ptr, unsigned short token )
 	}
 
 	token_not_found = token;
-	currentLine = getLineFromPointer( ptr );
 	setError(23, ptr);
 	printf("Addr %08x, token not found %04X at line %d\n", 
 				(unsigned int) ptr, 
@@ -1508,10 +1592,12 @@ char *code_reader( char *start, int tokenlength )
 	char *ptr;
 	int token = 0;
 	
-	interpreter_running = true;
 
-	currentLine = 0;
+	if (start == NULL) return NULL;
+
+	interpreter_running = true;
 	ptr = start;
+
 	while ( ptr = token_reader(  start, ptr,  token, tokenlength ) )
 	{
 		// this basic for now, need to handel "on error " commands as well.
@@ -1638,9 +1724,21 @@ int main(int args, char **arg)
 
 #endif
 
-	if (args == 2)
+
+	if (init())
 	{
-		filename = strdup(arg[1]);
+		startup = true;
+
+		switch (args)
+		{
+			case 2:	filename = strdup(arg[1]);
+					break;
+#if defined(__amigaos4__)
+			case 0:
+					filename = asl();
+					break;	
+#endif
+		}
 	}
 
 	amosid[16] = 0;	// /0 string.
@@ -1653,7 +1751,7 @@ int main(int args, char **arg)
 	cmdStack = 0;
 	onError = onErrorBreak;
 
-	memset(globalVars,0,sizeof(globalVars));
+	memset(globalVars,0,sizeof(struct globalVar) * VAR_BUFFERS);
 
 #ifdef __amigaos4__
 	sig_main_vbl = AllocSignal(-1);
@@ -1673,12 +1771,12 @@ int main(int args, char **arg)
 
 	channels = new ChannelTableClass();
 
-	if (init() && channels)
+	if ( (startup) && (channels) )
 	{
 		bool init_error = false;
 
-		__load_bank__( "AmosPro_System:APSystem/AMOSPro_Default_Resource.Abk",-2);
-		__load_bank__("Amos-the-creator:AMOS_System/mouse.abk",-3);
+		__load_bank__( (char *) "AmosPro_System:APSystem/AMOSPro_Default_Resource.Abk",-2);
+		__load_bank__( (char *) "Amos-the-creator:AMOS_System/mouse.abk",-3);
 
 		// set up a fake extention lookup
 
@@ -1695,6 +1793,7 @@ int main(int args, char **arg)
 		// function table init.
 		if (kitty_extensions[2].lookup)
 		{	
+			*((void **) (kitty_extensions[2].lookup + 0x0026)) = (void *) ext_cmd_spack;
 			*((void **) (kitty_extensions[2].lookup + 0x0048)) = (void *) ext_cmd_unpack;
 			*((void **) (kitty_extensions[2].lookup + 0x0056)) = (void *) ext_cmd_unpack;
 		}
@@ -1774,8 +1873,9 @@ int main(int args, char **arg)
 
 					init_banks( _file_end_ ,  _file_bank_size );
 
-#ifdef run_program_yes
 					gfxDefault(NULL, NULL);
+
+#ifdef run_program_yes
 					code_reader( data, tokenlength );
 #endif
 				}
@@ -1813,23 +1913,15 @@ int main(int args, char **arg)
 			free( (void *) do_to );
 			do_to = NULL;
 		}
-
-		printf("-- close & free video --\n");
-
-		free_video();
-
-		printf("-- clean up vars --\n");
-
-		clean_up_vars();
-
-		printf("-- clean up stack --\n");
-
-		clean_up_stack();
-		clean_up_files();
-		clean_up_special();	// we add other stuff to this one.
-
-		closedown();
 	}
+
+
+	free_video();
+	clean_up_vars();
+	clean_up_stack();
+	clean_up_files();
+	clean_up_special();	// we add other stuff to this one.
+	closedown();
 
 	if (sig_main_vbl) 
 	{

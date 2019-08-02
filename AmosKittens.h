@@ -16,7 +16,7 @@ typedef void * APTR;
 #define VAR_BUFFERS 1000
 #define MAX_PARENTHESIS_COUNT 1000
 
-#define token_semi	0x0064
+#define token_semi		0x0064
 #define token_add		0xFFC0
 #define token_sub		0xFFCA
 #define token_mul		0xFFE2
@@ -27,13 +27,16 @@ typedef void * APTR;
 #define token_xor		0xFF3E
 #define token_mod		0xFFD4
 
-#define token_more_or_equal	0xFF8E
+#define token_parenthesis_start	0x0074
+#define token_parenthesis_end	0x007C
+
+#define token_more_or_equal		0xFF8E
 #define token_less_or_equal		0xFF7A
-#define token_less_or_equal2	0xFF84
+#define token_less_or_equal2		0xFF84
 #define token_more_or_equal2	0xFF98
-#define token_not_equal		0xFF66
+#define token_not_equal			0xFF66
 #define token_equal			0xFFA2
-#define token_more			0xFFB6
+#define token_more				0xFFB6
 #define token_less				0xFFAC
 
 #define token_trap				0x259A
@@ -177,22 +180,56 @@ struct extension_lib
 	uint32_t crc;
 };
 
+struct dataBase
+{
+	uint16_t type;
+} __attribute__((packed)) ;
+
+struct stringData : dataBase
+{
+	uint16_t size;
+	char ptr;
+} __attribute__((packed));
+
+struct desimalData :  dataBase
+{
+	double value;
+} __attribute__((packed));
+
+struct valueData : dataBase
+{
+	int value;
+} __attribute__((packed));
+
+struct stringArrayData : dataBase
+{
+	uint16_t size;
+	struct stringData *ptr;
+} __attribute__((packed));
+
+struct desimalArrayData : dataBase
+{
+	uint16_t size;
+	struct desimalData ptr;
+} __attribute__((packed));
+
+struct valueArrayData : dataBase
+{
+	uint16_t size;
+	struct valueData ptr;
+} __attribute__((packed));
+
 struct kittyData
 {
-	union		// we don't need to wast space.
-	{
-		int len;
-		int value;
-		int count;
-	};
+	int count;
 	
 	union
 	{
-		char *str;
-		char **str_array;
-		int *int_array;
-		double *float_array;	
-		char *tokenBufferPos;	
+		struct stringData *str;
+		struct valueArrayData *int_array;
+		struct desimalArrayData *float_array;
+		struct stringArrayData *str_array;
+		char *tokenBufferPos;
 	};
 
 	union		// we don't need to wast space.
@@ -209,10 +246,12 @@ struct kittyData
 		char *procDataPointer;
 	};
 
-	double decimal;
+	struct valueData integer;
+	struct desimalData decimal;
 	int state;
 	int type;
 };
+
 
 struct label
 {
@@ -281,16 +320,6 @@ struct zone
 	int y0;
 	int x1;
 	int y1;
-};
-
-struct PacPicContext
-{
-	int w;
-	int h;
-	int ll;
-	int d;
-	unsigned char* raw;
-	unsigned short mode;
 };
 
 #define stackIfSuccess()					\
@@ -410,7 +439,7 @@ extern char *(*jump_mode) (struct reference *ref, char *ptr);
 extern char *jump_mode_goto (struct reference *ref, char *ptr);
 extern char *jump_mode_gosub (struct reference *ref, char *ptr);
 
-extern char *var_param_str;
+extern struct stringData *var_param_str;
 extern int var_param_num;
 extern double var_param_decimal;
 

@@ -68,14 +68,13 @@ Note:
 -----
 Unlike AMOS Pro, Amos Kittens probably have something on stack after the procedure returns, so you most likely can use it as it was a "function".. but that is just side effect. (I like to keep this because it the way modern programing languages works.)
 
-Note Machine Code 
------------------
+Note about machine Code (or Amos lowlevel commands)
+------------------------------------
 Be careful with these commands.
 
 String in Amos kittens are \0 terminated.
-Amos kittens don’t have length in front of strings, VarPtr(a$)-2 won't work, use Len(a$)
-VarPtr(a$), will return a address to double not a float.
-Call don't support arguments (yet, arguments has to be converted from Amos Kitty to Amos Pro, and freed on command exit)
+VarPtr(a#) will return a address to double not a float.
+Call don't support arguments (yet)
 
 On X86 Linux you might run into endieness issues if your using VarPtr(var), to peek into local or global variable.
 

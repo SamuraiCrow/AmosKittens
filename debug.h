@@ -8,14 +8,14 @@
 // --------- debug options --------------- (most common debug options)
 
 #define show_error_at_file_yes
-#define show_proc_names_yes
-#define show_token_numbers_yes
-#define show_debug_printf_yes
+#define show_proc_names_no
+#define show_token_numbers_no
+#define show_debug_printf_no
 #define show_debug_amal_no
 #define show_array_no
 #define enable_engine_debug_output_no
 
-// --------- debug options pass1 ----------- (most debug options for pretest)
+// --------- debug options pass1 ----------- (debug options for pretest)
 
 #define show_pass1_tokens_no
 #define show_pass1_procedure_fixes_no
@@ -30,7 +30,7 @@
 // ------------ optimizer ----------------------
 
 #define run_program_yes
-#define enable_fast_execution_yes		// Some debug option do not work when this enabled.
+#define enable_fast_execution_no		// Some debug option do not work when this is enabled.
 
 //------------- end of options -----------------
 
@@ -88,3 +88,6 @@ void Printf_iso(const char *fmt,...);
 #ifdef __linux__
 #define Printf_iso(fmt,...) fprintf(engine_fd,fmt,__VA_ARGS__)
 #endif
+
+
+#define NYI(name) printf("%s not yet implemented\n",name)

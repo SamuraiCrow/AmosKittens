@@ -47,7 +47,7 @@ char *set_menu_item ( struct glueCommands *data, int nextToken )
 		if (i)
 		{
 			if (i->str) free(i->str);
-			i -> str = strdup(getStackString( stack ));
+			i -> str = strdup( &(getStackString( stack ) -> ptr));
 		}
 		_set_menu_item = 0;
 	}
@@ -120,6 +120,7 @@ char *_menuMenuStr( struct glueCommands *data, int nextToken )
 	{
 		menuItem -> levels = args;
 		menuItem -> str = NULL;
+		menuItem -> active = true;
 
 		for (n=0;n<args;n++)
 		{
@@ -235,18 +236,29 @@ struct NewMenu *alloc_amiga_menu( int items )
 {
 	ULONG levels[]={NM_TITLE,NM_ITEM,NM_SUB,NM_SUB,NM_SUB,NM_SUB,NM_SUB,NM_SUB,NM_SUB,NM_SUB};
 	int n;
+	ULONG flag;
 	struct NewMenu *_new_ = (struct NewMenu *) AllocVecTags( sizeof(struct NewMenu) * (items+1), TAG_END );
 
 	if (_new_)
 	{
 		for (n=0;n<items;n++)
 		{
-			printf("number n %d\n",n);
+			flag = 0;
+
+			if (menuitems[n] -> active == false)
+			{
+				switch (levels[ menuitems[n] -> levels - 1 ])
+				{
+					case NM_TITLE: flag |= NM_MENUDISABLED; break;
+					case NM_ITEM: flag |= NM_ITEMDISABLED; break;
+					case NM_SUB: flag |= NM_ITEMDISABLED; break;
+				}
+			}
 
 			_new_[n].nm_Type = levels[ menuitems[n] -> levels - 1 ];
 			_new_[n].nm_Label = (STRPTR) menuitems[n] -> str;
     			_new_[n].nm_CommKey = 0;     
-    			_new_[n].nm_Flags = 0;        
+    			_new_[n].nm_Flags = flag;        
     			_new_[n].nm_MutualExclude = 0 ;
     			_new_[n].nm_UserData = (void *) n;
 		}
@@ -322,20 +334,58 @@ char *menuMenuOff(struct nativeCommand *cmd, char *tokenBuffer )
 	return tokenBuffer;
 }
 
-char *_menuMenuInactive( struct glueCommands *data, int nextToken )
+int findAmosMenuItem(struct glueCommands *data)
 {
+	int i,n;
+	int found;
 	int args = stack - data->stack +1 ;
+	struct amosMenuItem *menuItem;
+
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
-	switch (args)
+	for (i = 0; i<(int) menuitems.size();i++)
 	{
-		case 1:
-			break;
+		menuItem = menuitems[i];
+
+		if (menuItem -> levels == args)
+		{
+			found = 0;
+			for (n=0;n<args;n++)
+			{
+				if (menuItem -> index[n] == getStackNum(data->stack + n)) found++;
+			}
+
+			if (found == args) return i;
+		}
+	}
+	return -1;
+}
+
+char *_menuMenuInactive( struct glueCommands *data, int nextToken )
+{
+	int i;
+	struct amosMenuItem *menuItem;
+
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	i = findAmosMenuItem(data);
+	if (i>-1)
+	{
+		menuItem = menuitems[i];
+		menuItem -> active = false;
+		popStack( stack - data->stack );
+
+		if (amiga_menu)
+		{
+			detach_menu(My_Window);
+			attach_menu(My_Window);
+		}
+
+		return NULL;
 	}
 
 	popStack( stack - data->stack );
-
-	setError(23,data->tokenBuffer);	// not implemented
+	setError(22,data->tokenBuffer);	// not implemented
 
 	return NULL;
 }
@@ -349,18 +399,27 @@ char *menuMenuInactive(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *_menuMenuActive( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	int i;
+	struct amosMenuItem *menuItem;
 
-	switch (args)
+	i = findAmosMenuItem(data);
+	if (i>-1)
 	{
-		case 1:
-			break;
+		menuItem = menuitems[i];
+		menuItem -> active = true;
+		popStack( stack - data->stack );
+
+		if (amiga_menu)
+		{
+			detach_menu(My_Window);
+			attach_menu(My_Window);
+		}
+
+		return NULL;
 	}
 
 	popStack( stack - data->stack );
-
-	setError(23,data->tokenBuffer);	// not implemented
+	setError(22,data->tokenBuffer);	// not implemented
 
 	return NULL;
 }
@@ -419,10 +478,10 @@ char *menuMenuDel(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *_menuMenuX( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
 	int ret = 0;
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
+	NYI(__FUNCTION__);
 	setError(23,data->tokenBuffer);		// not implemented
 
 	popStack( stack - data->stack );
@@ -439,14 +498,11 @@ char *menuMenuX(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *_menuMenuY( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
-	int ret = 0;
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	setError(23,data->tokenBuffer);		// not implemented
-
 	popStack( stack - data->stack );
-	setStackNum(ret);
+
 	return NULL;
 }
 
@@ -457,4 +513,53 @@ char *menuMenuY(struct nativeCommand *cmd, char *tokenBuffer )
 	return tokenBuffer;
 }
 
+char *to_menuMenuKey( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+	dump_stack();
+	getchar();
+
+	switch (args)
+	{
+		case 2:
+				break;
+		case 3:
+				break;
+		default:
+				setError(22,data->tokenBuffer);		// not implemented
+				break;
+	}
+
+	popStack( stack - data->stack );
+
+	return NULL;
+}
+
+char *menuKey_do_to ( struct nativeCommand *, char *tokenBuffer ) 
+{
+	stackCmdNormal( to_menuMenuKey, tokenBuffer );
+}
+
+char *_menuMenuKey( struct glueCommands *data, int nextToken )
+{
+	int i;
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	i = findAmosMenuItem(data);
+	popStack( stack - data->stack );
+	setStackNum(i);
+	stack ++;
+
+	do_to[parenthesis_count] = menuKey_do_to;
+
+	return NULL;
+}
+
+char *menuMenuKey(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	stackCmdParm( _menuMenuKey, tokenBuffer );
+	return tokenBuffer;
+}
 

@@ -88,6 +88,9 @@ char *_discExist( struct glueCommands *data, int nextToken );
 char *_not_equal( struct glueCommands *data, int nextToken );
 char *_exit( struct glueCommands *data, int nextToken );
 char *_errTrap( struct glueCommands *data, int nextToken );
+char *_mathFn( struct glueCommands *data, int nextToken );
+char *_mathFnReturn( struct glueCommands *data, int nextToken );
+
 
 struct stackDebugSymbol
 {
@@ -141,6 +144,8 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_not_equal,"<>"},
 	{_exit,"exit loop"},
 	{_errTrap,"Trap"},
+	{_mathFn,"Fn"},
+	{_mathFnReturn, "Fn (Return)"},
 	{NULL, NULL}
 };
 
@@ -211,27 +216,25 @@ void dump_var( int n )
 #ifdef show_array_yes
 	int i;
 #endif
-
-
 		switch (globalVars[n].var.type)
 		{
 			case type_int:
 				printf("%d -- %d::%s%s=%d\n",n,
 					globalVars[n].proc, 
 					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName, globalVars[n].var.value );
+					globalVars[n].varName, globalVars[n].var.integer.value );
 				break;
 			case type_float:
 				printf("%d -- %d::%s%s=%0.2lf\n",n,
 					globalVars[n].proc, 
 					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName, globalVars[n].var.decimal );
+					globalVars[n].varName, globalVars[n].var.decimal.value );
 				break;
 			case type_string:
 				printf("%d -- %d::%s%s=%c%s%c\n",n,
 					globalVars[n].proc, 
 					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName, 34, globalVars[n].var.str ? globalVars[n].var.str : "NULL", 34 );
+					globalVars[n].varName, 34, globalVars[n].var.str ? &(globalVars[n].var.str -> ptr) : "NULL", 34 );
 				break;
 			case type_proc:
 
@@ -262,7 +265,7 @@ void dump_var( int n )
 #ifdef show_array_yes
 				for (i=0; i<globalVars[n].var.count; i++)
 				{
-					printf("[%d]=%d ,",i, globalVars[n].var.int_array[i]);
+					printf("[%d]=%d ,",i, (&(globalVars[n].var.int_array -> ptr) +i) -> value );
 				}
 #else
 				printf("...");
@@ -280,7 +283,7 @@ void dump_var( int n )
 #ifdef show_array_yes
 				for (i=0; i<globalVars[n].var.count; i++)
 				{
-					printf("[%d]=%0.2f ,",i, globalVars[n].var.float_array[i]);
+					printf("[%d]=%0.2f ,",i, (&(globalVars[n].var.float_array -> ptr)+i) -> value );
 				}
 #else
 				printf("...");
@@ -298,7 +301,9 @@ void dump_var( int n )
 #ifdef show_array_yes
 				for (i=0; i<globalVars[n].var.count; i++)
 				{
-					printf("[%d]=%s ,",i, globalVars[n].var.str_array[i]);
+					strptr =(&(globalVars[n].var.str_array -> ptr))[i];
+
+					printf("[%d]=%s ,",i, strptr ? &(strptr -> ptr) : "<NULL>");
 				}
 #else
 				printf("...");
@@ -378,13 +383,15 @@ void dump_stack()
 		}
 		else
 		{
-			switch( kittyStack[n].type )
+			struct kittyData *var = &kittyStack[n];
+
+			switch( var -> type )
 			{	
 				case type_none:
 					printf("<Nothing>\n");
 					break;
 				case type_int:
-					v = kittyStack[n].value;
+					v = var -> integer.value;
 					if (  ((v>='a')&&(v<='z'))  ||  ((v>='A')&&(v<='Z'))  )
 					{
 						printf("%d '%c'\n",v, (char) v );
@@ -392,16 +399,20 @@ void dump_stack()
 					else	printf("%d\n",v);
 					break;
 				case type_float:
-					printf("%f\n",kittyStack[n].decimal);
+					printf("%f\n", var -> decimal.value);
 					break;
 				case type_string:
-					if (kittyStack[n].str)
+					if (var -> str)
 					{
-						printf("'%s' (0x%x)\n", kittyStack[n].str, kittyStack[n].str) ;
+						printf("[0x%08x] '%s' (0x%08X) length %d\n", 
+							var -> str,
+							&var -> str -> ptr, 
+							&var -> str -> ptr, 
+							var -> str -> size) ;
 					}
 					else
 					{
-						printf("no string found\n");
+						printf("<NULL>\n");
 					}
 					break;
 			}

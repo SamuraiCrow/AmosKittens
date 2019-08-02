@@ -47,16 +47,16 @@ struct kittyChannel
 	unsigned short id;
 	unsigned short token;
 	unsigned short number;
-	char *amal_script;
+	struct stringData *amal_script;
 	char *amal_at;
-	char *anim_script;
+	struct stringData *anim_script;
 	char *anim_at;
 	int anim_loops;
 
 	// move x and move y
-	char *movex_script;
+	struct stringData *movex_script;
 	char *movex_at;
-	char *movey_script;
+	struct stringData *movey_script;
 	char *movey_at;
 	int deltax;
 	int deltay;
@@ -116,9 +116,9 @@ public:
 	int _size();
 };
 
-extern void setChannelAmal( struct kittyChannel *item, char *str);
-extern void setChannelAnim( struct kittyChannel *item, char *str);
-extern void setChannelMoveX( struct kittyChannel *item, char *str);
-extern void setChannelMoveY( struct kittyChannel *item, char *str);
+extern void setChannelAmal( struct kittyChannel *item, struct stringData *str);
+extern void setChannelAnim( struct kittyChannel *item, struct stringData *str);
+extern void setChannelMoveX( struct kittyChannel *item, struct stringData *str);
+extern void setChannelMoveY( struct kittyChannel *item, struct stringData *str);
 extern void initChannel( struct kittyChannel *item, int channel );
 

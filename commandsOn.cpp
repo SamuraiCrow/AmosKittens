@@ -30,9 +30,12 @@ extern const char *TokenName( unsigned short token );
 extern unsigned short token_not_found;
 extern char *_gosub_return( struct glueCommands *data, int nextToken );
 
-
 extern struct globalVar globalVars[1000];
 extern char *dupRef( struct reference *ref );
+
+extern void stack_frame_up(int varIndex);
+extern int tokenMode;
+
 
 extern std::vector<struct label> labels;
 
@@ -57,7 +60,7 @@ char *executeOnToken(char *ptr, unsigned short token)
 		case GOTO:
 		case GOSUB:	
 		case PROC:
-					printf("GOSUB OR GOTO\n");
+					printf("PROC, GOSUB OR GOTO\n");
 					is_token = token;
 					return ptr;
 		case 0x0000:
@@ -99,6 +102,7 @@ static char *collect_data(char *ptr)
 		printf("Next\n");
 		ptr += 2;	// next token.	
 	}
+	flushCmdParaStack( 0x0000 );
 	return ptr;
 }
 
@@ -131,6 +135,24 @@ char *cmdOn(struct nativeCommand *cmd, char *tokenBuffer )
 }
 
 
+struct label *GetLabel( unsigned int is_token, int ref_num )
+{
+	struct label *label = NULL;
+
+	switch (is_token)
+	{
+		case 0x0006:		label = findLabel(globalVars[ref_num-1].varName, procStcakFrame[proc_stack_frame].id );
+						break;
+
+		case 0x0018:		label = &labels[ref_num-1];
+						break;
+
+		case 0x003E:		label = &labels[ref_num-1];
+						break;
+	}
+	return label;
+}
+
 char *execute_on( int num, char *tokenBuffer, unsigned short token )
 {
 	unsigned short ref_num = 0;
@@ -138,6 +160,8 @@ char *execute_on( int num, char *tokenBuffer, unsigned short token )
 	unsigned short next_token = 0;
 	char *ret = NULL;
 	struct reference *ref = NULL;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if ( (token==PROC) || (token==GOTO) || (token==GOSUB) ) 
 	{
@@ -253,8 +277,11 @@ char *execute_on( int num, char *tokenBuffer, unsigned short token )
 					tokenBuffer +=2;
 					break;
 
-				default: 
+				case 0x0000:	// exit at end of list..
+				case 0x0054:
+					ret = tokenBuffer +2;
 
+				default: 
 					goto exit_on_for_loop;
 			}
 		}
@@ -270,37 +297,43 @@ exit_on_for_loop:
 			switch (token)
 			{
 				case GOTO:	
-						label = findLabel(globalVars[ref_num-1].varName, procStcakFrame[proc_stack_frame].id);
-						ret = label ? label -> tokenLocation : NULL;
+
+						dprintf("--GOTO--\n");
+
+						label = GetLabel( is_token, ref_num );
+						if (label)
+						{
+							dropProgStackAllFlag( cmd_true | cmd_false );	// just kill the if condition, if any.
+							ret = label -> tokenLocation ;
+						}
 						break;
 
 				case GOSUB:	
 
-						// +2 next token
+						dprintf("--GOSUB--\n");
 
-						switch (is_token)
+						label = GetLabel( is_token, ref_num );
+						if (label)
 						{
-							case 0x0006:
-									stackCmdLoop( _gosub_return, tokenBuffer+2 );
-									label = findLabel(globalVars[ref_num-1].varName, procStcakFrame[proc_stack_frame].id );
-									break;
-							case 0x0018:
-									stackCmdLoop( _gosub_return, tokenBuffer+2 );
-									label = &labels[ref_num-1];
-									break;
-							case 0x003E:
-									stackCmdLoop( _gosub_return, tokenBuffer+2 );
-									label = &labels[ref_num-1];
-									break;
+							stackCmdLoop( _gosub_return, tokenBuffer+2 );
+							ret = label -> tokenLocation;
 						}
-
-						ret = label ? label -> tokenLocation : NULL;
 						break;
 
 				case PROC:
 
-						stackCmdProc( _procedure, tokenBuffer);  
-						ret = globalVars[ref_num-1].var.tokenBufferPos;
+						dprintf("--PROC--\n");
+
+						{
+							int idx = ref_num - 1;
+							int oldStack = stack;
+							stackCmdProc( _procedure, tokenBuffer);  
+							cmdTmp[cmdStack-1].stack = oldStack;	// carry stack.
+
+							tokenMode = mode_store;
+							stack_frame_up(idx);
+							ret = globalVars[idx].var.tokenBufferPos;
+						}
 						break;
 			}
 		}

@@ -26,6 +26,8 @@
 #include "spawn.h"
 #include "init.h"
 
+#include <proto/asl.h>
+
 extern int sig_main_vbl;
 extern bool running;			// 
 extern bool interpreter_running;	// interprenter is really running.
@@ -38,16 +40,17 @@ enum
 	GID_PREFS
 };
 
-
 extern struct Menu *amiga_menu;
 extern struct retroSprite *sprite;
 
 struct Process *EngineTask = NULL;
+extern UWORD *EmptyPointer;
 
 bool engine_wait_key = false;
 bool engine_stopped = false;
 bool engine_key_repeat = false;
 bool engine_key_down = false;
+bool engine_mouse_hidden = false;
 
 extern bool curs_on;
 extern int _keyshift;
@@ -63,11 +66,16 @@ int engine_mouse_key = 0;
 int engine_mouse_x = 0;
 int engine_mouse_y = 0;
 int autoView = 1;
-int bobUpdate = 1;
+int bobDoUpdate = 0;			// when we are ready to update bobs.
+int bobAutoUpdate = 1;
+int bobUpdateNextWait = 0;
 int cursor_color = 3;
 
 void clearBobs();
+void clearBobsOnScreen(retroScreen *screen);
 void drawBobs();
+void drawBobsOnScreen(retroScreen *screen);
+
 struct Gadeget *IcoGad = NULL;
 struct Image * IcoImg = NULL;
 
@@ -199,7 +207,8 @@ void close_engine_window( )
 			IcoImg = NULL;
 		}
 
-		CloseWindow(My_Window);
+		ClearPointer( My_Window );
+		CloseWindow( My_Window );
 		My_Window = NULL;
 	}
 }
@@ -207,9 +216,12 @@ void close_engine_window( )
 struct RastPort font_render_rp;
 struct retroEngine *engine = NULL;
 
+extern struct TextFont *open_font( char const *filename, int size );
+extern struct TextFont *gfx_font;
+
 bool init_engine()
 {
-	if ( ! open_engine_window( 0, 0, 640,480) ) return false;
+	if ( ! open_engine_window( 200, 100, 640,480) ) return false;
 
 	InitRastPort(&font_render_rp);
 	font_render_rp.BitMap = AllocBitMapTags( 800, 50, 256, 
@@ -222,6 +234,11 @@ bool init_engine()
 
 	font_render_rp.Font =  My_Window -> RPort -> Font;
 	SetBPen( &font_render_rp, 0 );
+
+	if (gfx_font = open_font( "topaz.font", 8 ))
+	{
+		 SetFont( &font_render_rp, gfx_font );
+	}
 
 	engine =  retroAllocEngine( My_Window, video );
 
@@ -246,6 +263,12 @@ void close_engine()
 	}
 
 	close_engine_window();
+
+	if (gfx_font)
+	{
+		CloseFont( gfx_font );
+		gfx_font = NULL;
+	}
 
 	if (engine)
 	{
@@ -456,6 +479,24 @@ void empty_que( struct MsgPort *port )
 	}
 }
 
+
+void engine_ShowMouse( ULONG enable )
+{
+	if (engine)
+	{
+		if(enable)
+		{
+			ClearPointer( engine -> window );
+		}
+		else if(EmptyPointer)
+		{
+			SetPointer( engine -> window, EmptyPointer, 1, 16, 0, 0);
+		}
+	}
+
+	engine_mouse_hidden = !enable;
+}
+
 void handel_window()
 {
 	ULONG Class;
@@ -500,6 +541,7 @@ void handel_window()
 
 							engine_mouse_x = mouse_x - engine -> window -> BorderLeft;
 							engine_mouse_y = mouse_y - engine -> window -> BorderTop;
+							
 							break;
 
 					case IDCMP_MENUPICK:
@@ -586,9 +628,23 @@ void handel_iconify()
 	}
 }
 
+void swap_buffer(struct retroScreen *screen )
+{
+/*
+	memcpy( 
+		screen -> Memory[1 - screen -> double_buffer_draw_frame], 
+		screen -> Memory[screen -> double_buffer_draw_frame],
+		screen -> bytesPerRow * screen -> realHeight );
+*/
+
+	screen -> double_buffer_draw_frame = 1 - screen -> double_buffer_draw_frame ;
+}
+
 
 void main_engine()
 {
+	int bobIsUpdated = 0; 
+
 	Printf("init engine\n");
 
 	if (init_engine())		// libs open her.
@@ -641,14 +697,6 @@ void main_engine()
 				retroClearVideo( video );
 				engine_lock();
 
-#if 1
-				if ((bobUpdate==1)||(screen -> force_swap))
-				{
-					drawBobs();
-				}
-#endif
-
-#if 1
 				for (n=0; n<8;n++)
 				{
 					screen = screens[n];
@@ -659,34 +707,29 @@ void main_engine()
 
 						if (screen -> Memory[1]) 	// has double buffer
 						{
-							Printf_iso("screen %d - force swap %s\n", n, screen -> force_swap ? "Yes" : "No" );
-
 							if ((screen -> autoback!=0) || (screen -> force_swap))
 							{
-								screen -> force_swap = FALSE;
-
-								memcpy( 
-									screen -> Memory[1 - screen -> double_buffer_draw_frame], 
-									screen -> Memory[screen -> double_buffer_draw_frame],
-									screen -> bytesPerRow * screen -> realHeight );
-
-								screen -> double_buffer_draw_frame = 1 - screen -> double_buffer_draw_frame ;
+								drawBobsOnScreen(screen);
+								swap_buffer( screen );
+								clearBobsOnScreen(screen);
 							}
+						}
+						else if (bobDoUpdate)
+						{
+							clearBobsOnScreen(screen);
+							drawBobsOnScreen(screen);
+							bobIsUpdated = 1;
 						}
 					}
 				}	// next
-#endif
 
-#if 1
 				retroDrawVideo( video );
-#endif
 
-#if 1
-				if ((bobUpdate==1)||(screen -> force_swap))
+				if (bobIsUpdated)
 				{
-					clearBobs();
+					bobIsUpdated = 0;
+					bobDoUpdate = 0;
 				}
-#endif
 
 #if 1
 				if (channels)
@@ -784,5 +827,35 @@ void engine_lock()
 void engine_unlock()
 {
 	MutexRelease(engine_mx);
+}
+
+char *asl()
+{
+	struct FileRequester	 *filereq;
+	char *ret = NULL;
+	char c;
+	int l;
+
+	if (filereq = (struct FileRequester	 *) AllocAslRequest( ASL_FileRequest, TAG_DONE ))
+	{
+		if (AslRequestTags( (void *) filereq, ASLFR_DrawersOnly, FALSE,	TAG_DONE ))
+		{
+			if ((filereq -> fr_File)&&(filereq -> fr_Drawer))
+			{
+				if (l = strlen(filereq -> fr_Drawer))
+				{
+					c = filereq -> fr_Drawer[l-1];
+					if (ret = (char *) malloc( strlen(filereq -> fr_Drawer) + strlen(filereq -> fr_File) +2 ))
+					{
+						sprintf( ret, ((c == '/') || (c==':')) ? "%s%s" : "%s/%s",  filereq -> fr_Drawer, filereq -> fr_File ) ;
+					}
+				}
+				else ret = strdup(filereq -> fr_File);
+			}
+		}
+		 FreeAslRequest( filereq );
+	}
+
+	return ret;
 }
 

@@ -24,6 +24,7 @@
 #include "var_helper.h"
 #include "pass1.h"
 #include "label.h"
+#include "amosstring.h"
 
 const char *types[]={"","#","$",""};
 
@@ -231,7 +232,7 @@ struct label *findLabel( char *name, int _proc )
 	unsigned int n;
 	struct label *label;
 
-	printf("%s(%s,%d)\n",__FUNCTION__,name,_proc);
+	dprintf("%s(%s,%d)\n",__FUNCTION__,name,_proc);
 
 	for (n=0;n<labels.size();n++)
 	{
@@ -241,10 +242,11 @@ struct label *findLabel( char *name, int _proc )
 		{
 			if (strcasecmp( label -> name, name)==0)
 			{
-				return &labels[n];
+				return label;
 			}
 		}
 	}
+
 	return NULL;
 }
 
@@ -299,8 +301,8 @@ struct globalVar *add_var_from_ref( struct reference *ref, char **tmp, int type 
 		_new = &globalVars[global_var_count-1];
 		_new -> varName = *tmp;	// tmp is alloced and used here.
 		_new -> var.type = type;
-		_new -> var.len = 0;
-		if (_new -> var.type == type_string) _new -> var.str = strdup("");
+
+		if (_new -> var.type == type_string) _new -> var.str = toAmosString("",0);
 
 		*tmp = NULL;
 	}
@@ -570,11 +572,7 @@ void pass1label(char *ptr)
 
 				if (thisNest = find_nest_loop())
 				{
-					printf("label inside %s at %08x\n", nest_names[thisNest -> cmd], thisNest -> ptr);
-
 					tmp.loopLocation = thisNest -> ptr;
-
-					getchar();
 				}
 
 				labels.push_back(tmp);
@@ -948,6 +946,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				case 0x0026:	ret += QuoteByteLength(ptr); break;	// skip strings.
+				case 0x002E:	ret += QuoteByteLength(ptr); break;	// skip strings.
 				case 0x064A:	ret += QuoteByteLength(ptr); break;	// skip strings.
 				case 0x0652:	ret += QuoteByteLength(ptr); break;	// skip strings.
 
@@ -1123,8 +1122,8 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							{
 								ret = pass1_global( ptr );
 							}
-							else
-								setError(11,ptr);
+							// inside procedure this command should copies from global to local..
+
 							break;
 
 				case 0x0404:	// Data

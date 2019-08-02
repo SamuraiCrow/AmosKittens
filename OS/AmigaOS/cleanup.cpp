@@ -8,9 +8,13 @@
 #include "amosKittens.h"
 #include <vector>
 #include <proto/retroMode.h>
+#include "amoskittens.h"
 #include "commandsbanks.h"
+#include "commands.h"
+#include "engine.h"
 #include "amalcompiler.h"
 #include "channel.h"
+#include "debug.h"
 
 extern struct retroScreen *screens[8] ;
 extern struct retroSpriteObject bobs[64];
@@ -23,7 +27,44 @@ extern struct retroSprite *icons ;
 extern ChannelTableClass *channels;
 extern struct retroBlock *cursor_block;
 
+extern std::vector<struct amosMenuItem *> menuitems;
+extern std::vector<struct amos_selected> amosSelected;
+extern std::vector<struct defFn> defFns;
 extern std::vector<struct kittyBank> kittyBankList;
+
+void clean_up_defFns()
+{
+	struct defFn *item;
+
+	while (defFns.size())
+	{
+		if (item = &defFns[0])
+		{
+			if (item -> name) free (item -> name);
+			item -> name = NULL;
+		}
+		
+		defFns.erase( defFns.begin() );
+	}
+}
+
+void clean_up_menus()
+{
+	struct amosMenuItem *item;
+
+	while (menuitems.size())
+	{
+		if (item = menuitems[0])
+		{
+			menuitems[0] = NULL;
+			if (item -> str) free (item -> str);
+			item -> str = NULL;
+			free(item);
+		}
+		
+		menuitems.erase( menuitems.begin() );
+	}
+}
 
 
 void clear_local_vars( int proc )
@@ -40,16 +81,16 @@ void clear_local_vars( int proc )
 			switch (var->type)
 			{
 				case type_int:
-					var -> value = 0;
+					var -> integer.value = 0;
 					break;
 
 				case type_float:
-					var -> decimal = 0;
+					var -> decimal.value = 0;
 					break;
 
 				case type_string:
-					if (var->str) var->str[0] = 0;
-					var->len = 0;
+					if (var->str) free(var->str);
+					var->str = NULL;
 					break;
 
 				case type_int | type_array:
@@ -141,10 +182,31 @@ extern void freeBank( int banknr );
 
 void clean_up_banks()
 {
-	unsigned int n;
-	for (n=0;n<kittyBankList.size();n++)
+	while (kittyBankList.size())
 	{
-		freeBank(n);
+		freeBank( kittyBankList[0].id );
+	}
+}
+
+struct kittyBank *get_first_user_bank()
+{
+	unsigned int n;
+
+	for (n=0; n<kittyBankList.size();n++)
+	{
+		if (kittyBankList[n].id > 0) return &kittyBankList[n];
+	}
+
+	return NULL;
+}
+
+void clean_up_user_banks()
+{
+	struct kittyBank *userBank = NULL;
+
+	while ( userBank = get_first_user_bank())
+	{
+		freeBank( userBank -> id );
 	}
 }
 
@@ -152,15 +214,15 @@ void clean_up_special()
 {
 	int n;
 
-	printf("should clean up menus here, don't forget me\n");
+	dprintf("clean up defFns\n");
 
-	if (cursor_block)
-	{
-		retroFreeBlock(cursor_block);
-		cursor_block = NULL;
-	}
+	clean_up_defFns();
 
-	printf("clean up channels!!\n");
+	dprintf("clean up menus\n");
+
+	clean_up_menus();
+
+	dprintf("clean up channels!!\n");
 
 	if (channels) 
 	{
@@ -168,18 +230,28 @@ void clean_up_special()
 		channels = NULL;
 	}
 
-	printf("clean up bobs!!\n");
-
-	for (n=0;n<64;n++)
+	if (IRetroMode)
 	{
-		retroFreeSpriteObject( &bobs[n],TRUE);		// TRUE = only data
+
+		if (cursor_block)
+		{
+			retroFreeBlock(cursor_block);
+			cursor_block = NULL;
+		}
+
+		dprintf("clean up bobs!!\n");
+
+		for (n=0;n<64;n++)
+		{
+			retroFreeSpriteObject( &bobs[n],TRUE);		// TRUE = only data
+		}
 	}
 
-	printf("clean up banks!!\n");
+	dprintf("clean up banks!!\n");
 
 	clean_up_banks();
 
-	printf("clean up contextDir\n");
+	dprintf("clean up contextDir\n");
 
 	if (contextDir)
 	{
@@ -187,7 +259,7 @@ void clean_up_special()
 		contextDir = NULL;
 	}
 
-	printf("clean up dir first pattern");
+	dprintf("clean up dir first pattern\n");
 
 	if (dir_first_pattern)
 	{
@@ -195,7 +267,7 @@ void clean_up_special()
 		dir_first_pattern = NULL;
 	}
 
-	printf("clean up zones\n");
+	dprintf("clean up zones\n");
 
 	if (zones)
 	{

@@ -31,6 +31,7 @@
 #include "AmalCompiler.h"
 #include "channel.h"
 #include "amal_object.h"
+#include "amosstring.h"
 
 extern char *(*_do_set) ( struct glueCommands *data, int nextToken );
 extern char *_setVar( struct glueCommands *data, int nextToken );
@@ -43,7 +44,7 @@ extern struct retroVideo *video;
 extern struct retroSpriteObject sprites[64];
 extern struct retroSpriteObject bobs[64];
 
-extern void remove_lower_case(char *txt);
+extern void remove_lower_case( struct stringData *txt);
 
 void setChannelToken(struct kittyChannel *item,int token, int number);
 void channel_do_object( struct kittyChannel *self );
@@ -213,6 +214,7 @@ void setChannelToken(struct kittyChannel *item,int token, int number)
 		case 0x1A94:	item -> objectAPI = &sprite_api; break;
 		case 0x1B9E: 	item -> objectAPI = &bob_api; break;
 		case 0x0A18:	item -> objectAPI = &screen_display_api; break;
+		case 0x0A36:	item -> objectAPI = &screen_offset_api; break;
 	}
 
 	if (item -> objectAPI) 
@@ -276,6 +278,7 @@ char *do_to_channel( struct nativeCommand *cmd, char *tokenbuffer )
 		case 0x1A94:	// Channel x To Sprite y
 		case 0x1B9E: 	// Channel x To Bob y
 		case 0x0A18:	// Channel x To Display y
+		case 0x0A36:	// Channel x to Screen Offset Y
 		case 0x0DDC:  // Channel x to Rainbow y
 
 					stack ++;
@@ -285,7 +288,7 @@ char *do_to_channel( struct nativeCommand *cmd, char *tokenbuffer )
 					ret = tokenbuffer+2;
 					break;
 		default:
-			printf("bad token for TO command %04x\n",token);
+			printf("bad token for CHANNEL ... TO command %04x\n",token);
 			getchar();
 			setError(22,tokenbuffer);
 	}
@@ -348,13 +351,13 @@ char *_amalAmal( struct glueCommands *data, int nextToken )
 			{
 				struct kittyChannel *item;
 				int channel = getStackNum( stack -1 );
-				char *script = getStackString( stack );
-				char *nscript;
+				struct stringData *script = getStackString( stack );
+				struct stringData *nscript;
 
 				engine_lock();				// most be thread safe!!!
 				if (item = channels -> getChannel(channel))
 				{
-					nscript = strdup(script);
+					nscript = amos_strdup(script);
 					if (nscript)
 					{
 						remove_lower_case( nscript );
@@ -370,7 +373,7 @@ char *_amalAmal( struct glueCommands *data, int nextToken )
 					{
 						setChannelToken(item,0x1A94,channel); // default to sprite token
 
-						nscript = strdup(script);
+						nscript = amos_strdup(script);
 						if (nscript)
 						{
 							remove_lower_case( nscript );
@@ -441,11 +444,7 @@ char *_amalAmalOn( struct glueCommands *data, int nextToken )
 	}
 
 	if (success == false) setError(22, data-> tokenBuffer);
-
-
 	popStack( stack - data->stack );
-
-	getchar();
 
 	return NULL;
 }
@@ -539,7 +538,7 @@ void channel_anim( struct kittyChannel *self )
 
 		if (self->anim_loops==-1)	// infinity.
 		{
-			self->anim_at = self -> anim_script;
+			self->anim_at = &self -> anim_script -> ptr;
 		}
 	}
 
@@ -553,7 +552,7 @@ void channel_anim( struct kittyChannel *self )
 
 		for (c=self->anim_at;*c;c++)
 		{
-			if (*c=='L') c = self -> anim_script;	//  when using normal anim command, "L" loops back to start.
+			if (*c=='L') c = &(self -> anim_script -> ptr);	//  when using normal anim command, "L" loops back to start.
 			if (*c=='(') para++;
 			if ((*c>='0')&&(*c<='9')) num = (num*10) + (*c-'0');
 			if (*c=='-') sign = -1;
@@ -618,11 +617,11 @@ char *_amalAnim( struct glueCommands *data, int nextToken )
 			{
 				struct kittyChannel *item;
 				int channel = getStackNum( stack -1 );
-				char *script = getStackString( stack );
+				struct stringData *script = getStackString( stack );
 
 				if (item = channels -> getChannel(channel))
 				{
-					setChannelAnim( item, strdup( script ) );
+					setChannelAnim( item, amos_strdup( script ) );
 					success = true;
 				}
 			}
@@ -737,7 +736,7 @@ void channel_movex( struct kittyChannel *self )
 
 		for (c=self->movex_at;*c;c++)
 		{
-			if (*c=='L') c = self -> movex_script;
+			if (*c=='L') c = &self -> movex_script -> ptr;
 			if (*c=='(') para++;
 			if ((*c>='0')&&(*c<='9')) num = (num*10) + (*c-'0');
 			if (*c=='-') sign = -1;
@@ -786,7 +785,7 @@ void channel_movey( struct kittyChannel *self )
 
 		for (c=self->movey_at;*c;c++)
 		{
-			if (*c=='L') c = self -> movey_script;
+			if (*c=='L') c = &self -> movey_script -> ptr;
 			if (*c=='(') para++;
 			if ((*c>='0')&&(*c<='9')) num = (num*10) + (*c-'0');
 			if (*c=='-') sign = -1;
@@ -833,20 +832,20 @@ char *_amalMoveX( struct glueCommands *data, int nextToken )
 			{
 				struct kittyChannel *item;
 				int channel = getStackNum( stack -1 );
-				char *txt = getStackString( stack );
+				struct stringData *txt = getStackString( stack );
 
 				if (txt)
 				{
 					engine_lock();				// most be thread safe!!!
 					if (item = channels -> getChannel(channel))
 					{
-						setChannelMoveX( item, strdup(txt) );
+						setChannelMoveX( item, amos_strdup(txt) );
 					}
 					else
 					{
 						if (item = channels -> newChannel( channel ) )
 						{
-							setChannelMoveX( item, strdup(txt) );
+							setChannelMoveX( item, amos_strdup(txt) );
 						}
 					}
 					engine_unlock();
@@ -881,20 +880,20 @@ char *_amalMoveY( struct glueCommands *data, int nextToken )
 			{
 				struct kittyChannel *item;
 				int channel = getStackNum( stack -1 );
-				char *txt = getStackString( stack );
+				struct stringData *txt = getStackString( stack );
 
 				if (txt)
 				{
 					engine_lock();				// most be thread safe!!!
 					if (item = channels -> getChannel(channel))
 					{
-						setChannelMoveY( item, strdup(txt) );
+						setChannelMoveY( item, amos_strdup(txt) );
 					}
 					else
 					{
 						if (item = channels -> newChannel( channel ) )
 						{
-							setChannelMoveY( item, strdup(txt) );
+							setChannelMoveY( item, amos_strdup(txt) );
 						}
 					}
 					engine_unlock();

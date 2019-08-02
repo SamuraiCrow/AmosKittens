@@ -32,6 +32,7 @@ extern struct RastPort font_render_rp;
 #include "errors.h"
 #include "engine.h"
 #include "bitmap_font.h"
+#include "amosString.h"
 
 extern int last_var;
 extern struct retroScreen *screens[8] ;
@@ -58,10 +59,10 @@ struct retroTextWindow *findTextWindow(struct retroScreen *screen,int id);
 struct retroTextWindow *redrawWindowsExceptID(struct retroScreen *screen,int exceptID);
 void delTextWindow( struct retroScreen *screen, struct retroTextWindow *window );
 
-extern int os_text_base(char *txt);
-extern void os_text_no_outline(struct retroScreen *screen,int x, int y, char *txt, int pen);
-extern void os_text(struct retroScreen *screen,int x, int y, char *txt, int ink0, int ink1);
-extern int os_text_width(char *txt);
+extern int os_text_base(struct stringData *txt);
+extern void os_text_no_outline(struct retroScreen *screen,int x, int y, struct stringData *txt, int pen);
+extern void os_text(struct retroScreen *screen,int x, int y, struct stringData *txt, int ink0, int ink1);
+extern int os_text_width(struct stringData *txt);
 
 void retroPutBlock(struct retroScreen *screen, struct retroBlock *block,  int x, int y, unsigned char bitmask);
 
@@ -95,6 +96,7 @@ void draw_cursor(struct retroScreen *screen)
 	if (screen)
 	{
 		struct retroTextWindow *textWindow = screen -> currentTextWindow;
+		unsigned char *memory = screen -> Memory[screen -> double_buffer_draw_frame]; 
 
 		if ((curs_on)&&(textWindow))
 		{
@@ -102,6 +104,7 @@ void draw_cursor(struct retroScreen *screen)
 			int d,m;
 			int x = (textWindow -> x + textWindow -> locateX) + (textWindow -> border ? 1 : 0);
 			int y = (textWindow -> y + textWindow -> locateY) + (textWindow -> border ? 1 : 0);
+
 			gx=8*x;	gy=8*y;
 
 			if (cursor_block == NULL) cursor_block = retroAllocBlock( 8, 8 );
@@ -111,8 +114,6 @@ void draw_cursor(struct retroScreen *screen)
 				retroGetBlock( screen, cursor_block, gx, gy );
 			}
 
-//			retroBAR( screen, gx,gy+6,gx+6,gy+7, cursor_color);
-
 			for (y=0;y<8;y++)
 			{
 				if (d = curs_lines[y])
@@ -121,7 +122,7 @@ void draw_cursor(struct retroScreen *screen)
 					m = 0x80;
 					while (m>0)
 					{
-						if (d&m) retroPixel( screen, gx+x,gy+y, cursor_color );
+						if (d&m) retroPixel( screen, memory, gx+x,gy+y, cursor_color );
 						m>>=1;
 						x++;
 					}
@@ -154,15 +155,15 @@ char *_textLocate( struct glueCommands *data, int nextToken )
 			{
 				case 1:
 						if (kittyStack[stack].type == type_int ) 
-							textWindow -> locateX = kittyStack[stack].value;
+							textWindow -> locateX = kittyStack[stack].integer.value;
 						break;
 
 				case 2:
 						if (kittyStack[stack-1].type == type_int ) 
-							textWindow -> locateX = kittyStack[stack-1].value;
+							textWindow -> locateX = kittyStack[stack-1].integer.value;
 		
 						if (kittyStack[stack].type == type_int )
-							textWindow -> locateY = kittyStack[stack].value;
+							textWindow -> locateY = kittyStack[stack].integer.value;
 						break;
 
 				default:
@@ -278,7 +279,19 @@ char *_textPaper( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
-void __print_text(struct retroScreen *screen, const char *txt, int maxchars)
+void __print_text(struct retroScreen *screen, struct stringData *txt, int maxchars)
+{
+	if (engine_ready())
+	{
+		_my_print_text( screen, (char *) &txt -> ptr, maxchars, underLine, shade, inverse,writing_w1,writing_w2 );
+	}
+	else
+	{
+		printf("%s", &txt -> ptr);
+	}
+}
+
+void __print_char_array(struct retroScreen *screen, const char *txt, int maxchars)
 {
 	if (engine_ready())
 	{
@@ -286,38 +299,41 @@ void __print_text(struct retroScreen *screen, const char *txt, int maxchars)
 	}
 	else
 	{
-		printf("%s", txt);
+		printf("%s", txt );
 	}
 }
+
 
 void __print_num( struct retroScreen *screen, int num )
 {
 	char tmp[50];
+	struct stringData *str = (struct stringData *) tmp;
 
 	if (num>-1)
 	{
-		sprintf(tmp," %d",num);
+		sprintf( &(str->ptr)," %d",num);
 	}
 	else
 	{
-		sprintf(tmp,"%d",num);
+		sprintf( &(str->ptr),"%d",num);
 	}
-	__print_text(screen, tmp,0);
+	__print_text(screen, str ,0);
 }
 
 void __print_double( struct retroScreen *screen, double d )
 {
-	char tmp[40];
+	char tmp[50];
+	struct stringData *str = (struct stringData *) tmp;
 
 	if (d>=0.0)
 	{
-		sprintf(tmp," %0.3lf",d);
+		sprintf(&(str->ptr)," %0.3lf",d);
 	}
 	else
 	{
-		sprintf(tmp,"%0.3lf",d);
+		sprintf(&(str->ptr),"%0.3lf",d);
 	}
-	__print_text(screen, tmp,0);
+	__print_text(screen, str,0);
 }
 
 char *_print( struct glueCommands *data, int nextToken )
@@ -335,10 +351,10 @@ char *_print( struct glueCommands *data, int nextToken )
 			switch (kittyStack[n].type)
 			{
 				case type_int:
-					__print_num( screen, kittyStack[n].value);
+					__print_num( screen, kittyStack[n].integer.value);
 					break;
 				case type_float:
-					__print_double( screen, kittyStack[n].decimal);
+					__print_double( screen, kittyStack[n].decimal.value);
 					break;
 				case type_string:
 					if (kittyStack[n].str) __print_text( screen, kittyStack[n].str,0);
@@ -361,14 +377,12 @@ char *_print( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
-int strlen_no_esc(const char *txt);
-
 
 char *_textCentre( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	struct retroScreen *screen; 
-	const char *txt = NULL;
+	struct stringData *txt = NULL;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -383,7 +397,7 @@ char *_textCentre( struct glueCommands *data, int nextToken )
 
 			clear_cursor(screen);
 
-			if (next_print_line_feed == true) __print_text( screen, "\n",0);
+			if (next_print_line_feed == true) __print_char_array( screen, "\n",0);
 
 			if ((txt)&&(textWindow))
 			{
@@ -447,7 +461,7 @@ char *textPrint(nativeCommand *cmd, char *ptr)
 	if (screen)
 	{
 		 clear_cursor(screen);
-		if (next_print_line_feed == true) __print_text(screen, "\n",0);
+		if (next_print_line_feed == true) __print_char_array(screen, "\n",0);
 	}
 	next_print_line_feed = true;
 
@@ -595,21 +609,30 @@ char *textInverseOff(struct nativeCommand *cmd, char *tokenBuffer)
 char *_textBorderStr( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	char *newstr = NULL;
+	struct stringData *newstr = NULL;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 2)
 	{
-		char *txt = getStackString( stack-1 );
+		struct stringData *txt = getStackString( stack-1 );
 		int border = getStackNum( stack );
+		char *ptr;
 
 		if ((txt)&&(border>=0)&&(border<16))
 		{
-			newstr = (char *) malloc( strlen(txt) + 6 + 1 ); 
+			newstr = alloc_amos_string( txt->size + 7 ); 
 			if (newstr)
 			{
-				sprintf(newstr,"%cE0%s%cR%c",27,txt,27,48+ border );
+				ptr = &newstr -> ptr;
+				*ptr++ = 27;
+				memcpy( ptr, "E0",2); ptr+=2;
+				memcpy( ptr, &txt->ptr, txt -> size); ptr += txt -> size;
+				*ptr++ = 27;
+				*ptr++ = 'R';
+				*ptr++ = 48+ border;
+				*ptr = 0;
+				newstr -> size = 3 + txt -> size + 4;
 			}
 		}
 
@@ -642,13 +665,13 @@ char *_textAt( struct glueCommands *data, int nextToken )
 	{
 		if (kittyStack[stack-1].type == type_int ) 
 		{
-			x = kittyStack[stack-1].value;
+			x = kittyStack[stack-1].integer.value;
 			index = 1;
 		}
 
 		if (kittyStack[stack].type == type_int )
 		{
-			y = kittyStack[stack].value;
+			y = kittyStack[stack].integer.value;
 			index |= 2;
 		}
 	}
@@ -656,33 +679,33 @@ char *_textAt( struct glueCommands *data, int nextToken )
 
 	popStack( stack - data->stack );
 
-	switch (index)
+	if  (index &1)
 	{
-		case 1:
-				{
-					char str[] = {27,'X','0',0};
-					if (x>-1) str[2]='0'+x;
-					setStackStrDup( str );
-				}
-				break;
-		case 2:
-				{
-					char str[] = {27,'Y','0',0};
-					if (y>-1) str[2]='0'+y;
-					setStackStrDup( str );
-				}
-				break;
-		case 3:
-				{
-					char str[] = {27,'X','0',27,'Y','0',0};
-					if (x>-1) str[2]='0'+x;
-					if (y>-1) str[5]='0'+y;
-					setStackStrDup( str );
-				}
-				break;
-		default:
-				setStackStrDup("");
-				break;
+		struct stringData *str = alloc_amos_string( 3 );
+		char *p = &str -> ptr;
+		*p++ =27;
+		*p++ = 'X';
+		*p++ = (x>-1) ? '0'+x : '0';
+		*p = 0;
+		setStackStr( str );
+	}
+
+
+	if  (index &2)
+	{
+		struct stringData *str = alloc_amos_string( 3 );
+		char *p = &str -> ptr;
+		*p++ =27;
+		*p++ = 'Y';
+		*p++ = (y>-1) ? '0'+y : '0';
+		*p = 0;
+		setStackStr( str );
+	}
+
+	if (index == 0)
+	{
+		struct stringData *str = alloc_amos_string( 0 );
+		setStackStr( str );
 	}
 
 	return NULL;
@@ -699,19 +722,23 @@ extern char *textAt(nativeCommand *cmd, char *ptr)
 char *_textPenStr( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	char str[] = {27,'P','0',0};
+	struct stringData *str = alloc_amos_string( 3 );
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
 		int n = getStackNum( stack );
-		if (n>-1) str[2]='0'+n;
+		char *p = &str -> ptr;
+		*p++ =27;
+		*p++ = 'P';
+		*p++ = (n>-1) ? '0'+n : '0';
+		*p = 0;
 	}
 	else setError(22,data->tokenBuffer);
 
 	popStack( stack - data->stack );
-	setStackStrDup( str );
+	setStackStr( str );
 
 	return NULL;
 }
@@ -726,19 +753,23 @@ extern char *textPenStr(nativeCommand *cmd, char *ptr)
 char *_textPaperStr( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	char str[] = {27,'B','0',0};
+	struct stringData *str = alloc_amos_string( 3 );
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
 		int n = getStackNum( stack );
-		if (n>-1) str[2]='0'+n;
+		char *p = &str -> ptr;
+		*p++ =27;
+		*p++ = 'B';
+		*p++ = (n>-1) ? '0'+n : '0';
+		*p = 0;
 	}
 	else setError(22,data->tokenBuffer);
 
 	popStack( stack - data->stack );
-	setStackStrDup( str );
+	setStackStr( str );
 
 	return NULL;
 }
@@ -1199,7 +1230,7 @@ char *_textClw( struct glueCommands *data, int nextToken )
 				textWindow -> locateX = 0;
 				textWindow -> locateY = 0;
 
-				retroBAR( screen, 
+				retroBAR( screen, screen -> double_buffer_draw_frame,
 					gx, gy ,
 					gx + gw, gy + gh,
 					screen -> paper);
@@ -1263,7 +1294,7 @@ char *_textCline( struct glueCommands *data, int nextToken )
 					break;
 			}
 
-			retroBAR(screen,x0,y0,x1,y1,screen -> paper);
+			retroBAR(screen,screen -> double_buffer_draw_frame,x0,y0,x1,y1,screen -> paper);
 		}
 	}
 
@@ -1281,34 +1312,40 @@ char *textCline(struct nativeCommand *cmd, char *ptr)
 
 char *textCDownStr(nativeCommand *cmd, char *ptr)
 {
-	char str[] = {31,0};
+	struct stringData *str = alloc_amos_string(1);	 //  '%' 
+	str -> ptr = 31;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackStrDup(str);
+	setStackStr(str);
 	return ptr;
 }
 
 char *textCUpStr(nativeCommand *cmd, char *ptr)
 {
-	char str[] = {30,0};
+	struct stringData *str = alloc_amos_string(1);	 //  '%' 
+	str -> ptr = 30;
+
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackStrDup(str);
+	setStackStr(str);
 	return ptr;
 }
 
 char *textCLeftStr(nativeCommand *cmd, char *ptr)
 {
-	char str[] = {29,0};
+	struct stringData *str = alloc_amos_string(1);	 //  '%' 
+	str -> ptr = 29;
+
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-	setStackStrDup(str);
-	dump_stack();
+	setStackStr(str);
 	return ptr;
 }
 
 char *textCRightStr(nativeCommand *cmd, char *ptr)
 {
-	char str[] = {28,0};
+	struct stringData *str = alloc_amos_string(1);	 //  '%' 
+	str -> ptr = 28;
+
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackStrDup(str);
+	setStackStr(str);
 	return ptr;
 }
 
@@ -1318,11 +1355,12 @@ void _print_using_break( struct nativeCommand *cmd, char *tokenBuffer )
 	setStackNone();
 }
 
-int stringSymbCount(char *str, char c)
+int stringSymbCount(struct stringData *str, char c)
 {
 	int cnt = 0;
 	char *s;
-	for (s=str;*s;s++) if (*s==c) cnt++;
+	char *se = (&str -> ptr) + str -> size;
+	for (s=&(str->ptr);s<se;s++) if (*s==c) cnt++;
 	return cnt;
 }
 
@@ -1394,13 +1432,13 @@ void write_format( bool sign, char *buf, char *dest )
 char *_textPrintUsing( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	char *dest = NULL;
+	struct stringData *dest = NULL;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
-		char *fmt = getStackString(stack-1);
-		dest = strdup(fmt);
+		struct stringData *fmt = getStackString(stack-1);
+		dest = amos_strdup(fmt);
 		char *d;
 		int numPos = 1;
 		int _div = 0;
@@ -1410,10 +1448,10 @@ char *_textPrintUsing( struct glueCommands *data, int nextToken )
 			case type_string:
 					{
 						int fmtCount = stringSymbCount(fmt,'~');
-						char *str = getStackString(stack);
-						char *s = str;
+						struct stringData *str = getStackString(stack);
+						char *s = &str -> ptr;
 
-						for (d=dest;*d;d++)
+						for (d=&dest->ptr;*d;d++)
 						{
 							switch (*d)
 							{
@@ -1428,7 +1466,7 @@ char *_textPrintUsing( struct glueCommands *data, int nextToken )
 						char buf[60];
 						double  decimal = getStackDecimal(stack);
 						sprintf(buf,"%lf",decimal);
-						write_format( decimal < 0.0f, buf, dest );
+						write_format( decimal < 0.0f, buf, &dest -> ptr );
 					}
 					break;
 
@@ -1437,7 +1475,7 @@ char *_textPrintUsing( struct glueCommands *data, int nextToken )
 						char buf[60];
 						int num = getStackNum(stack);
 						sprintf(buf,"%d.0",num);
-						write_format( num<0, buf, dest );
+						write_format( num<0, buf, &dest -> ptr );
 					}
 					break;
 		}
@@ -1637,7 +1675,7 @@ void renderWindow( struct retroScreen *screen, struct retroTextWindow *textWindo
 	x1 = x0 + (textWindow -> charsPerRow*8)-1;
 	y1 = y0 + (textWindow -> rows*8)-1;
 
-	retroBAR( screen, x0,y0,x1,y1,screen -> paper);
+	retroBAR( screen, screen -> double_buffer_draw_frame, x0,y0,x1,y1,screen -> paper);
 }
 
 void renderWindowBorder( struct retroScreen *screen, struct retroTextWindow *textWindow )
@@ -1652,18 +1690,18 @@ void renderWindowBorder( struct retroScreen *screen, struct retroTextWindow *tex
 
 	if (textWindow -> border == 0) return;
 
-	retroBAR( screen, x0,y0,x1,y0+7,screen -> paper);
-	retroBAR( screen, x0,y0,x0+7,y1,screen -> paper);
-	retroBAR( screen, x1-7,y0,x1,y1,screen -> paper);
-	retroBAR( screen, x0,y1-7,x1,y1,screen -> paper);
+	retroBAR( screen, screen -> double_buffer_draw_frame,x0,y0,x1,y0+7,screen -> paper);
+	retroBAR( screen, screen -> double_buffer_draw_frame,x0,y0,x0+7,y1,screen -> paper);
+	retroBAR( screen, screen -> double_buffer_draw_frame,x1-7,y0,x1,y1,screen -> paper);
+	retroBAR( screen, screen -> double_buffer_draw_frame,x0,y1-7,x1,y1,screen -> paper);
 
 	x0+=2;
 	y0+=2;
 	x1-=2;
 	y1-=2;
 
-	retroBox( screen, x0,y0,x1,y1, 2 );
-	retroBox( screen, x0+1,y0+1,x1-1,y1-1, 2 );
+	retroBox( screen, screen -> double_buffer_draw_frame,x0,y0,x1,y1, 2 );
+	retroBox( screen, screen -> double_buffer_draw_frame,x0+1,y0+1,x1-1,y1-1, 2 );
 
 
 	x0-=2;
@@ -1676,7 +1714,7 @@ void renderWindowBorder( struct retroScreen *screen, struct retroTextWindow *tex
 
 	if (textWindow -> title_top)
 	{
-		retroBAR( screen, _x*8,y0,(_x + strlen(textWindow -> title_top) )*8,y0+7,screen -> paper);
+		retroBAR( screen, screen -> double_buffer_draw_frame,_x*8,y0,(_x + strlen(textWindow -> title_top) )*8,y0+7,screen -> paper);
 
 		for (c = textWindow -> title_top; *c; c++)
 		{
@@ -1690,7 +1728,7 @@ void renderWindowBorder( struct retroScreen *screen, struct retroTextWindow *tex
 
 	if (textWindow -> title_bottom)
 	{
-		retroBAR( screen, _x*8,y1-7,(_x + strlen(textWindow -> title_bottom) )*8,y1,screen -> paper);
+		retroBAR( screen, screen -> double_buffer_draw_frame,_x*8,y1-7,(_x + strlen(textWindow -> title_bottom) )*8,y1,screen -> paper);
 
 		for (c = textWindow -> title_bottom; *c; c++)
 		{
@@ -2003,10 +2041,10 @@ char *_textTitleTop( struct glueCommands *data, int nextToken )
 
 			if (textWindow)
 			{
-				char *title = getStackString(stack);
+				struct stringData *title = getStackString(stack);
 
 				if (textWindow -> title_top) free( textWindow -> title_top );
-				textWindow -> title_top = strdup( title );
+				textWindow -> title_top = strdup( &title -> ptr );
 				
 				renderWindowBorder( screen, textWindow );
 			}
@@ -2039,10 +2077,10 @@ char *_textTitleBottom( struct glueCommands *data, int nextToken )
 
 			if (textWindow)
 			{
-				char *title = getStackString(stack);
+				struct stringData *title = getStackString(stack);
 
 				if (textWindow -> title_bottom) free( textWindow -> title_bottom );
-				textWindow -> title_bottom = strdup( title );
+				textWindow -> title_bottom = strdup( &title -> ptr );
 				
 				renderWindowBorder( screen, textWindow );
 			}
@@ -2080,7 +2118,7 @@ char *_textWindClose( struct glueCommands *data, int nextToken )
 				int gw = textWindow -> charsPerRow * 8 - 1;
 				int gh = textWindow -> rows * 8  -1;
 
-				retroBAR( screen, 
+				retroBAR( screen, screen -> double_buffer_draw_frame,
 					gx, gy ,
 					gx + gw, gy + gh,
 					screen -> paper);
@@ -2159,8 +2197,14 @@ char *textTextBase(struct nativeCommand *cmd, char *tokenBuffer)
 	int ret = 0;
 	proc_names_printf("%s:s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	char *txt="abcdefghijklmnopqrstuvwxyz";
+	const char *alpha = "abcdefghijklmnopqrstuvwxyz";
+	char buffer[ sizeof(struct stringData) + 50 ];
 
+	struct stringData *txt = (struct stringData *) buffer;
+
+	txt -> size = strlen(alpha);
+	memcpy( &txt -> ptr, alpha ,txt -> size );
+	 
 	if (txt)
 	{
 		ret = os_text_base(txt);
@@ -2292,7 +2336,7 @@ char *_textText( struct glueCommands *data, int nextToken )
 			{
 				int x = getStackNum( stack-2 );
 				int y = getStackNum( stack-1 );
-				char *txt = getStackString( stack );
+				struct stringData *txt = getStackString( stack );
 
 				if ((txt)&&(screen))
 				{
@@ -2357,7 +2401,7 @@ char *_textTextLength( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	unsigned short ret = 0;
-	char *txt;
+	struct stringData *txt;
 	proc_names_printf("%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
