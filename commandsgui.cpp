@@ -26,7 +26,7 @@
 #include "amosKittens.h"
 #include "commands.h"
 #include "commandsbanks.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 
 #include "interfacelanguage.h"
@@ -352,8 +352,6 @@ char *guiDialogUnfreeze(nativeCommand *cmd, char *tokenBuffer)
 
 int current_dialog = -1;
 
-void retroPutBlock(struct retroScreen *screen, struct retroBlock *block,  int x, int y, unsigned char bitmask);
-
 char *_guiDialogClose( struct glueCommands *data, int nextToken )
 {
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
@@ -388,7 +386,8 @@ char *_guiDialogClose( struct glueCommands *data, int nextToken )
 		{
 			if (context -> saved_block)
 			{
-				retroPutBlock( screens[current_screen], context -> saved_block, context -> dialog[0].x, context -> dialog[0].y, 0xFF );
+				struct retroScreen *screen = screens[current_screen];
+				retroPutBlock( screen , screen -> double_buffer_draw_frame, context -> saved_block, context -> dialog[0].x, context -> dialog[0].y, 0xFF );
 			}
 
 			cleanup_inerface_context( context );
@@ -417,15 +416,23 @@ char *_guiDialogOpen( struct glueCommands *data, int nextToken )
 	int ret = 0;
 	int varSize=17,bufferSize=0;
 
+	printf("args: %d\n",args);
+
 	switch (args)
 	{
 		case 2:	id = getStackNum(stack-1);
-				script = getStackString(stack);
+				script = getStackString(stack);			// this can also be a number
+				break;
+
+		case 3:
+				id = getStackNum(stack-2);
+				script = getStackString(stack-1);		// this can also be a number
+				varSize = getStackNum(stack);
 				break;
 
 		case 4:
 				id = getStackNum(stack-3);
-				script = getStackString(stack-2);
+				script = getStackString(stack-2);		// this can also be a number 
 				varSize = getStackNum(stack-1);
 				bufferSize = getStackNum(stack);
 				break;

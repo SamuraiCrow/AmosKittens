@@ -15,6 +15,7 @@
 #include <proto/wb.h>
 #include <proto/intuition.h>
 #include <intuition/pointerclass.h>
+#include "ahi_dev.h"
 
 #include "joysticks.h"
 #include "amoskittens.h"
@@ -26,17 +27,21 @@ extern struct TextFont *open_font( char const *filename, int size );
 
 struct Process *main_task = NULL;
 
-struct Library 					 *AmosExtensionBase = NULL;
-struct AmosExtensionIFace		 *IAmosExtension = NULL;
+struct Library 				*AmosExtensionBase = NULL;
+struct AmosExtensionIFace	*IAmosExtension = NULL;
 
-struct Library					*DataTypesBase = NULL;
-struct DataTypesIFace			*IDataTypes = NULL;
+struct Library				*DataTypesBase = NULL;
+struct DataTypesIFace		*IDataTypes = NULL;
 
 extern struct Library		 	*DOSBase;
-extern struct DOSIFace			*IDOS;
+extern struct DOSIFace		*IDOS;
 
 extern struct Library			*RetroModeBase;
-extern struct RetroModeIFace		*IRetroMode;
+extern struct RetroModeIFace	*IRetroMode;
+
+
+struct Library 			*AHIBase = NULL;
+struct AHIIFace			*IAHI = NULL;
 
 struct Library 			*AslBase = NULL;
 struct AslIFace			*IAsl = NULL;
@@ -75,6 +80,7 @@ struct Library			*LayersBase = NULL;
 struct LayersIFace		*ILayers = NULL;
 
 APTR engine_mx = 0;
+APTR channel_mx[4] = { 0,0,0,0 };
 
 UWORD *EmptyPointer = NULL;
 
@@ -145,6 +151,11 @@ BOOL init()
 	engine_mx = (APTR) AllocSysObjectTags(ASOT_MUTEX, TAG_DONE);
 	if ( ! engine_mx) return FALSE;
 
+	for (i=0;i<4;i++)
+	{
+		channel_mx[i] = (APTR) AllocSysObjectTags(ASOT_MUTEX, TAG_DONE);
+	}
+
 	// bitmap 16 bit alighed width = 2 bytes, 8 layers = 16 bytes
 
 	EmptyPointer = (UWORD*)  AllocVecTags( 16, 
@@ -196,6 +207,8 @@ BOOL init()
 #endif
 
 	if ( ! EmptyPointer ) return FALSE;
+
+	audio_start();
 
 	return TRUE;
 }
@@ -284,6 +297,13 @@ void closedown()
 		engine_mx = NULL;
 	}
 
-
+	for (i=0;i<4;i++)
+	{
+		if (channel_mx[i]) 
+		{
+			FreeSysObject(ASOT_MUTEX, channel_mx[i]); 
+			channel_mx[i] = NULL;
+		}
+	}
 }
 

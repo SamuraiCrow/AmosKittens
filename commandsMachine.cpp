@@ -29,14 +29,14 @@
 #include "commands.h"
 #include "commandsMachine.h"
 #include "commandsBanks.h"
-#include "errors.h"
-
+#include "kittyErrors.h"
+#include "amosString.h"
 
 #include "var_helper.h"
 
 extern int last_var;
 extern struct globalVar globalVars[];
-extern unsigned short last_token;
+//extern unsigned short last_token;
 extern int tokenMode;
 extern int tokenlength;
 
@@ -136,61 +136,53 @@ char *_machineDoke( struct glueCommands *data, int nextToken )
 char *_machineLoke( struct glueCommands *data, int nextToken )
 {
 	int *adr;
-	int value;
 	int args = stack - data->stack +1 ;
-	bool success = false;
-	int ret = 0;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==2)
 	{
 		adr = (int *) getStackNum(stack-1);
-		value = getStackNum(stack);
 
 		if (adr)
 		{
-			*adr = (int) value;
-			success = true;
+			*adr = (int) getStackNum(stack);
+			popStack( stack - data->stack );
+			return NULL;
 		}
 	}
 
-	if (success == false) setError(25,data->tokenBuffer);
-
+	setError(25,data->tokenBuffer);
 	popStack( stack - data->stack );
-	setStackNum(ret);
 	return NULL;
+}
+
+char *machineLoke(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _machineLoke, tokenBuffer );
+	setStackNum(0);
+	return tokenBuffer;
 }
 
 char *_machinePeek( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
-	int ret = 0;
-
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (args==1)
+	if (args==1)	// don't need to pop stack.
 	{
 		char *adr = (char *) getStackNum(stack);
-
 		if (adr)
 		{
-			ret = *adr;
-			success = true;
+			setStackNum(*adr);
+			return NULL;
 		}
-		else
-		{
-			setError(25,data->tokenBuffer);
-		}
+		else	setError(25,data->tokenBuffer);
 	}
-	else
-	{
-		setError(22,data->tokenBuffer);
-	}
+	else	setError(22,data->tokenBuffer);
 
 	popStack( stack - data->stack );
-	setStackNum(ret);
+	setStackNum(0);
 	return NULL;
 }
 
@@ -203,9 +195,6 @@ char *machinePeek(struct nativeCommand *cmd, char *tokenBuffer)
 char *_machineDeek( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	bool success = false;
-	int ret = 0;
-
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
@@ -214,52 +203,16 @@ char *_machineDeek( struct glueCommands *data, int nextToken )
 
 		if (adr)
 		{
-			ret = *adr;
-			success = true;
+			setStackNum( *adr );
+			return NULL;
 		}
+		else setError(25,data->tokenBuffer);
 	}
-
-	if (success == false) setError(25,data->tokenBuffer);
+	else	setError(22,data->tokenBuffer);
 
 	popStack( stack - data->stack );
-	setStackNum(ret);
+	setStackNum(0);
 	return NULL;
-}
-
-
-char *_machineLeek( struct glueCommands *data, int nextToken )
-{
-	int args = stack - data->stack +1 ;
-	bool success = false;
-	int ret = 0;
-
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-	if (args==1)
-	{
-		int *adr = (int *) getStackNum(data->stack);
-
-		if (adr)
-		{
-			ret = *adr;
-			success = true;
-		}
-	}
-
-	if (success == false) setError(25,data->tokenBuffer);
-
-	popStack( stack - data->stack );
-	setStackNum(ret);
-	return NULL;
-}
-
-
-
-
-char *machineDoke(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	stackCmdNormal( _machineDoke, tokenBuffer );
-	return tokenBuffer;
 }
 
 char *machineDeek(struct nativeCommand *cmd, char *tokenBuffer)
@@ -268,15 +221,38 @@ char *machineDeek(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *machineLoke(struct nativeCommand *cmd, char *tokenBuffer)
+char *_machineLeek( struct glueCommands *data, int nextToken )
 {
-	stackCmdNormal( _machineLoke, tokenBuffer );
-	return tokenBuffer;
+	int args = stack - data->stack +1 ;
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+		int *adr = (int *) getStackNum(data->stack);
+
+		if (adr)
+		{
+			setStackNum(*adr);
+			return NULL;
+		}
+		else setError(25,data->tokenBuffer);
+	}
+	else	setError(22,data->tokenBuffer);
+
+	popStack( stack - data->stack );
+	setStackNum(0);
+	return NULL;
 }
 
 char *machineLeek(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	stackCmdParm( _machineLeek, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *machineDoke(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdNormal( _machineDoke, tokenBuffer );
 	return tokenBuffer;
 }
 
@@ -350,32 +326,51 @@ char *machineVarPtr(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_machineFill( struct glueCommands *data, int nextToken )
 {
-	int *adrStart, *adrEnd;
-	int num;
 	int args = stack - data->stack +1 ;
-	bool success = false;
-	int _n, _size = 0;
+	uint32_t num;
+	int _size = 0;
+	char *adrStart, *adrEnd;
 
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==3)
 	{
-		adrStart = (int *) getStackNum(stack-2);
-		adrEnd = (int *) getStackNum(stack-1);
-		num = getStackNum(stack);
+		adrStart = (char *) getStackNum(stack-2);
+		adrEnd = (char *) getStackNum(stack-1);
+		num = (uint32_t) getStackNum(stack);
 
 		printf("%08X, %08X, %08x\n", adrStart, adrEnd, num);
 
-		if ( (adrStart) && (((int) adrStart&3)==0) && (((int)adrEnd&3)==0) )
+		if (adrStart) 
 		{
-			_size = ((int) adrEnd - (int) adrStart) / sizeof(int);
-			for (_n=0;_n<_size;_n++) adrStart[_n] = num;
-			success = true;
+			_size = ((uint32_t) adrEnd - (uint32_t) adrStart) / sizeof(uint32_t);
+
+			if ( (((int) adrStart&3)==0) && (((int) adrEnd&3)==0) )		// 32bit
+			{
+				uint32_t *ptr;
+				for ( ptr=(uint32_t *) adrStart ; ptr<(uint32_t *) adrEnd; ptr++) *ptr = num;
+				popStack( stack - data->stack );
+				return NULL;
+			}
+
+			if ( (((int) adrStart&1)==0) && (((int)adrEnd&1)==0) )		// 16bit	(maybe only works on BigEndien)
+			{
+				uint16_t *ptr;
+				uint16_t *num16 = (uint16_t *) &num;
+				int n = 0;
+
+				for ( ptr=(uint16_t *) adrStart ; ptr<(uint16_t *) adrEnd; ptr++)
+				{
+					*ptr = num16[n&1];
+					n++;
+				}
+				popStack( stack - data->stack );
+				return NULL;
+			}
 		}
 	}
 
-	if (success == false) setError(25,data->tokenBuffer);
-
+	setError(25,data->tokenBuffer);
 	popStack( stack - data->stack );
 	return NULL;
 }
@@ -745,7 +740,7 @@ char *machineBclr(struct nativeCommand *cmd, char *tokenBuffer)
 
 
 int reg = 0;
-unsigned int regs[16];
+extern unsigned int regs[16];
 
 extern char *_setVar( struct glueCommands *data, int nextToken );
 extern char *(*_do_set) ( struct glueCommands *data, int nextToken );
@@ -766,7 +761,6 @@ char *_machineAREG( struct glueCommands *data, int nextToken )
 	{
 		reg = getStackNum(stack) + 8;
 		if ((reg>7)&&(reg<16)) setStackNum( regs[reg] );
-		_do_set = _set_reg;
 	}
 	else setError(22,data->tokenBuffer);
 
@@ -783,7 +777,7 @@ char *_machineDREG( struct glueCommands *data, int nextToken )
 	{
 		reg = getStackNum(stack);
 		if ((reg>-1)&&(reg<8)) setStackNum( regs[reg] );
-		_do_set = _set_reg;
+
 	}
 	else setError(22,data->tokenBuffer);
 
@@ -794,12 +788,26 @@ char *_machineDREG( struct glueCommands *data, int nextToken )
 char *machineAREG(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	stackCmdParm( _machineAREG, tokenBuffer );
+
+	if (token_is_fresh) 
+	{
+		tokenMode = mode_store;
+		_do_set = _set_reg;
+	}
+
 	return tokenBuffer;
 }
 
 char *machineDREG(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	if (token_is_fresh)
+	{
+		tokenMode = mode_store;
+		_do_set = _set_reg;
+	}
+
 	stackCmdParm( _machineDREG, tokenBuffer );
+
 	return tokenBuffer;
 }
 
@@ -994,8 +1002,9 @@ proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	if (args==1)
 	{
 		int bankNr = getStackNum(stack);
+
 		bank = findBank(bankNr);
-		if (bank) if (bank -> type == 11) code = bank -> start;
+		if (bank) if ((bank -> type >= 8)&&(bank -> type <= 10)) code = bank -> start;
 	}
 
 	popStack( stack - data->stack );
@@ -1219,12 +1228,12 @@ char *_machinePeekStr( struct glueCommands *data, int nextToken )
 				switch ( kittyStack[stack].type )
 				{
 					case type_int:
-						ret = _copy_until_len(adr,kittyStack[stack].integer.value);
+						ret = toAmosString(adr,kittyStack[stack].integer.value);
 						break;
 
 					case type_string:
 						term = getStackString(stack);
-						ret = _copy_until_char(adr, term ? term -> ptr : 0 );
+						ret = toAmosString_char(adr, term ? term -> ptr : 0 );
 						break;
 				}
 				break;
@@ -1232,7 +1241,7 @@ char *_machinePeekStr( struct glueCommands *data, int nextToken )
 				adr = (char *) getStackNum(stack-2);
 				len = getStackNum(stack-1);
 				term = getStackString(stack);		
-				ret = _copy_until_len_or_char(adr, len, term ? term -> ptr : 0 );
+				ret = toAmosString_len_or_char(adr, len, term ? term -> ptr : 0 );
 				break;
 
 		default:
@@ -1249,7 +1258,6 @@ char *_machinePeekStr( struct glueCommands *data, int nextToken )
 
 	popStack( stack - data->stack );
 	setStackStr(ret);
-
 	return NULL;
 }
 
@@ -1284,7 +1292,7 @@ char *_machinePokeStr( struct glueCommands *data, int nextToken )
 
 				for (s=&src->ptr;s<src_end;s++)
 				{
-					*s = *dest;
+					*dest = *s;
 					dest++;
 				}
 

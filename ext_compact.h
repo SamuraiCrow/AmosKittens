@@ -7,9 +7,16 @@
 #endif
 #include "amosKittens.h"
 
+
+#define PicPac_screen 0x12031990
+#define PicPac_image 0x06071963
+
 struct PacPicContext
 {
 	// for when uncompressing or when compressing.
+
+	int scanline_x;
+	int scanline_y;
 
 	int w;
 	int h;
@@ -32,8 +39,10 @@ struct PacPicContext
 	unsigned char last_rle;
 	bool first_rle;
 	bool ready_to_encode;
+	int rrle_bit;
 };
 
 extern char *ext_cmd_unpack(nativeCommand *cmd, char *ptr);
+extern char *ext_cmd_pack(nativeCommand *cmd, char *tokenBuffer);
 extern char *ext_cmd_spack(nativeCommand *cmd, char *tokenBuffer);
 

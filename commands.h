@@ -67,6 +67,8 @@ char *cmdKillEditor(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdElseIf(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdAmosToBack(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdAmosToFront(struct nativeCommand *cmd, char *tokenBuffer );
+char *cmdAmosLock(struct nativeCommand *cmd, char *tokenBuffer );
+char *cmdAmosUnlock(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdNot(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdSetBuffers(struct nativeCommand *cmd, char *tokenBuffer );
 char *cmdMultiWait(struct nativeCommand *cmd, char *tokenBuffer );
@@ -130,4 +132,6 @@ extern unsigned int every_timer;
 extern char *on_every_gosub_location;
 extern char *on_every_proc_location;
 extern struct timeval every_before, every_after;
+extern void stack_frame_up(int varIndex);
+
 

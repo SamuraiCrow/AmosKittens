@@ -12,6 +12,8 @@ VERSION = 1
 
 warnings = -Wuninitialized -Wsign-compare -Wunused-variable
 
+COPT = -D__USE_INLINE__ -D__amoskittens__
+
 inc = -I./ -I../../
 
 objects_dir = objs_amoskittens/
@@ -25,7 +27,6 @@ main_objects = commands.cpp \
 			commandsBanks.cpp \
 			commandsErrors.cpp \
 			commandsMachine.cpp \
-			commandsSound.cpp \
 			commandsObjectControl.cpp \
 			commandsHardwareSprite.cpp \
 			commandsBlitterObject.cpp \
@@ -42,22 +43,27 @@ main_objects = commands.cpp \
 			os/amigaos/commandsDisc.cpp \
 			os/amigaos/commandsMenu.cpp \
 			os/amigaos/commandsGfxText.cpp \
+			os/amigaos/commandsDevice.cpp \
+			os/amigaos/commandsLibs.cpp \
 			os/amigaos/stuff.cpp \
 			AmalCompiler.cpp \
 			AmalCommands.cpp \
 			interfacelanguage.cpp \
 			ext_compact.cpp \
 			ext_turbo.cpp \
+			ext_music.cpp \
 			debug.cpp \
 			pass1.cpp \
-			errors.cpp \
+			kittyErrors.cpp \
 			stack.cpp \
 			var_helper.cpp \
 			channel.cpp \
 			amal_object_bob.cpp \
 			amal_object_sprite.cpp \
+			amal_object_rainbow.cpp \
 			amal_object_screen_display.cpp \
 			amal_object_screen_offset.cpp \
+			amal_object_screen_size.cpp \
 			screen_helper.cpp \
 			os/amigaos/readhunk.cpp \
 			os/amigaos/engine.cpp \
@@ -67,8 +73,11 @@ main_objects = commands.cpp \
 			os/amigaos/joystick.cpp \
 			os/amigaos/spawn.cpp \
 			os/amigaos/iconify.cpp \
+			os/amigaos/ahi_dev.cpp \
+			os/amigaos/animation.cpp \
 			AmosString.cpp \
-			floyd.cpp
+			floyd.cpp \
+
 
 objects_in_dir = ${main_objects:%.cpp=${objects_dir}%.o}
 main_SRCS = AmosKittens.cpp
@@ -78,17 +87,20 @@ programs= $(main_SRCS:.cpp=.exe)
 
 all:	 config.h $(objects_in_dir) $(programs) 
 
-$(objects_dir)%.o:	%.cpp debug.h 
-	g++ $(warnings) -c -O2 -D__USE_INLINE__ $(COPT) $(inc) $(@:${objects_dir}%.o=%.cpp) -o $@
+debug:
+	echo $(objects_in_dir)
 
-ccmosKittens.exe:	config.h	AmosKittens.cpp	 $(objects_in_dir)
-	g++ $(warnings) -O2 -D__USE_INLINE__ $(@:.exe=.cpp) $(objects_in_dir) -o $@
+$(objects_dir)%.o:	%.cpp debug.h 
+	g++ $(warnings) -c -O2  $(COPT) $(inc) $(@:${objects_dir}%.o=%.cpp) -o $@
+
+amosKittens.exe:	config.h	AmosKittens.cpp	 $(objects_in_dir)
+	g++ $(warnings) -O2 $(COPT) $(@:.exe=.cpp) $(objects_in_dir) -o $@
 
 %.exe:		%.cpp $(objects_in_dir)
-	g++ $(warnings) -O2 -D__USE_INLINE__ $(@:.exe=.cpp) $(objects_in_dir) -o $@
+	g++ $(warnings) -O2 $(COPT) $(@:.exe=.cpp) $(objects_in_dir) -o $@
 
 config_tools/check_cpu.tool.exe:		config_tools/check_cpu.tool.cpp 
-	g++ $(warnings) -O2 -D__USE_INLINE__ $(@:.exe=.cpp) -o $@
+	g++ $(warnings) -O2 $(COPT) $(@:.exe=.cpp) -o $@
 
 config.h: $(config_tools:.tool.cpp=.tool.exe)
 	echo > config.h

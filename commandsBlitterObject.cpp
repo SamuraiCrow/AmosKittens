@@ -25,7 +25,7 @@
 #include "amosKittens.h"
 #include "commandsGfx.h"
 #include "commandsBlitterObject.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 #include "commandsBanks.h"
 
@@ -39,6 +39,7 @@ extern int tokenlength;
 extern int priorityReverse;
 extern int bobDoUpdate;
 extern int bobAutoUpdate;
+extern int bobDoUpdateEnable;
 extern int bobUpdateNextWait;
 
 extern int current_screen;
@@ -55,12 +56,15 @@ void copyClearToScreen( struct retroSpriteClear *clear, struct retroScreen *scre
 
 void clearBob(struct retroSpriteObject *bob)
 {
-	struct retroScreen *screen = screens[bob->screen_id];
-	struct retroSpriteClear *clear;
+	if (bob->screen_id<0) return;
 
-	if (screen)
 	{
-		clear = &bob -> clear[ 0 ];
+		struct retroScreen *screen = screens[bob->screen_id];
+		struct retroSpriteClear *clear;
+
+		if (screen == NULL) return;
+
+		clear = &bob -> clear[ screen -> double_buffer_draw_frame ];
 
 		if ((clear -> mem)&&(bob->background==0))
 		{
@@ -243,7 +247,7 @@ void drawBob(struct retroSpriteObject *bob)
 		{
 			frame = &sprite -> frames[ image ];
 
-			clear = &bob -> clear[ 0 ];
+			clear = &bob -> clear[ screen -> double_buffer_draw_frame ];
 
 			clear -> x = bob -> x - frame -> XHotSpot;
 			clear -> y = bob -> y - frame -> YHotSpot;
@@ -271,7 +275,7 @@ void drawBob(struct retroSpriteObject *bob)
 				if (clear -> mem) copyScreenToClear( screen,clear );
 			}
 
-			retroPasteSprite(screen, sprite, bob->x, bob->y, image, flags, bob -> plains);
+			retroPasteSprite(screen, screen -> double_buffer_draw_frame,  sprite, bob->x, bob->y, image, flags, bob -> plains);
 		}
 	}
 }
@@ -366,7 +370,7 @@ char *_boBob( struct glueCommands *data, int nextToken )
 	{
 		if (screen -> Memory[1])
 		{
-			printf("face swaped\n");
+			dprintf("force swaped\n");
 			screen -> force_swap = TRUE;
 		}
 	}
@@ -537,13 +541,16 @@ char *boIBob(struct nativeCommand *cmd, char *tokenBuffer)
 char *_boPasteBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
+	struct retroScreen *screen = NULL;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 3:	// past bob x,y,i
-				if ( screens[current_screen] )
+
+				screen = screens[current_screen];
+				if (( screen ) && (sprite))
 				{
 					int x = getStackNum( stack-2 );
 					int y = getStackNum( stack-1 );
@@ -551,7 +558,16 @@ char *_boPasteBob( struct glueCommands *data, int nextToken )
 					int flags = image & 0xC000;
 					image &= 0x3FFF;
 
-					retroPasteSprite(screens[current_screen],sprite,x,y,image-1,flags, 0 );
+					switch (screen -> autoback)
+					{
+						case 0:	retroPasteSprite(screen,screen -> double_buffer_draw_frame,sprite,x,y,image-1,flags, 0 );
+								break;
+
+						default:	retroPasteSprite(screen,0,sprite,x,y,image-1,flags, 0 );
+								if (screen -> Memory[1]) retroPasteSprite(screen,1,sprite,x,y,image-1,flags, 0 );
+								break;
+					}
+
 				}
 				break;
 		default:
@@ -651,6 +667,7 @@ char *_boPutBob( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int n,image,flags;
+	struct retroScreen *screen;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -661,11 +678,24 @@ char *_boPutBob( struct glueCommands *data, int nextToken )
 				flags = image & 0xC000;
 				image &= image & 0x3FFF;
 
-				retroPasteSprite(screens[current_screen],sprite,
-						bobs[ n & 63 ].x,
-						bobs[ n & 63 ].y,
-						image -1, flags,
-						bobs[ n & 63].plains);
+				screen = screens[current_screen];
+
+				if (screen)	
+				{
+					switch (screen -> autoback)
+					{
+						case 0:	retroPasteSprite(screen,screen -> double_buffer_draw_frame,sprite,
+									bobs[ n & 63 ].x,bobs[ n & 63 ].y,image -1, flags, bobs[ n & 63].plains);
+								break;
+
+						default:	retroPasteSprite(screen,0,sprite,bobs[ n & 63 ].x,bobs[ n & 63 ].y,image -1, flags, bobs[ n & 63].plains);
+								if (screen -> Memory[1]) retroPasteSprite(screen,1,sprite,bobs[ n & 63 ].x,bobs[ n & 63 ].y,image -1, flags, bobs[ n & 63].plains);
+								break;
+					}
+				}
+				break;
+		default:
+				setError(22, data -> tokenBuffer);
 				break;
 	 }
 
@@ -775,8 +805,6 @@ char *_boLimitBob( struct glueCommands *data, int nextToken )
 
 	NYI(__FUNCTION__);
 
-	dump_stack();
-
 	popStack( stack - data->stack );
 	return NULL;
 }
@@ -871,10 +899,13 @@ char *boBobUpdateOn(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+extern void __wait_vbl();
+
 char *boBobUpdate(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	bobDoUpdate = 1;
+	__wait_vbl();
 	return tokenBuffer;
 }
 
@@ -1006,7 +1037,8 @@ char *_boBobOff( struct glueCommands *data, int nextToken )
 		if ((del>-1)&&(del<64))
 		{
 			engine_lock();
-			clearBob(&bobs[del]);
+
+			if (bobDoUpdateEnable)	clearBob(&bobs[del]);
 
 			if (bobs[del].clear[0].mem) sys_free(bobs[del].clear[0].mem);
 			bobs[del].clear[0].mem = NULL;

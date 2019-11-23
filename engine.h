@@ -16,15 +16,26 @@ extern bool engine_wait_key;
 extern int engine_mouse_key;
 extern int engine_mouse_x;
 extern int engine_mouse_y;
+extern uint32_t engine_back_color;
 extern bool engine_stopped;
 extern bool engine_mouse_hidden;
 
 extern struct retroVideo *video;
 extern struct retroScreen *screens[8] ;
 
+#define hardware_upper_left 128
+#define hardware_upper_top 50
+
 #ifdef __amigaos4__
 extern Process *EngineTask;
 #endif
+
+enum
+{
+	kitty_to_back = 1,
+	kitty_to_front,
+	kitty_limit_mouse
+};
 
 enum
 {
@@ -52,6 +63,9 @@ struct amosMenuItem
 	int levels;
 	int index[3];
 	char *str;
+	char *key;
+	unsigned short scancode;
+	unsigned short qualifier;
 	bool active;
 };
 

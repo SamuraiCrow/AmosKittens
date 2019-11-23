@@ -72,11 +72,6 @@ void remove_parenthesis(int black_at_stack )
 	}
 }
 
-unsigned short getLastProgStackToken()
-{
-	if (cmdStack) return cmdTmp[cmdStack-1].token;
-	return 0;
-}
 
 void _unLockPara()
 {
@@ -190,6 +185,18 @@ void stack_get_if_int( int n, int *ret )
 	}
 }
 
+
+bool stack_is_number( int n )
+{
+	switch (kittyStack[n].type)
+	{
+		case type_int:	return true;
+		case type_float: return true;
+	}
+	return false;
+}
+
+
 void setStackNone( void )
 {
 	if (kittyStack[stack].str) 
@@ -265,7 +272,6 @@ void setStackParenthesis()
 	kittyStack[stack].state = state_subData;
 	kittyStack[stack].type = type_none;
 }
-
 
 bool stackStrAddValue(struct kittyData *item0, struct kittyData *item1)
 {

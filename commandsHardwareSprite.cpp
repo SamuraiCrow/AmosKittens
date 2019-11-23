@@ -25,7 +25,7 @@
 #include "stack.h"
 #include "amosKittens.h"
 #include "commandsGfx.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 
 extern int sig_main_vbl;
@@ -52,11 +52,32 @@ char *_hsGetSpritePalette( struct glueCommands *data, int nextToken )
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if ((sprite)&&(screen))
+	if (args == 1)
 	{
-		for (n=0;n<256;n++)
+		if ((sprite)&&(screen))
 		{
-			retroScreenColor( screen, n, sprite -> palette[n].r, sprite -> palette[n].g, sprite -> palette[n].b );
+			switch (kittyStack[stack].type)
+			{
+				case type_none:
+
+					for (n=0;n<256;n++)
+					{
+						retroScreenColor( screen, n, sprite -> palette[n].r, sprite -> palette[n].g, sprite -> palette[n].b );		
+					}
+					break;
+
+				case type_int:
+					{
+						int mask = kittyStack[stack].integer.value;
+
+						for (n=0;n<256;n++)
+						{
+							if (mask & n) retroScreenColor( screen, n, sprite -> palette[n].r, sprite -> palette[n].g, sprite -> palette[n].b );		
+						}
+					}
+					break;
+
+			}
 		}
 	}
 
@@ -68,8 +89,12 @@ char *hsGetSpritePalette(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _hsGetSpritePalette, tokenBuffer );
+	setStackNone();
 	return tokenBuffer;
 }
+
+extern int XSprite_formula(int x);
+extern int YSprite_formula(int y);
 
 char *_hsSprite( struct glueCommands *data, int nextToken )
 {
@@ -79,14 +104,13 @@ char *_hsSprite( struct glueCommands *data, int nextToken )
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
+	engine_lock();
 	num = getStackNum( stack - 3 );
 	sprite = &video -> sprites[num];
-
-	stack_get_if_int( stack - 2 , &sprite->x );
-	stack_get_if_int( stack - 1 , &sprite->y );
-
+	if (stack_is_number( stack - 2)) sprite->x = XSprite_formula(getStackNum( stack - 2 ));
+	if (stack_is_number( stack - 1)) sprite->y = YSprite_formula(getStackNum( stack - 1 ));
 	sprite->image = getStackNum( stack );
-
+	engine_unlock();
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -124,10 +148,28 @@ char *hsGetSprite(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_hsSpriteOff( struct glueCommands *data, int nextToken )
 {
-	int n;
 	int args = stack - data->stack +1 ;
-
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args == 1)
+	{
+		struct kittyData *s = &kittyStack[stack];
+		engine_lock();
+		if (s -> type == type_int)
+		{
+			video -> sprites[ s -> integer.value ].image = -1;	// not deleted, just gone.
+		}
+		else
+		{
+			int n;
+			for (n=0;n<64;n++)
+			{
+				video -> sprites[n].image = -1;
+			}
+		}
+		engine_unlock();
+		return NULL;
+	}
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -137,6 +179,7 @@ char *hsSpriteOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _hsSpriteOff, tokenBuffer );
+	setStackNone();
 	return tokenBuffer;
 }
 
@@ -144,7 +187,6 @@ char *_hsSpriteBase( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int pick = 0;
-	struct retroFrameHeader *frame;
 	void *ret = NULL;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);

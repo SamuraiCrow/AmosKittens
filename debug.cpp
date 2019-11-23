@@ -30,6 +30,7 @@ extern struct globalVar globalVars[1000];
 extern std::vector<struct lineAddr> linesAddress;
 extern std::vector<struct label> labels;
 extern std::vector<struct kittyBank> kittyBankList;
+extern std::vector<struct wave *> waves;
 extern int global_var_count;
 
 extern struct retroScreen *screens[8] ;
@@ -67,6 +68,8 @@ char *_andData (struct glueCommands *data, int nextToken);
 char *_ifSuccess (struct glueCommands *data, int nextToken);
 char *_ifThenSuccess (struct glueCommands *data, int nextToken);
 char *_machinePeek(struct glueCommands *data, int nextToken);
+char *_machineDeek( struct glueCommands *data, int nextToken);
+char *_machineLeek( struct glueCommands *data, int nextToken);
 char *_bankStart(struct glueCommands *data, int nextToken);
 char *_chr(struct glueCommands *data, int nextToken);
 char *_gfxPoint(struct glueCommands *data, int nextToken);
@@ -90,6 +93,13 @@ char *_exit( struct glueCommands *data, int nextToken );
 char *_errTrap( struct glueCommands *data, int nextToken );
 char *_mathFn( struct glueCommands *data, int nextToken );
 char *_mathFnReturn( struct glueCommands *data, int nextToken );
+char *_machineAREG( struct glueCommands *data, int nextToken );
+char *_machineDREG( struct glueCommands *data, int nextToken );
+char *_gfxLogic( struct glueCommands *data, int nextToken );
+char *_gfxScreenCopy( struct glueCommands *data, int nextToken );
+char *_setVar( struct glueCommands *data, int nextToken );
+char *_set_amreg_fn( struct glueCommands *data, int nextToken );
+char *_set_amreg_channel_fn( struct glueCommands *data, int nextToken );
 
 
 struct stackDebugSymbol
@@ -116,6 +126,8 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_ifSuccess,"If Success" },
 	{_ifThenSuccess,"If Then Success" },
 	{_machinePeek,"Peek" },
+	{_machineDeek,"Deek" },
+	{_machineLeek,"Leek" },
 	{_bankStart,"Start" },
 	{_chr,"Chr$" },
 	{_gfxPoint,"Point" },
@@ -146,6 +158,13 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_errTrap,"Trap"},
 	{_mathFn,"Fn"},
 	{_mathFnReturn, "Fn (Return)"},
+	{_machineAREG,"_machineAREG"},
+	{_machineDREG,"_machineDREG"},
+	{_gfxLogic,"_gfxLogic"},
+	{_gfxScreenCopy,"_gfxScreenCopy"},
+	{_setVar,"set var"},
+	{_set_amreg_fn,"_set_amreg_fn" },
+	{_set_amreg_channel_fn,"_set_amreg_channel_fn" },
 	{NULL, NULL}
 };
 
@@ -424,21 +443,20 @@ void dump_banks()
 {
 	unsigned int n = 0;
 	struct kittyBank *bank;
-	printf( "%s\n", "Nr   Type       Start       Length\n\n");
-
+	printf( "Nr   Type       Start       Length\n\n");
 	for (n=0;n<kittyBankList.size();n++)
 	{
 		bank = &kittyBankList[n];
-
 		if (bank -> start)
 		{
-			printf("%2d - %.8s S:$%08X L:%d\n", 
+			printf("%03d - %.8s S:$%08X L:%d\n", 
 				bank -> id,
 				(char *) bank->start-8,
 				bank -> start, 
 				bank -> length);
 		}
 	}
+	printf("\n");
 }
 
 void dump_end_of_program()
@@ -456,6 +474,9 @@ void dump_end_of_program()
 
 	printf("\n--- label dump ---\n");
 	dump_labels();
+
+	printf("\n-- banks loaded --\n");
+	dump_banks();
 }
 
 int getLineFromPointer( char *address )
@@ -534,8 +555,26 @@ void dump_bobs(int screen_id)
 	Printf("\n");
 }
 
+void dump_zones()
+{
+	int z;
+	struct zone *zz;
+	struct retroScreen *s;
+	for (z=0;z<zones_allocated;z++)
+	{
+		if ((zones[z].screen>-1) && (zones[z].screen<8))
+		{
+			if (s = screens[zones[z].screen])
+			{
+				zz = &zones[z];
+				printf ("zone %d at %d,%d to %d,%d - on screen %d\n",z, zz->x0,zz->y0,zz->x1,zz->y1,zz -> screen );
+			}
+		}
+	}
+}
 
-void dumpScreenInfo()
+
+void dump_screens()
 {
 	int n;
 
@@ -548,7 +587,7 @@ void dumpScreenInfo()
 				n,
 				screens[n]->displayWidth, screens[n]->displayHeight,
 				screens[n]->realWidth,screens[n]->realHeight,
-				screens[n]->scanline_x,screens[n]->scanline_y,
+				screens[n]->scanline_x/2+128,screens[n]->scanline_y/2+50,
 				screens[n]->offset_x,screens[n]->offset_y,
 				screens[n]->Memory[1] ? "Yes" : "No ",
 				screens[n]->double_buffer_draw_frame,
@@ -561,3 +600,93 @@ void dumpScreenInfo()
 	}
 };
 
+void dumpWaves( )
+{
+	unsigned int n,nn;
+	printf("-- waves --\n");
+	for (n=0;n<waves.size();n++)
+	{
+		printf("waves[%d] -> id %d\n",n, waves[n] -> id);
+
+		for (nn=0;nn<7;nn++)
+		{
+			printf("waves[%d] -> envels[%d] = {%d,%d,%d}\n",n, nn,
+				waves[n] -> envels[nn].volume, 
+				waves[n] -> envels[nn].startDuration,
+				waves[n] -> envels[nn].duration );
+		}
+	}
+}
+
+#ifdef __amigaos__
+#define IDCMP_COMMON IDCMP_MOUSEBUTTONS | IDCMP_INACTIVEWINDOW | IDCMP_ACTIVEWINDOW  | \
+	IDCMP_CHANGEWINDOW | IDCMP_MOUSEMOVE | IDCMP_REFRESHWINDOW | IDCMP_RAWKEY | \
+	IDCMP_EXTENDEDMOUSE | IDCMP_CLOSEWINDOW | IDCMP_NEWSIZE | IDCMP_INTUITICKS | IDCMP_MENUPICK | IDCMP_GADGETUP
+
+struct Window *debug_Window = NULL;;
+#endif
+
+void open_debug_window()
+{
+#ifdef __amigaos__
+	debug_Window = OpenWindowTags( NULL,
+				WA_Left,			820,
+				WA_Top,			20,
+				WA_InnerWidth,		800,
+				WA_InnerHeight,	800,
+				WA_SimpleRefresh,	TRUE,
+				WA_CloseGadget,	FALSE,
+				WA_DepthGadget,	TRUE,
+				WA_DragBar,		TRUE,
+				WA_Borderless,	FALSE,
+				WA_SizeGadget,	FALSE,
+				WA_SizeBBottom,	TRUE,
+				WA_NewLookMenus,	TRUE,
+				WA_Title, "Debug Window",
+				WA_Activate,        TRUE,
+				WA_Flags, WFLG_RMBTRAP| WFLG_REPORTMOUSE,
+				WA_IDCMP,           IDCMP_COMMON,
+			TAG_DONE);
+#endif
+}
+
+void close_debug_window()
+{
+#ifdef __amigaos__
+	if (debug_Window) CloseWindow(debug_Window);
+	debug_Window = NULL;
+#endif
+}
+
+void debug_draw_wave(struct wave *wave)
+{
+#ifdef __amigaos__
+	unsigned int n;
+	 char *data;
+	data = ( char *) &(wave -> sample.ptr);
+
+	open_debug_window();
+	for (n=0;n<wave -> sample.bytes;n++) 	WritePixelColor( debug_Window -> RPort, 50+n, 400 + data[n] , 0xFF0000FF); 
+	getchar();
+	close_debug_window();
+#endif
+}
+
+
+void debug_draw_hline(int x)
+{
+#ifdef __amigaos__
+	int y;
+	if (debug_Window)
+	{
+		for (y=-30;y<=30;y++)
+		{
+			WritePixelColor( debug_Window -> RPort, 50+x, 400+y, 0xFFFF0000); 
+		}
+	}
+	else
+	{
+		printf("debug gfx window not open\n");
+	}
+#endif 
+}

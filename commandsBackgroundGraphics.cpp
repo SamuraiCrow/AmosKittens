@@ -24,7 +24,7 @@
 #include "stack.h"
 #include "amosKittens.h"
 #include "commandsBackgroundGraphics.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 #include "commandsbanks.h"
 		
@@ -72,7 +72,14 @@ char *_bgPasteIcon( struct glueCommands *data, int nextToken )
 					int y = getStackNum( stack-1 );
 					int image = getStackNum( stack );
 
-					retroPasteIcon( screen, screen -> double_buffer_draw_frame,  icons,x,y,image-1);
+					switch (screen -> autoback)
+					{
+						case 0:	retroPasteIcon( screen, screen -> double_buffer_draw_frame,  icons,x,y,image-1);
+								break;
+						default:	retroPasteIcon( screen, 0,  icons,x,y,image-1);
+								if (screen -> Memory[1]) retroPasteIcon( screen, 1,  icons,x,y,image-1);
+								break;
+					}		
 				}
 				break;
 			break;
@@ -300,79 +307,6 @@ void del_block(std::vector<struct retroBlock> &blocks,int id)
 }
 
 
-void putRowBlock(int w, unsigned char *sslice,unsigned char *dslice, int x, int sw, unsigned char bitmask)
-{
-	int _x, dx; 
-
-	for (_x=0;_x<w;_x++)
-	{
-		dx = _x+x;
-		if ((dx>=0)&&(dx<sw))
-		{
-			dslice[dx]= sslice[_x] & bitmask;
-		}
-	}
-}
-
-void putRowBlockMask(int w, unsigned char *sslice,unsigned char *dslice, int x,int sw, unsigned char bitmask)
-{
-	int _x, dx; 
-
-	for (_x=0;_x<w;_x++)
-	{
-		dx = _x+x;
-		if ((dx>=0)&&(dx<sw))
-		{
-			if (sslice[_x]) dslice[dx]= sslice[_x] & bitmask;
-		}
-	}
-}
-
-
-void retroPutBlock(struct retroScreen *screen, struct retroBlock *block,  int x, int y, unsigned char bitmask)
-{
-	unsigned char *sslice,*dslice;
-	int _y,dy;
-
-	void (*putRow) (int w, unsigned char *sslice,unsigned char *dslice, int x, int sw, unsigned char bitmask);
-
-	if (block->mask)
-	{
-		putRow = putRowBlockMask;
-	}
-	else
-	{
-		putRow = putRowBlock;
-	}
-
-	if ( block -> flag & flag_block_vrev )
-	{
-		for (_y=block->h-1;_y>=0;_y--)
-		{
-			dy = _y+y;
-			if ((dy>=0)&&(dy<screen->realHeight))
-			{
-				dslice = screen->Memory[0] + (screen->bytesPerRow*dy);
-				sslice = block->mem + (block->w * _y);
-				putRow( block -> w, sslice,dslice, x, screen -> realWidth, bitmask);
-			}
-		}
-	}
-	else
-	{
-		for (_y=0;_y<block->h;_y++)
-		{
-			dy = _y+y;
-			if ((dy>=0)&&(dy<screen->realHeight))
-			{
-				dslice = screen->Memory[0] + (screen->bytesPerRow*dy);
-				sslice = block->mem + (block->w * _y);
-				putRow( block -> w, sslice,dslice, x, screen -> realWidth, bitmask);
-			}
-		}
-	}
-}
-
 struct retroBlock *findBlock(std::vector<struct retroBlock> &blocks,int id)
 {
 	unsigned int b;
@@ -404,7 +338,7 @@ char *_bgGetBlock( struct glueCommands *data, int nextToken )
 
 					del_block( blocks, block.id );
 					block.mem  = (unsigned char *) malloc( block.w * block.h );		
-					retroGetBlock(screens[current_screen],&block, block.x, block.y);
+					retroGetBlock(screens[current_screen],0,&block, block.x, block.y);
 					blocks.push_back(block);
 				}
 				break;
@@ -419,7 +353,7 @@ char *_bgGetBlock( struct glueCommands *data, int nextToken )
 
 					del_block( blocks, block.id );	// delete old
 					block.mem  = (unsigned char *) malloc( block.w * block.h );
-					retroGetBlock(screens[current_screen],&block, block.x, block.y);
+					retroGetBlock(screens[current_screen],0,&block, block.x, block.y);
 
 					blocks.push_back(block);
 
@@ -480,7 +414,17 @@ char *_bgPutBlock( struct glueCommands *data, int nextToken )
 		screen = screens[ current_screen ];
 		if (screen)
 		{
-			if (block) retroPutBlock(screen, block, x,y, 255);
+			if (block) 
+			{
+				switch (screen -> autoback)
+				{
+					case 0:	retroPutBlock(screen, screen -> double_buffer_draw_frame, block, x,y, 255);
+							break;
+					default:	retroPutBlock(screen, 0, block, x,y, 255);
+							if (screen -> Memory[1]) retroPutBlock(screen, 1, block, x,y, 255);
+							break;
+				}	
+			}
 		}
 	}
 
@@ -545,7 +489,9 @@ char *_bgGetCBlock( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 5:	{
+					struct retroScreen *screen;
 					struct retroBlock block;
+
 					block.id = getStackNum(stack-4);
 					block.x = getStackNum(stack-3);
 					block.y = getStackNum(stack-2);
@@ -555,7 +501,9 @@ char *_bgGetCBlock( struct glueCommands *data, int nextToken )
 
 					del_block( cblocks, block.id );
 					block.mem  = (unsigned char *) malloc( block.w * block.h );		
-					retroGetBlock(screens[current_screen],&block, block.x, block.y);
+					screen = screens[current_screen];
+
+					retroGetBlock(screen ,screen -> double_buffer_draw_frame,&block, block.x, block.y);
 					cblocks.push_back(block);
 				}
 				break;
@@ -605,12 +553,19 @@ char *_bgPutCBlock( struct glueCommands *data, int nextToken )
 
 	popStack( stack - data->stack );
 
-	if (block)
+	screen = screens[ current_screen ];
+	if (screen)
 	{
-		screen = screens[ current_screen ];
-		if (screen)
+		if (block)
 		{
-			if (block) retroPutBlock(screen, block, x,y, 255);
+			switch (screen -> autoback)
+			{
+				case 0:	retroPutBlock(screen, screen -> double_buffer_draw_frame, block, x,y, 255);
+						break;
+				default:	retroPutBlock(screen, 0, block, x,y, 255);
+						if (screen -> Memory[1]) retroPutBlock(screen, 1, block, x,y, 255);
+						break;
+			}
 		}
 	}
 

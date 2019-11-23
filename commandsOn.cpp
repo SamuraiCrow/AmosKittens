@@ -18,7 +18,7 @@
 #include "commands.h"
 #include "engine.h"
 #include "debug.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "var_helper.h"
 #include "label.h"
 
@@ -39,9 +39,7 @@ extern int tokenMode;
 
 extern std::vector<struct label> labels;
 
-#define GOTO 0x02A8
-#define GOSUB 0x02B2
-#define PROC 0x0386
+
 
 static unsigned int is_token = 0;
 extern int last_var;
@@ -57,9 +55,9 @@ char *executeOnToken(char *ptr, unsigned short token)
 
 	switch (token)
 	{
-		case GOTO:
-		case GOSUB:	
-		case PROC:
+		case token_goto:
+		case token_gosub:	
+		case token_proc:
 					printf("PROC, GOSUB OR GOTO\n");
 					is_token = token;
 					return ptr;
@@ -106,7 +104,8 @@ static char *collect_data(char *ptr)
 	return ptr;
 }
 
-char *execute_on( int num, char *tokenBuffer, unsigned short token );
+
+char *execute_on( int num, char *tokenBuffer, char *returnTokenBuffer, unsigned short token );
 
 char *cmdOn(struct nativeCommand *cmd, char *tokenBuffer )
 {
@@ -129,7 +128,7 @@ char *cmdOn(struct nativeCommand *cmd, char *tokenBuffer )
 		else break;
 	}
 
-	tokenBuffer = execute_on( getStackNum(stack), tokenBuffer, is_token );
+	tokenBuffer = execute_on( getStackNum(stack), tokenBuffer, NULL, is_token );
 
 	return tokenBuffer-4-2;
 }
@@ -153,7 +152,61 @@ struct label *GetLabel( unsigned int is_token, int ref_num )
 	return label;
 }
 
-char *execute_on( int num, char *tokenBuffer, unsigned short token )
+char *do_ON_command(uint16_t token, int ref_num, char *tokenBuffer )
+{
+	char *ret = NULL;
+
+	if (ref_num>0)
+	{
+		struct label *label = NULL;
+
+		switch (token)
+		{
+			case token_goto:	
+
+					dprintf("--GOTO--\n");
+
+					label = GetLabel( is_token, ref_num );
+					if (label)
+					{
+						dropProgStackAllFlag( cmd_true | cmd_false );	// just kill the if condition, if any.
+						ret = label -> tokenLocation ;
+					}
+					break;
+
+			case token_gosub:	
+
+					dprintf("--GOSUB--\n");
+
+					label = GetLabel( is_token, ref_num );
+					if (label)
+					{
+						stackCmdLoop( _gosub_return, tokenBuffer+2 );
+						ret = label -> tokenLocation;
+					}
+					break;
+
+			case token_proc:
+
+					dprintf("--PROC--\n");
+
+					{
+						int idx = ref_num - 1;
+						int oldStack = stack;
+						stackCmdProc( _procedure, tokenBuffer);  
+						cmdTmp[cmdStack-1].stack = oldStack;	// carry stack.
+
+						tokenMode = mode_store;
+						stack_frame_up(idx);
+						ret = globalVars[idx].var.tokenBufferPos;
+					}
+					break;
+		}
+	}
+	return ret;
+}
+
+char *execute_on( int num, char *tokenBuffer, char *returnTokenBuffer, unsigned short token )
 {
 	unsigned short ref_num = 0;
 	unsigned short is_token = 0;
@@ -163,15 +216,12 @@ char *execute_on( int num, char *tokenBuffer, unsigned short token )
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if ( (token==PROC) || (token==GOTO) || (token==GOSUB) ) 
+	if ( (token==token_proc) || (token==token_goto) || (token==token_gosub) ) 
 	{
 
 		for(;;)
 		{	
 			next_token = NEXT_TOKEN(tokenBuffer);
-
-			printf("next token %04X - num %d\n", next_token, num);
-
 			switch (next_token)
 			{
 				case 0x0006:
@@ -229,8 +279,6 @@ char *execute_on( int num, char *tokenBuffer, unsigned short token )
 					tokenBuffer +=2;
 					ref = (struct reference *) (tokenBuffer);
 					num--;
-
-					printf("ref->ref %d\n",ref->ref);
 
 					if (num == 0)
 					{
@@ -290,54 +338,12 @@ exit_on_for_loop:
 
 		printf("ref_num %d\n",ref_num);
 
-		if (ref_num>0)
-		{
-			struct label *label = NULL;
+		ret = do_ON_command( token,  ref_num, returnTokenBuffer ? returnTokenBuffer :  tokenBuffer );
 
-			switch (token)
-			{
-				case GOTO:	
-
-						dprintf("--GOTO--\n");
-
-						label = GetLabel( is_token, ref_num );
-						if (label)
-						{
-							dropProgStackAllFlag( cmd_true | cmd_false );	// just kill the if condition, if any.
-							ret = label -> tokenLocation ;
-						}
-						break;
-
-				case GOSUB:	
-
-						dprintf("--GOSUB--\n");
-
-						label = GetLabel( is_token, ref_num );
-						if (label)
-						{
-							stackCmdLoop( _gosub_return, tokenBuffer+2 );
-							ret = label -> tokenLocation;
-						}
-						break;
-
-				case PROC:
-
-						dprintf("--PROC--\n");
-
-						{
-							int idx = ref_num - 1;
-							int oldStack = stack;
-							stackCmdProc( _procedure, tokenBuffer);  
-							cmdTmp[cmdStack-1].stack = oldStack;	// carry stack.
-
-							tokenMode = mode_store;
-							stack_frame_up(idx);
-							ret = globalVars[idx].var.tokenBufferPos;
-						}
-						break;
-			}
-		}
 	}
+
+	// if this function is used some where else then in normal ON ... PROC. 
+	if (returnTokenBuffer) tokenBuffer = NULL;
 
 	if (ret) tokenBuffer = ret;
 

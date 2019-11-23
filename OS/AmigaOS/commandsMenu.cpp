@@ -10,6 +10,7 @@
 #include <proto/dos.h>
 #include <proto/intuition.h>
 #include <proto/gadtools.h>
+#include <proto/keymap.h>
 #endif
 
 #include "debug.h"
@@ -21,7 +22,7 @@
 #include "commands.h"
 #include "commandsMenu.h"
 #include "var_helper.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 
 extern int last_var;
@@ -59,24 +60,32 @@ char *set_menu_item ( struct glueCommands *data, int nextToken )
 
 struct amos_selected _selected_;
 
+int getMenuEvent()
+{
+	int ret = 0;
+	engine_lock();
+	if (!amosSelected.empty())
+	{
+		_selected_ = amosSelected[0];
+		amosSelected.erase(amosSelected.begin());
+		ret = -1;
+	}
+	engine_unlock();
+	return ret;
+}
+
 char *_menuChoice( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
 	int i = 0;
 	int ret = 0;
-	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 1:
 			if (kittyStack[stack].type == type_none)
 			{
-				if (!amosSelected.empty())
-				{
-					_selected_ = amosSelected[0];
-					amosSelected.erase(amosSelected.begin());
-					ret = -1;
-				}
+				ret = getMenuEvent();
 			}
 			else
 			{
@@ -120,6 +129,7 @@ char *_menuMenuStr( struct glueCommands *data, int nextToken )
 	{
 		menuItem -> levels = args;
 		menuItem -> str = NULL;
+		menuItem -> key = NULL;
 		menuItem -> active = true;
 
 		for (n=0;n<args;n++)
@@ -255,9 +265,11 @@ struct NewMenu *alloc_amiga_menu( int items )
 				}
 			}
 
+			if (menuitems[n] -> key) flag |= NM_COMMANDSTRING;
+
 			_new_[n].nm_Type = levels[ menuitems[n] -> levels - 1 ];
 			_new_[n].nm_Label = (STRPTR) menuitems[n] -> str;
-    			_new_[n].nm_CommKey = 0;     
+    			_new_[n].nm_CommKey = (STRPTR) menuitems[n] -> key;     
     			_new_[n].nm_Flags = flag;        
     			_new_[n].nm_MutualExclude = 0 ;
     			_new_[n].nm_UserData = (void *) n;
@@ -316,9 +328,6 @@ char *menuMenuOn(struct nativeCommand *cmd, char *tokenBuffer )
 		amiga_menu = CreateMenusA( amiga_menu_data,NULL);
 		attach_menu(My_Window);
 		SetWindowAttrs( My_Window, WA_RMBTrap, FALSE, TAG_END );
-
-		printf("well done\n");
-		getchar();
 	}
 
 	return tokenBuffer;
@@ -465,16 +474,18 @@ char *menuMenuToBank(struct nativeCommand *cmd, char *tokenBuffer )
 	return tokenBuffer;
 }
 
+extern void clean_up_menus();
+
 char *menuMenuDel(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-	stackCmdParm( _menuMenuToBank, tokenBuffer );
 
-	setError(23,tokenBuffer);		// not implemented
+	detach_menu(My_Window);
+	SetWindowAttrs( My_Window, WA_RMBTrap, TRUE, TAG_END );
+	clean_up_menus();
 
 	return tokenBuffer;
 }
-
 
 char *_menuMenuX( struct glueCommands *data, int nextToken )
 {
@@ -513,19 +524,86 @@ char *menuMenuY(struct nativeCommand *cmd, char *tokenBuffer )
 	return tokenBuffer;
 }
 
+extern char *scancodeToTxt( unsigned int scancode, int qualifier );
+
+void set_menu_item_key( struct kittyData *stackItem , ULONG qualifier, struct amosMenuItem *menuItem )
+{
+	if (menuItem -> key)	
+	{
+		free(menuItem -> key);
+		menuItem -> key = NULL;
+	}
+
+	switch ( stackItem -> type )
+	{
+		case type_int:
+
+			menuItem -> scancode  = stackItem -> integer.value;
+			menuItem -> qualifier = qualifier;
+			menuItem -> key = scancodeToTxt( menuItem -> scancode, 0 );
+			break;
+
+		case type_string:
+
+			menuItem -> key = strdup( &(stackItem -> str -> ptr) );
+			menuItem -> scancode = 0;
+			menuItem -> qualifier = 0;
+
+			if (menuItem -> key)
+			{
+				int32 actual;
+				char buffer[10];
+
+				actual = MapANSI(menuItem -> key, 1, buffer, 10, NULL );
+				if (actual>0)
+				{
+					menuItem -> scancode = buffer[0];
+					menuItem -> qualifier = buffer[1];
+				}
+			}
+			break;
+	}
+}
+
+
 char *to_menuMenuKey( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
+	struct stringData *str;
+	struct amosMenuItem *menuItem = NULL;
+	int i;
 
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-	dump_stack();
-	getchar();
 
 	switch (args)
 	{
 		case 2:
+				i = getStackNum(stack-1);
+
+				if (i>-1)
+				{
+					set_menu_item_key( &kittyStack[stack] , 0, menuitems[i] );
+
+					if (amiga_menu)
+					{
+						detach_menu(My_Window);
+						attach_menu(My_Window);
+					}
+				}
 				break;
 		case 3:
+				i = getStackNum(stack-2);
+
+				if (i>-1)
+				{
+					set_menu_item_key( &kittyStack[stack -1] , getStackNum(stack),  menuitems[i] );
+
+					if (amiga_menu)
+					{
+						detach_menu(My_Window);
+						attach_menu(My_Window);
+					}
+				}
 				break;
 		default:
 				setError(22,data->tokenBuffer);		// not implemented
@@ -537,9 +615,13 @@ char *to_menuMenuKey( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
-char *menuKey_do_to ( struct nativeCommand *, char *tokenBuffer ) 
+char *menuKey_do_to ( struct nativeCommand *data, char *tokenBuffer ) 
 {
 	stackCmdNormal( to_menuMenuKey, tokenBuffer );
+	stack ++;
+	setStackNone();
+
+	return NULL;
 }
 
 char *_menuMenuKey( struct glueCommands *data, int nextToken )
@@ -548,9 +630,9 @@ char *_menuMenuKey( struct glueCommands *data, int nextToken )
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	i = findAmosMenuItem(data);
+
 	popStack( stack - data->stack );
 	setStackNum(i);
-	stack ++;
 
 	do_to[parenthesis_count] = menuKey_do_to;
 
@@ -560,6 +642,205 @@ char *_menuMenuKey( struct glueCommands *data, int nextToken )
 char *menuMenuKey(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	stackCmdParm( _menuMenuKey, tokenBuffer );
+	return tokenBuffer;
+}
+
+
+char *onMenuTokenBuffer = NULL;
+uint16_t onMenuToken = 0;
+bool onMenuEnabled = false;
+
+char *get_on_option(char *tokenBuffer, int num)
+{
+	uint16_t next_token;
+	struct reference *ref = NULL;
+
+	if (num == 0) return tokenBuffer;
+
+	for(;;)	// skip the on menu options.
+	{	
+		next_token = NEXT_TOKEN(tokenBuffer);
+
+		switch (next_token)
+		{
+			case 0x0006:
+				tokenBuffer +=2;
+				ref = (struct reference *) (tokenBuffer);
+				tokenBuffer += sizeof(struct reference) + ref -> length;
+				break;
+
+			case 0x0012:
+				tokenBuffer +=2;
+				ref = (struct reference *) (tokenBuffer);
+				tokenBuffer += sizeof(struct reference) + ref -> length;
+				break;
+
+			case 0x0018:
+				tokenBuffer +=2;
+				ref = (struct reference *) (tokenBuffer);
+				tokenBuffer += sizeof(struct reference) + ref -> length;
+				break;
+
+			case 0x001E:
+			case 0x0036:
+			case 0x003E:
+				tokenBuffer += 6;	// token + data
+				break;
+
+			case 0x005C:
+				num --;
+				tokenBuffer +=2;
+				return tokenBuffer;
+
+			case 0x0000:	// exit at end of list..
+			case 0x0054:
+			default: 
+				return NULL;
+		}
+	}
+
+	return NULL;
+
+}
+
+char *menuOnMenu(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	struct reference *ref = NULL;
+	uint16_t next_token  = NEXT_TOKEN(tokenBuffer) ;
+
+	printf("%s:%d\n",__FUNCTION__,__LINE__);
+
+	onMenuTokenBuffer = 0;
+	onMenuToken = next_token;
+	tokenBuffer +=2;
+
+	switch (onMenuToken)
+	{
+		case token_goto:
+		case token_gosub:
+		case token_proc:
+			onMenuTokenBuffer = tokenBuffer;
+			break;
+		default:		// return if error.
+			setError(22, tokenBuffer);
+			return tokenBuffer;
+	}
+
+	for(;;)	// skip the on menu options.
+	{	
+		next_token = NEXT_TOKEN(tokenBuffer);
+
+		switch (next_token)
+		{
+			case 0x0006:
+				tokenBuffer +=2;
+				ref = (struct reference *) (tokenBuffer);
+				tokenBuffer += sizeof(struct reference) + ref -> length;
+				break;
+
+			case 0x0012:
+				tokenBuffer +=2;
+				ref = (struct reference *) (tokenBuffer);
+				tokenBuffer += sizeof(struct reference) + ref -> length;
+				break;
+
+			case 0x0018:
+				tokenBuffer +=2;
+				ref = (struct reference *) (tokenBuffer);
+				tokenBuffer += sizeof(struct reference) + ref -> length;
+				break;
+
+			case 0x001E:
+			case 0x0036:
+			case 0x003E:
+				tokenBuffer += 6;	// token + data
+				break;
+
+			case 0x005C:
+				tokenBuffer +=2;
+				break;
+
+			case 0x0000:	// exit at end of list..
+				tokenBuffer +=4;		// +2 is added automatic on exit.
+				goto exit_on_for_loop;
+
+			case 0x0054:
+				// +2 is added automatic on exit.
+
+			default: 
+				goto exit_on_for_loop;
+		}
+	}
+
+exit_on_for_loop:
+
+
+	return tokenBuffer;
+}
+
+char *menuOnMenuOn(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	onMenuEnabled = true;
+	return tokenBuffer;
+}
+
+char *menuOnMenuOff(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	onMenuEnabled = false;
+	return tokenBuffer;
+}
+
+char *menuOnMenuDel(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	onMenuTokenBuffer = NULL;
+	return tokenBuffer;
+}
+
+char *_menuMenuTLine( struct glueCommands *data, int nextToken )	// menu style (just a dummy command)
+{
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *menuMenuTLine(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	stackCmdNormal( _menuMenuTLine, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_menuMenuBar( struct glueCommands *data, int nextToken )	// menu style (just a dummy command)
+{
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *menuMenuBar(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	stackCmdNormal( _menuMenuBar, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_menuMenuStatic( struct glueCommands *data, int nextToken )	// menu style (just a dummy command)
+{
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *menuMenuStatic(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	stackCmdNormal( _menuMenuStatic, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_menuMenuItemStatic( struct glueCommands *data, int nextToken )	// menu style (just a dummy command)
+{
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *menuMenuItemStatic(struct nativeCommand *cmd, char *tokenBuffer )
+{
+	stackCmdNormal( _menuMenuItemStatic, tokenBuffer );
 	return tokenBuffer;
 }
 

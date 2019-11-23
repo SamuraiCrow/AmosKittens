@@ -24,7 +24,7 @@
 #include "stack.h"
 #include "amosKittens.h"
 #include "commandsGfx.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 
 extern int sig_main_vbl;
@@ -38,6 +38,7 @@ extern int tokenlength;
 extern struct retroScreen *screens[8] ;
 extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
+extern struct retroSprite *sprite;
 
 extern struct RastPort font_render_rp;
 
@@ -146,9 +147,13 @@ char *_gfxColour( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
+extern struct amos_selected _selected_;
+extern int getMenuEvent();		// is atomic
+extern bool onMenuEnabled;
 
-char *gfxWaitVbl(struct nativeCommand *cmd, char *tokenBuffer)
+void __wait_vbl()
 {
+
 	engine_lock();
 	if (bobUpdateNextWait)
 	{
@@ -160,7 +165,6 @@ char *gfxWaitVbl(struct nativeCommand *cmd, char *tokenBuffer)
 #if defined(__amigaos4__) || defined(__morphos__) || defined(__aros__)
 	if (( sig_main_vbl )&&( EngineTask ))
 	{
-//		Delay(1);
 		Wait(1<<sig_main_vbl);
 	}
 	else
@@ -172,6 +176,25 @@ char *gfxWaitVbl(struct nativeCommand *cmd, char *tokenBuffer)
 #ifdef __linux__
 	sleep(1);
 #endif
+}
+
+extern char *onMenuTokenBuffer ;
+extern uint16_t onMenuToken ;
+extern char *execute_on( int num, char *tokenBuffer, char *returnTokenBuffer, unsigned short token );
+
+char *gfxWaitVbl(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	if (onMenuEnabled)
+	{
+		if (getMenuEvent())
+		{
+			char *ret;
+			ret  = execute_on( _selected_.menu +1, onMenuTokenBuffer , tokenBuffer, onMenuToken );
+			if (ret) tokenBuffer = ret - 2;		// +2 will be added on exit.
+		}
+	}
+
+	__wait_vbl();
 
 	return tokenBuffer;
 }
@@ -1331,7 +1354,7 @@ char *_gfxRainbow( struct glueCommands *data, int nextToken )
 	{
 		int rainbowNumber = getStackNum( stack-3 );
 		int base = getStackNum( stack-2 );
-		int verticalOffset = getStackNum( stack-1 ) - 38;
+		int verticalOffset = getStackNum( stack-1 ) ;
 		int height = getStackNum( stack );
 
 #if defined(__amigaos4__) 
@@ -1343,7 +1366,7 @@ char *_gfxRainbow( struct glueCommands *data, int nextToken )
 		sleep(1);
 #endif
 
-		retroRainbow( video, rainbowNumber, base, verticalOffset, height);
+		retroRainbow( video, rainbowNumber, base, verticalOffset-51, height);
 	}
 	else setError(22,data->tokenBuffer);
 
@@ -1546,7 +1569,9 @@ char *_gfxFade( struct glueCommands *data, int nextToken )
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (kittyStack[stack].type == type_none)
+	printf("check if last arg is none, way\n");
+
+	if (kittyStack[data->stack].type == type_none)
 	{
 		setError(22, data -> tokenBuffer);
 		popStack( stack - data->stack );
@@ -1560,32 +1585,49 @@ char *_gfxFade( struct glueCommands *data, int nextToken )
 		int c;
 		int rgb;
 
-		fade_speed = getStackNum( data->stack );
-		screen -> fade_speed = 0;	// disable fade.. until its setup again.
-
-		if ((fade_speed == 0)&&(args>255))
-		{
-			setError(22, data -> tokenBuffer);
-			popStack( stack - data->stack );
-			return NULL;
-		}
-
 		dest_pal = screen -> fadePalette;
 
 		if (args>1)	// fade to colors listed after fade speed.
 		{
+			fade_speed = getStackNum( data->stack );
+			screen -> fade_speed = 0;	// disable fade.. until its setup again.
+
+			if ((fade_speed == 0)&&(args>255))
+			{
+				setError(22, data -> tokenBuffer);
+				popStack( stack - data->stack );
+				return NULL;
+			}
+
 			c = 0;	// color
 			for (int s = data->stack+1 ; s <= stack ; s++ )
 			{
-				rgb = getStackNum( s );
-				dest_pal[c].r = ((rgb & 0xF00) >> 8) * 0x11;
-				dest_pal[c].g = ((rgb & 0x0F0) >> 4) * 0x11;
-				dest_pal[c].b = ((rgb & 0x00F)) * 0x11;
+				if (kittyStack[s].type == type_none)
+				{
+					dest_pal[c] = screen -> orgPalette[c];
+				}
+				else
+				{
+					rgb = getStackNum( s );
+					dest_pal[c].r = ((rgb & 0xF00) >> 8) * 0x11;
+					dest_pal[c].g = ((rgb & 0x0F0) >> 4) * 0x11;
+					dest_pal[c].b = ((rgb & 0x00F)) * 0x11;
+//					printf("rgb[%d] %03x\n",c,rgb);
+				}
+
 				c ++;
 			}
+
+			for ( ; c< 256;c++)	dest_pal[c] = screen -> orgPalette[c];
 		}
 		else		// fade to black, if no colors after fade.
 		{
+			if (kittyStack[ stack ].type == type_int)
+			{
+				fade_speed = kittyStack[stack].integer.value;
+			}
+			else fade_speed = 1;
+
 			for (c = 0; c < 256 ; c++ )
 			{
 				dest_pal[c].r = 0;
@@ -1600,9 +1642,6 @@ char *_gfxFade( struct glueCommands *data, int nextToken )
 	}
 
 	popStack( stack - data->stack );
-
-	Delay(3);
-
 	return NULL;
 }
 
@@ -1612,7 +1651,6 @@ char *_gfxFadeTo( struct glueCommands *data, int nextToken )
 	int fade_speed = 0;
 	int mask = 0xFFFFFFFF;	// 8 bit set, all colors in use.
 	int source_screen = 0;
-	bool valid = true;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -1628,24 +1666,19 @@ char *_gfxFadeTo( struct glueCommands *data, int nextToken )
 				mask = getStackNum( stack );
 				break;
 		default:
-				valid = false;
 				setError(22,data->tokenBuffer);
+				popStack( stack - data->stack );
 				return NULL;
 	}
 
-
-	if (valid)
+	if ((source_screen>=0)&&(source_screen<8))
 	{
-
 		if ((screens[current_screen])&&(screens[source_screen]))
 		{
 			int n;
-			int fade_speed = 0;
 			struct retroRGB *org_pal;
 			struct retroRGB *source_pal;
 			struct retroRGB *dest_pal;
-
-			fade_speed = getStackNum( data -> stack );
 
 			screens[current_screen] -> fade_count = 0;
 			screens[current_screen] -> fade_speed = 0;
@@ -1654,7 +1687,34 @@ char *_gfxFadeTo( struct glueCommands *data, int nextToken )
 			source_pal = screens[source_screen] -> orgPalette;
 			dest_pal = screens[current_screen] -> fadePalette;
 
-			printf("setting fade pal\n");
+			n = 0;
+			while ( n<256)
+			{
+				*dest_pal=*source_pal;
+
+				source_pal++;
+				dest_pal++;
+				n++;
+			}
+
+			screens[current_screen] -> fade_speed = fade_speed;
+			screens[current_screen] -> fade_count = fade_speed;		// next vbl is auto fade 1. (no delay)
+		}
+
+		popStack( stack - data->stack );
+		return NULL;
+	}
+
+	if (source_screen<0)
+	{
+		if ((screens[current_screen])&&(sprite))
+		{
+			int n;
+			struct retroRGB *source_pal;
+			struct retroRGB *dest_pal;
+
+			dest_pal = screens[current_screen] -> fadePalette;
+			source_pal = sprite -> palette;
 
 			n = 0;
 			while ( n<256)
@@ -1663,14 +1723,11 @@ char *_gfxFadeTo( struct glueCommands *data, int nextToken )
 
 				source_pal++;
 				dest_pal++;
-//				org_pal++;
 				n++;
-			}
+			}	
 
 			screens[current_screen] -> fade_speed = fade_speed;
 			screens[current_screen] -> fade_count = fade_speed;		// next vbl is auto fade 1. (no delay)
-
-			printf("fade speed is %d\n",screens[current_screen] -> fade_speed);
 		}
 	}
 
@@ -1689,6 +1746,7 @@ char *do_to_fade( struct nativeCommand *cmd, char *tokenBuffer )
 		}
 	}
 	stack++;
+	setStackNone();
 	return NULL;
 }
 
@@ -1749,17 +1807,18 @@ char *gfxAutoback(struct nativeCommand *cmd, char *tokenBuffer)
 char *_gfxColourBack( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-
+	uint32_t color;
+	uint16_t r,g,b;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-	NYI(__FUNCTION__);
 
 	switch (args)
 	{
 		case 1:
-				if (screens[current_screen])
-				{
-				}
+				color = getStackNum(stack);
+				r = (color & 0xF00) >> 8;
+				g = (color & 0x0F0) >> 4;
+				b = color & 0xF;
+				engine_back_color = (r * 0x110000) | (g * 0x001100) | ( b * 0x000011 );
 			break;
 		default:
 			setError(22,data->tokenBuffer);
@@ -1994,8 +2053,16 @@ char *_gfxPhysic( struct glueCommands *data, int nextToken )
 
 char *gfxPhysic(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdParm( _gfxPhysic, tokenBuffer );
-	setStackNone();
+	int nextToken = *((unsigned short *) tokenBuffer);
+
+	if (nextToken == token_parenthesis_start)	
+	{
+		stackCmdParm( _gfxPhysic, tokenBuffer );
+		setStackNone();
+		return tokenBuffer;
+	}
+
+	setStackNum( current_screen | 0xC0000000 );
 	return tokenBuffer;
 }
 
@@ -2032,8 +2099,16 @@ char *_gfxLogic( struct glueCommands *data, int nextToken )
 
 char *gfxLogic(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdParm( _gfxLogic, tokenBuffer );
-	setStackNone();
+	int nextToken = *((unsigned short *) tokenBuffer);
+
+	if (nextToken == token_parenthesis_start)	
+	{
+		stackCmdParm( _gfxLogic, tokenBuffer );
+		setStackNone();
+		return tokenBuffer;
+	}
+
+	setStackNum( current_screen | 0x80000000 );
 	return tokenBuffer;
 }
 
@@ -2182,20 +2257,6 @@ char *gfxSetSlider(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _gfxSetSlider, tokenBuffer );
-	return tokenBuffer;
-}
-
-char *gfxDualPlayfield(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setError(1000,tokenBuffer);
-	return tokenBuffer;
-}
-
-char *gfxLaced(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackNum(retroInterlaced);
 	return tokenBuffer;
 }
 

@@ -1,22 +1,27 @@
 
 #ifndef __amoskittens_h__
 
-#ifdef _MSC_VER
-#define BOOL bool
-#define PACKED
-typedef void * APTR;
-#else
-#define PACKED __attribute__ ((__packed__))
+#if defined(_MSC_VER) || defined(_linux_)
+typedef bool BOOL;
+typedef void* APTR;
 #endif
 
-
+#ifdef _MSC_VER
+#define PACKED 
+#else
+#define PACKED __attribute__((packed))
+#endif
 #define __amoskittens_h__
 
 #define PROC_STACK_SIZE 1000
 #define VAR_BUFFERS 1000
 #define MAX_PARENTHESIS_COUNT 1000
 
+#define token_newLine	0x0000
+#define token_index		0x0074
 #define token_semi		0x0064
+#define token_comma	0x005C
+#define token_nextCmd	0x0054
 #define token_add		0xFFC0
 #define token_sub		0xFFCA
 #define token_mul		0xFFE2
@@ -40,6 +45,10 @@ typedef void * APTR;
 #define token_less				0xFFAC
 
 #define token_trap				0x259A
+
+#define token_goto				0x02A8
+#define token_gosub			0x02B2
+#define token_proc				0x0386
 
 #define joy_up 1
 #define joy_down 2
@@ -70,19 +79,19 @@ enum
 	state_hidden_subData 
 };
 
-#define cmd_normal		1
-#define cmd_index			2 
-#define cmd_para			4
-#define cmd_loop			8
-#define cmd_proc			16
-#define cmd_onEol			32
-#define cmd_onNextCmd	64
-#define cmd_onComma		128
-#define cmd_onBreak		256
-#define cmd_never			512
-#define cmd_exit			1024
-#define cmd_true			2048
-#define cmd_false			4096
+#define cmd_normal			0x0001
+#define cmd_index			0x0002 
+#define cmd_para			0x0004
+#define cmd_loop			0x0008
+#define cmd_proc			0x0010
+#define cmd_onEol			0x0020
+#define cmd_onNextCmd		0x0040
+#define cmd_onComma		0x0080
+#define cmd_onBreak		0x0100
+#define cmd_never			0x0200
+#define cmd_exit			0x0400
+#define cmd_true			0x0800
+#define cmd_false			0x1000
 
 enum
 {
@@ -182,42 +191,84 @@ struct extension_lib
 
 struct dataBase
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	uint16_t type;
-} __attribute__((packed)) ;
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct stringData : dataBase
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	uint16_t size;
 	char ptr;
-} __attribute__((packed));
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct desimalData :  dataBase
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	double value;
-} __attribute__((packed));
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct valueData : dataBase
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	int value;
-} __attribute__((packed));
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct stringArrayData : dataBase
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	uint16_t size;
 	struct stringData *ptr;
-} __attribute__((packed));
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct desimalArrayData : dataBase
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	uint16_t size;
 	struct desimalData ptr;
-} __attribute__((packed));
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct valueArrayData : dataBase
 {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
 	uint16_t size;
 	struct valueData ptr;
-} __attribute__((packed));
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED;
 
 struct kittyData
 {
@@ -252,6 +303,32 @@ struct kittyData
 	int type;
 };
 
+struct kittyVideoInfo
+{
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+	uint16_t videoWidth;
+	uint16_t videoHeight;
+	uint16_t display_x;
+	uint16_t display_y; 
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED ; 
+
+struct kittyInfo		// where amos programs look for info about the editor.
+{
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+	struct kittyVideoInfo *video;
+	uint32_t dummy[6];
+	uint16_t rgb[8];
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED ;
 
 struct label
 {
@@ -322,6 +399,50 @@ struct zone
 	int y1;
 };
 
+struct sampleHeader
+{
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+	char		name[8];
+	uint16_t	frequency;
+	uint32_t	bytes;
+	uint8_t	ptr;
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+} PACKED ;
+
+struct envel
+{
+	int startDuration;
+	int duration;
+	int volume;
+};
+
+struct wave
+{
+	int id;
+	int	bytesPerSecond;	// bytesPerSecond
+	struct envel envels[7];
+	struct sampleHeader sample;	// this one most be last
+};
+
+struct kittyDevice
+{
+	int id;
+	struct MsgPort *port;
+	struct IORequest *io;
+	bool sendt;
+	int error;
+};
+
+struct kittyLib
+{
+	int id;
+	struct Library *base;
+};
+
 #define stackIfSuccess()					\
 	cmdTmp[cmdStack].cmd = _ifSuccess;		\
 	cmdTmp[cmdStack].tokenBuffer = NULL;	\
@@ -340,8 +461,8 @@ struct zone
 	cmdTmp[cmdStack].flag = cmd_normal | cmd_onNextCmd | cmd_onEol;	\
 	cmdTmp[cmdStack].lastVar = last_var;	\
 	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
 	cmdTmp[cmdStack].token = 0; \
+	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
 	cmdStack++; \
 	token_is_fresh = false; 
 
@@ -375,7 +496,7 @@ struct zone
 	cmdTmp[cmdStack].flag = cmd_index ;	\
 	cmdTmp[cmdStack].lastVar = last_var;	\
 	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].token = 0; \
+	cmdTmp[cmdStack].token = token_index ; \
 	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
 	cmdStack++; } \
 

@@ -18,7 +18,7 @@
 #include "amosKittens.h"
 #include "commands.h"
 #include "commandsData.h"
-#include "errors.h"
+#include "kittyErrors.h"
 
 extern int last_var;
 extern struct globalVar globalVars[];
@@ -518,7 +518,7 @@ char *_orData( struct glueCommands *data, int nextToken )
 	{
 		if (type1 == type_int)
 		{
-			setStackNum( (item0->integer.value != 0) ||  (item1->integer.value != 0)  ? ~0 : 0);
+			setStackNum( item0->integer.value  |  item1->integer.value );	
 			success = true;
 		}
 		else if (type1 == type_float)
@@ -815,7 +815,7 @@ char *_addDataToText( struct glueCommands *data, int nextToken )
 
 bool _subStr( struct kittyData *item0, struct kittyData *item1 )
 {
-	proc_names_printf("%s%s:%d stack is %d cmd stack is %d state %d\n",__FILE__,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d stack is %d cmd stack is %d state %d\n",__FILE__,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
 
 	struct stringData *string;
 	struct stringData *remove;
@@ -828,8 +828,9 @@ bool _subStr( struct kittyData *item0, struct kittyData *item1 )
 	if ((string)&&(remove))
 	{
 		int new_len = string->size;
+
 		s=d=&string -> ptr;
-		for(spos=0;spos < (new_len - remove->size) ;spos++)
+		for(spos=0;spos < new_len ;spos++)
 		{
 			if (memcmp(s,&remove -> ptr,remove -> size)==0) 
 			{		
@@ -838,7 +839,7 @@ bool _subStr( struct kittyData *item0, struct kittyData *item1 )
 				printf("removed %d\n",remove -> size);
 			}
 
-			*d++=*s++;
+			if (spos < new_len) *d++=*s++;
 		}
 		*d = 0;
 
@@ -937,7 +938,7 @@ char *_subData( struct glueCommands *data, int nextToken )
 
 char *_modData( struct glueCommands *data, int nextToken )
 {
-	proc_names_printf("%20s:%08d stack is %d cmd stack is %d state %d\n",__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
+	proc_names_printf("%s:%s:%d stack is %d cmd stack is %d state %d\n",__FILE__,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state);
 
 	struct kittyData *item0;
 	struct kittyData *item1;
@@ -1074,7 +1075,7 @@ char *_divData( struct glueCommands *data, int nextToken )
 	struct kittyData *item0;
 	struct kittyData *item1;
 	int type0, type1;
-	bool success = FALSE;
+	int error = 0;
 
 	if (stack==0) 
 	{
@@ -1092,44 +1093,52 @@ char *_divData( struct glueCommands *data, int nextToken )
 
 	if (type0 == type_float) 
 	{
+		double d;
 		if (type1 == type_int)
 		{
-			dprintf(" %f / %d\n", item0->decimal.value , item1->integer.value );
-			setStackDecimal( item0->decimal.value / (double) item1->integer.value );
-			success = TRUE;
+			d = (double) item1->integer.value ;
 		}
 		else if (type1 == type_float)
 		{
-			dprintf(" %f / %f\n", item0->decimal.value , item1->decimal.value );
-			setStackDecimal( item0->decimal.value / item1->decimal.value );
-			success = TRUE;
+			d = item1->decimal.value ;
 		}
+
+		if (d)	
+		{
+			setStackDecimal( item0->decimal.value / d );
+			correct_for_hidden_sub_data();
+			return NULL;
+		}
+		else error = 20;
 	}
 	else if (type0 == type_int) 
 	{
 		if (type1 == type_int)
 		{
-			dprintf(" %d / %d\n", item0->integer.value , item1->integer.value );
-			setStackNum( item0->integer.value / item1->integer.value );
-			success = TRUE;
+			int d = item1->integer.value;
+			if (d)
+			{
+				setStackNum( item0->integer.value / d );
+				correct_for_hidden_sub_data();
+				return NULL;
+			}
+			else error = 20;
 		}
 		else if (type1 == type_float)
 		{
-			dprintf(" %d / %f\n", item0->integer.value , item1->decimal.value );
-			setStackDecimal( (double) item0->integer.value / item1->decimal.value );
-			success = TRUE;
+			double d = item1->decimal.value;
+			if (d)
+			{
+				setStackDecimal( (double) item0->integer.value / d );
+				correct_for_hidden_sub_data();
+				return NULL;
+			}
+			else error = 20;
 		}
 	}
 
 	correct_for_hidden_sub_data();
-
-	if (success == FALSE)
-	{
-		proc_names_printf("%d != %d\n",kittyStack[stack].type,kittyStack[stack+1].type);
-		setError(ERROR_Type_mismatch,data->tokenBuffer);
-		return NULL;
-	}
-
+	setError(error ? error : ERROR_Type_mismatch,data->tokenBuffer);
 	return NULL;
 }
 

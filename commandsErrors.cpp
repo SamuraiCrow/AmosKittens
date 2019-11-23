@@ -24,9 +24,10 @@
 #include "amosKittens.h"
 #include "commands.h"
 #include "commandsErrors.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "label.h"
 #include "amosString.h"
+#include "var_helper.h"
 
 extern int last_var;
 extern struct globalVar globalVars[];
@@ -49,7 +50,6 @@ void name_from_ref( char **tokenBuffer, char **name_out)
 
 	if ((next_token == 0x006) || (next_token == 0x0018))
 	{
-		char *name;
 		struct reference *ref = (struct reference *) (*tokenBuffer + 2);
 		*name_out = strndup( *tokenBuffer + 2 + sizeof(struct reference), ref->length );
 		*tokenBuffer += (2 + sizeof(struct reference) + ref -> length) ;	
@@ -59,8 +59,6 @@ void name_from_ref( char **tokenBuffer, char **name_out)
 char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 {
 	char *name = NULL;
-	unsigned short next_token; 
-	struct label *label;
 
 	onError = onErrorBreak;	// default.
 
@@ -74,7 +72,6 @@ char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 				name_from_ref(&tokenBuffer, &name);
 				if (name)
 				{
-					printf("name %s\n",name);
 					struct label *label =  findLabel(name, procStcakFrame[proc_stack_frame].id);
 					on_error_goto_location = label -> tokenLocation;
 					onError = onErrorGoto;
@@ -84,30 +81,28 @@ char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 
 		case 0x0386:	// Proc
 
-				printf("On Error ... Gosub ...\n");
+				printf("On Error ... Proc ...\n");
 
 				tokenBuffer += 2;
 
 				if (NEXT_TOKEN(tokenBuffer ) == 0x0012)	// proc
 				{
-					char *name;
 					struct reference *ref = (struct reference *) (tokenBuffer + 2);
-					name = strndup( tokenBuffer + 2 + sizeof(struct reference), ref->length );
+					int found = var_find_proc_ref( ref );
 
-					if (name)
+					if (found)
 					{
-						int found = findVarPublic(name, ref -> flags);
-						if (found)
-						{
-							on_error_proc_location = globalVars[found -1].var.tokenBufferPos;
-							onError = onErrorProc;
-						}
-
-						free(name);
+						on_error_proc_location = globalVars[found -1].var.tokenBufferPos;
+						onError = onErrorProc;
 					}
 
 					tokenBuffer += (2 + sizeof(struct reference) + ref -> length) ;	
 				}
+				else
+				{
+					setError(22,tokenBuffer);
+				}
+
 				break;
 	}
 	return tokenBuffer;
@@ -117,22 +112,24 @@ char *errEndProc(struct nativeCommand *cmd, char *tokenBuffer );
 
 char *errResumeLabel(nativeCommand *cmd, char *tokenBuffer)
 {
-	struct reference *ref;
 	printf("Next token %04x\n",NEXT_TOKEN(tokenBuffer));
 
 	switch (NEXT_TOKEN(tokenBuffer))
 	{
 		case 0x0018:
 
-			ref = (struct reference *) (tokenBuffer + 2);
-			tokenBuffer += 2;
-
-			if (ref->ref)
 			{
-				resume_location = labels[ref->ref-1].tokenLocation+2;
-			}
+				struct reference *ref = (struct reference *) (tokenBuffer + 2);
+				struct label *label = var_JumpToName( ref );		// after function, amos kittens try access next token and adds +2 (+0 data)
 
-			tokenBuffer += sizeof(struct reference) + ref -> length;
+				if (label)
+				{
+					resume_location = label -> tokenLocation;
+				}
+
+				tokenBuffer += 2;
+				tokenBuffer += sizeof(struct reference) + ref -> length;
+			}
 			break;
 
 		case 0x0000:
@@ -143,10 +140,10 @@ char *errResumeLabel(nativeCommand *cmd, char *tokenBuffer)
 				if (cmdTmp[cmdStack-1].cmd == _procedure ) 
 				{
 					printf(" maybe need flush some stack here? %d - %d --\n", cmdTmp[cmdStack-1].stack, stack );
-					tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+					tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0) - 2;		// +2 will be added on exit.
 				}
 			}
-			if ( resume_location ) tokenBuffer = resume_location;
+			if ( resume_location ) tokenBuffer = resume_location -2;		// +2 will be added on exit.
 			break;
 	}
 
@@ -155,10 +152,9 @@ char *errResumeLabel(nativeCommand *cmd, char *tokenBuffer)
 
 char *errResumeNext(nativeCommand *cmd, char *tokenBuffer)
 {
-	struct reference *ref;
+//	struct reference *ref;
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-	printf("this command is not yet working!!!\n");
-	getchar();
+	NYI(__FUNCTION__);
 	return tokenBuffer;
 }
 
@@ -221,25 +217,43 @@ char *errResume(struct nativeCommand *cmd, char *tokenBuffer)
 		char *ret;
 		struct label *label =  findLabel(name, procStcakFrame[proc_stack_frame].id);
 		ret = label -> tokenLocation;
-
 		free(name);
+
+		proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 		if (ret) 
 		{
+			proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 			kittyError.code = 0;
 			kittyError.pos = 0;  
 			kittyError.newError = false;
 			return ret -2;
 		}
+
+		proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 	}
 	else	// has no args, return to error.
 	{
-		if (kittyError.pos)
+		proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+		if (kittyError.posResume)
 		{
+			tokenBuffer = kittyError.posResume - 2;		// -2 for location of the error, -2 for resume command.
+
+			proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 			kittyError.code = 0;
 			kittyError.pos = 0;  
+			kittyError.posResume = 0;
 			kittyError.newError = false;
-			return kittyError.pos-2;
+			return tokenBuffer;
+		}
+		else 
+		{
+			printf("do not have resume location\n");
+			return NULL;	// exit here.
 		}
 	}
 
@@ -273,6 +287,7 @@ char *errTrap(nativeCommand *err, char *tokenBuffer)
 	onErrorTemp = onError;
 	onError = onErrorIgnore;
 	stackCmdFlags( _errTrap, tokenBuffer, cmd_onNextCmd | cmd_onEol );
+	kittyError.trapCode = 0;
 	return tokenBuffer;
 }
 
@@ -288,8 +303,6 @@ char *errErrTrap(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	setStackNum( kittyError.trapCode );
-	kittyError.trapCode = 0;
-
 	return tokenBuffer;
 }
 
@@ -297,15 +310,34 @@ char *_errErrStr( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	int args = stack - data->stack +1 ;
+	struct stringData *err_str = NULL;
+	int err = 0;
 
-	if (args == 1)
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	switch (args)
 	{
-		int err = getStackNum(stack);
-		struct stringData *err_str = toAmosString( errorsRunTime[ err ].errorText, strlen(errorsRunTime[ err ].errorText) );
-		setStackStr( err_str );
+		case 1: 	err = getStackNum(stack);
+				break;
+		default:
+				popStack( stack - data->stack );
+				setError(22,data->tokenBuffer);
+				return NULL;
 	}
 
-	popStack( stack - data->stack );
+
+	for (struct error *e = errorsRunTime; e->errorText;e++ )
+	{
+		if (e -> errorCode == err )
+		{
+			err_str = toAmosString( e -> errorText, strlen(e -> errorText) );
+			break;
+		}
+	}
+
+	if (err_str == NULL) err_str = toAmosString( "", 0 );
+	setStackStr( err_str );
+
 	return NULL;
 }
 

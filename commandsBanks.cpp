@@ -26,7 +26,7 @@
 #include "amosKittens.h"
 #include "commands.h"
 #include "commandsBanks.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 #include "bitmap_font.h"
 #include "amosString.h"
@@ -153,7 +153,36 @@ struct kittyBank * allocBank( int banknr )
 	return findBank( banknr );
 }
 
-#define bankCount()  kittyBankList.size()
+int bankCount(int opt) 
+{
+	int ret = 0;
+
+	switch (opt)
+	{
+		case -1:
+			{
+				unsigned int n = 0;
+				for (n=0;n<kittyBankList.size();n++)
+				{
+					if (kittyBankList[n].id<0) ret++;
+				}
+			}
+			break;
+		case 0:
+			ret = kittyBankList.size();
+			break;
+		case 1:
+			{
+				unsigned int n = 0;
+				for (n=0;n<kittyBankList.size();n++)
+				{
+					if (kittyBankList[n].id>0) ret++;
+				}
+			}
+			break;
+	}
+	return ret;	
+}
 
 bool bank_is_object( struct kittyBank *bank, void *ptr);
 
@@ -243,7 +272,7 @@ char *bankEraseAll(nativeCommand *cmd, char *tokenBuffer)
 
 char *bankEraseTemp(nativeCommand *cmd, char *tokenBuffer)
 {
-	int n;
+	unsigned int n;
 	bool erased;
 	struct kittyBank *bank = NULL;
 
@@ -316,12 +345,9 @@ char *_bankLength( struct glueCommands *data, int nextToken )
 char *_bankBload( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	struct kittyBank *bank;
 	int args = stack - data->stack +1 ;
 	FILE *fd;
 	int size;
-	int n;
-	char *adr = NULL;
 
 	if (args==2)
 	{
@@ -330,7 +356,8 @@ char *_bankBload( struct glueCommands *data, int nextToken )
 		fd = fopen( &name -> ptr , "r");
 		if (fd)
 		{
-			n = getStackNum(stack);
+			uint32_t bankid_or_address;
+			struct kittyBank *bank;
 
 			fseek(fd , 0, SEEK_END );			
 			size = ftell(fd);
@@ -338,22 +365,18 @@ char *_bankBload( struct glueCommands *data, int nextToken )
 
 			if (size)
 			{
-				freeBank(n);
-				bank = allocBank(n);
+				bankid_or_address = getStackNum(stack);
+				bank = findBank( bankid_or_address );	// bank must be previously reserved 
 
 				if (bank)
 				{
-					char *mem = (char *) malloc( size+bank_header );
-
-					bank -> length = size;
-					if (bank -> start) free( (char *) bank -> start-bank_header );
-
-					bank -> start = mem ? mem+bank_header : NULL;
-					bank -> type = 9;	
-					adr = (char *)  bank -> start;
+					fread( bank -> start  ,size,1, fd);
 				}
-				
-				if (adr) fread( adr ,size,1, fd);
+				else if (bankid_or_address != 0)
+				{
+					fread( (void *) bankid_or_address  ,size,1, fd);
+				}
+				else setError(22, data -> tokenBuffer );
 			}
 
 			fclose(fd);
@@ -421,14 +444,23 @@ struct kittyBank *__ReserveAs( int type, int bankNr, int length, const char *nam
 			const char *ptr;
 			char *dest = bank->start-bank_header;
 
-			for (ptr = bankTypes[type]; *ptr ; ptr++ )
+			if (name)
 			{
-				dest[n]=*ptr;	n++;
+				int tl = strlen( name );
+				memset( dest, ' ', 8 );	// fill mem with space.
+				memcpy( dest, name, tl > 8 ? 8 : tl );
 			}
-
-			while (n<8)
+			else
 			{
-				dest[n] = ' '; n++;
+				for (ptr = bankTypes[type]; *ptr ; ptr++ )
+				{
+					dest[n]=*ptr;	n++;
+				}
+
+				while (n<8)
+				{
+					dest[n] = ' '; n++;
+				}
 			}
 		}
 
@@ -606,7 +638,7 @@ struct bankItemDisk
 	char name[8];
 } __attribute__((packed)) ;
 
-void __save_work_data__(FILE *fd,int bankno,struct kittyBank *bank)
+void __save_work_data__(FILE *fd,struct kittyBank *bank)
 {
 	struct bankItemDisk item;
 	int type = bank -> type;
@@ -618,7 +650,7 @@ void __save_work_data__(FILE *fd,int bankno,struct kittyBank *bank)
 		case 9:	type-=8;	flags = 0x80000000; break;
 	}
 
-	item.bank = bankno;
+	item.bank = bank->id;
 	item.type = type;
 	item.length = (bank -> length + 8) | flags;
 	memcpy( item.name, bank->start-8, 8 );
@@ -661,11 +693,12 @@ void __load_work_data__(FILE *fd,int bank)
 
 				if (bank != -1)
 				{
-					if (__ReserveAs( item.type, bank, item.length,NULL, mem ) == false) free(mem);
+					if (__ReserveAs( item.type, bank, item.length,item.name, mem ) == false) free(mem);
 				}
 				else
 				{
-					if (__ReserveAs( item.type, item.bank, item.length,NULL, mem ) == false) free(mem);
+					if ( strncasecmp( item.name , "Samples",7) == 0) item.bank=5;
+					if (__ReserveAs( item.type, item.bank, item.length,item.name, mem ) == false) free(mem);
 				}
 			}
 		}
@@ -969,7 +1002,7 @@ char *_bankLoad( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 1:
-				__load_bank__( getStackString( stack  ) , -1 );
+			__load_bank__( getStackString( stack  ) , -1 );
 			break;
 
 		case 2:
@@ -988,15 +1021,12 @@ char *bankLoad(nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-void __write_banks__( FILE *fd )
+void __write_bank__( FILE *fd, int bankid )
 {
-	unsigned int n=0;
-	struct kittyBank *bank = NULL;
+	struct kittyBank *bank = findBank( bankid );
 
-	for (n=0;n<kittyBankList.size();n++)
+	if (bank)
 	{
-		bank = &kittyBankList[n];
-
 		if (bank->start)
 		{
 			switch (bank->type)
@@ -1007,7 +1037,7 @@ void __write_banks__( FILE *fd )
 				case type_FastData:
 
 						fwrite("AmBk",4,1,fd);
-						__save_work_data__(fd,n+1,bank);
+						__save_work_data__(fd,bank);
 						break;
 /*
 				case type_Music:
@@ -1023,6 +1053,18 @@ void __write_banks__( FILE *fd )
 				default: printf("can't save bank, not supported yet\n");
 			}
 		}
+	}
+}
+
+void __write_banks__( FILE *fd )
+{
+	unsigned int n=0;
+	struct kittyBank *bank = NULL;
+
+	for (n=0;n<kittyBankList.size();n++)
+	{
+		bank = &kittyBankList[n];
+		if (bank) if (bank -> id>0) __write_bank__( fd, bank -> id );
 	}
 }
 
@@ -1043,7 +1085,7 @@ char *_bankSave( struct glueCommands *data, int nextToken )
 			fd = fopen( &filename -> ptr , "w");
 			if (fd)
 			{
-				__write_ambs__( fd, bankCount() );
+				__write_ambs__( fd, bankCount(1) );
 				__write_banks__(fd);
 				fclose(fd);
 			}
@@ -1057,6 +1099,7 @@ char *_bankSave( struct glueCommands *data, int nextToken )
 			fd = fopen( &filename -> ptr , "w");
 			if (fd)
 			{
+				__write_bank__(fd,banknr);
 				fclose(fd);
 			}
 			break;
@@ -1116,6 +1159,22 @@ char *_bankBankSwap( struct glueCommands *data, int nextToken )
 				}
 
 				if (bank2)	bank2 -> id = b1;
+				
+				// update active data objects.
+
+				engine_lock();
+
+				icons = NULL;
+				sprite = NULL;
+
+				bank1 = findBank(1);
+				if (bank1) if (bank1 -> type == type_Sprites ) sprite = (struct retroSprite *) bank1 -> object_ptr;
+
+				bank1 = findBank(2);
+				if (bank1) if (bank1 -> type == type_Icons ) sprite = (struct retroSprite *) bank1 -> object_ptr;
+
+				engine_unlock();
+
 				break;
 		default:
 				setError(22,data->tokenBuffer);

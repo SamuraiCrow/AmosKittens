@@ -15,6 +15,9 @@
 #include "amalcompiler.h"
 #include "channel.h"
 #include "debug.h"
+#include "commandsDevice.h"
+#include "commandsLibs.h"
+
 
 extern struct retroScreen *screens[8] ;
 extern struct retroSpriteObject bobs[64];
@@ -31,6 +34,10 @@ extern std::vector<struct amosMenuItem *> menuitems;
 extern std::vector<struct amos_selected> amosSelected;
 extern std::vector<struct defFn> defFns;
 extern std::vector<struct kittyBank> kittyBankList;
+extern std::vector<struct wave *> waves;
+extern std::vector<struct kittyDevice> deviceList;
+extern std::vector<struct kittyLib> libsList;
+
 
 void clean_up_defFns()
 {
@@ -59,6 +66,8 @@ void clean_up_menus()
 			menuitems[0] = NULL;
 			if (item -> str) free (item -> str);
 			item -> str = NULL;
+			if (item -> key) free (item -> key);
+			item -> key = NULL;
 			free(item);
 		}
 		
@@ -188,6 +197,32 @@ void clean_up_banks()
 	}
 }
 
+void clean_up_devices()
+{
+	while (deviceList.size())
+	{
+		kFreeDevice( deviceList[0].id );
+	}
+}
+
+void clean_up_libs()
+{
+	while (libsList.size())
+	{
+		kFreeLib( libsList[0].id );
+	}
+}
+
+void clean_up_waves()
+{
+	while (waves.size())
+	{
+		if( waves[0]) free( waves[0] );
+		waves.erase(waves.begin() );
+	}
+}
+
+
 struct kittyBank *get_first_user_bank()
 {
 	unsigned int n;
@@ -213,6 +248,14 @@ void clean_up_user_banks()
 void clean_up_special()
 {
 	int n;
+
+	dprintf("clean up libs\n");
+
+	clean_up_libs();
+
+	dprintf("clean up devices\n");
+
+	clean_up_devices();
 
 	dprintf("clean up defFns\n");
 
@@ -274,5 +317,9 @@ void clean_up_special()
 		free(zones);
 		zones = NULL;
 	}
+
+	dprintf("clean up waves\n");
+
+	clean_up_waves();
 }
 

@@ -26,7 +26,7 @@
 #include "commandsDisc.h"
 #include "commands.h"
 #include "debug.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "amosString.h"
 
 extern int last_var;
@@ -47,6 +47,8 @@ char *_discLineInputFile( struct glueCommands *data, int nextToken );
 
 char *amos_to_amiga_pattern(const char *amosPattern);
 void split_path_pattern( struct stringData *str, struct stringData **path, struct stringData **pattern);
+
+int have_drive( struct stringData *name);
 
 char *_discSetDir( struct glueCommands *data, int nextToken )
 {
@@ -206,6 +208,8 @@ char *_discRename( struct glueCommands *data, int nextToken )
 	int args = stack - data -> stack +1;
 	int32 success = false;
 
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
+
 	if (args == 2)
 	{
 		struct stringData *oldName = getStackString( stack - 1 );
@@ -239,6 +243,8 @@ char *_discFselStr( struct glueCommands *data, int nextToken )
 	struct stringData *_title_ = NULL;
 	struct stringData *_title2_ = NULL;
 	struct stringData *_title_temp_ = NULL;
+
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if (filereq = (struct FileRequester	 *) AllocAslRequest( ASL_FileRequest, TAG_DONE ))
 	{
@@ -357,6 +363,9 @@ char *_discExist( struct glueCommands *data, int nextToken )
 	int args = stack - data -> stack +1;
 	struct stringData *_str;
 	BPTR lock = 0;
+	APTR oldRequest;
+	int32 success;
+	struct InfoData info;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -364,19 +373,31 @@ char *_discExist( struct glueCommands *data, int nextToken )
 	{
 		_str = getStackString( stack );
 
+		if (_str -> size == 0) 
+		{
+			setStackNum( 0 );
+			return NULL;
+		}
+
+		oldRequest = SetProcWindow((APTR)-1);
 		lock = Lock( &_str -> ptr, SHARED_LOCK );
+		SetProcWindow(oldRequest);
 
 		if (lock)
 		{
 			UnLock( lock );
-			setStackNum( true ); 
+			setStackNum( ~0 ); 
+			return NULL;
 		}
+
+		setStackNum( 0 );
+		return NULL;
 	}
-
-	popStack( stack - data -> stack  );
-
-	setStackNum( lock ? ~0 : 0 );
-
+	else
+	{
+		popStack( stack - data -> stack  );
+		setError( 22, data -> tokenBuffer );
+	}
 	return NULL;
 }
 
@@ -552,6 +573,7 @@ bool pattern_match( char *name , const char *pattern )
 
 void split_path_pattern( struct stringData *str, struct stringData **path, struct stringData **pattern)
 {
+	bool has_pattern = false;
 	int _len;
 	char c;
 	int i;
@@ -572,12 +594,23 @@ void split_path_pattern( struct stringData *str, struct stringData **path, struc
 			for (i=_len-1; i>=0;i--)
 			{
 				c = (&str->ptr) [i];
+		
+				if (c=='*') has_pattern = true;
 
 				if ((c == '/') || ( c == ':'))
 				{
-					*path = amos_strndup( str, i );
-					*pattern = toAmosString( &str-> ptr + i +1, strlen(&str-> ptr + i +1) );
-					return;
+					if (has_pattern)
+					{
+						*path = amos_strndup( str, i+1 );
+						*pattern = toAmosString( &str-> ptr + i +1, strlen(&str-> ptr + i +1) );
+						return;
+					}
+					else 
+					{
+						*path = amos_strdup(str);
+						*pattern = toAmosString("",0);
+						return;
+					}
 				}
 			}
 		}		
@@ -776,33 +809,30 @@ char *discParent(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *discDfree(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	struct InfoData data;
-
+	struct InfoData info;
 
 	int32 success = GetDiskInfoTags( 
 					GDI_LockInput,GetCurrentDir(),
-					GDI_InfoData, &data,
+					GDI_InfoData, &info,
 					TAG_END);
 
 	if (success)
 	{
-		unsigned int freeBlocks;
 
-		dprintf("num blocks %d\n", data.id_NumBlocks);
-		dprintf("used blocks %d\n", data.id_NumBlocksUsed);
-		dprintf("bytes per block %d\n", data.id_BytesPerBlock);
-
-
-		freeBlocks = data.id_NumBlocks - data.id_NumBlocksUsed;
+		uint64_t freeBlocks = (uint64_t) info.id_NumBlocks - (uint64_t) info.id_NumBlocksUsed;
+		uint64_t freeBytes = freeBlocks * (uint64_t) info.id_BytesPerBlock;
 
 		// this does not support my disk as it has more then 4 GB free :-/
 		// ints are 32bit internaly in AMOS kittens, should bump it up to 64bit, internally.
 
-		setStackNum( freeBlocks * data.id_BytesPerBlock ); 
-
-		// print the real size here... 
-		printf("free bytes %lld\n", (long long int) freeBlocks * (long long int) data.id_BytesPerBlock );
-
+		if (freeBytes<0x80000000)
+		{
+			setStackNum( (int) freeBytes ); 
+		}
+		else
+		{
+			setStackDecimal( (double) freeBytes );
+		}
 	}
 
 	return tokenBuffer;
@@ -1599,6 +1629,29 @@ char *_discGet( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
+bool write_file_start_end( int channel, char *start, char *end )
+{
+	printf("channel %d\n",channel);
+
+	if ((channel>0)&&(channel<11))
+	{
+		FILE *fd = kittyFiles[channel-1].fd ;
+		printf("channel\n");
+
+		if (fd)
+		{
+			printf("is open\n");
+
+			printf("fwrite( %0lx, (uint32_t) %0lx - (uint32_t) %0lx,  1,  fd );\n", start , end, start );
+			printf("fwrite( %0lx, %d, %d, %0lx)\n", start, (uint32_t) end - (uint32_t) start, 1, fd );
+
+			fwrite( start, (uint32_t) end - (uint32_t) start,  1,  fd );
+			return true;
+		}
+	}
+	return false;
+}
+
 char *_discPut( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data -> stack +1;
@@ -1688,7 +1741,7 @@ char *discField(struct nativeCommand *cmd, char *ptr)
 						size += fields[count-1].size;
 					}
 					ptr+=2;
-					break;					
+					break;
 
 			case 0x005C:	
 				count ++;
@@ -1872,13 +1925,13 @@ char *findVolumeName(char *name)
 char *_cmdDiskInfoStr( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data -> stack +1;
-	struct stringData *ret;
+
 	struct stringData *path;
 	char  *volumeName;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	NYI(__FUNCTION__);
+//	NYI(__FUNCTION__);
 
 	switch (args)
 	{
@@ -1888,9 +1941,45 @@ char *_cmdDiskInfoStr( struct glueCommands *data, int nextToken )
 
 			if (volumeName)
 			{
-				ret = toAmosString(volumeName, strlen(volumeName));
-				setStackStr(ret);
+				int result = -1;
+				struct InfoData info;
+
+				int32 success;
+				APTR oldRequest;
+
+//				printf("volumeName: %s\n",volumeName);
+
+				oldRequest = SetProcWindow(NULL);
+
+				result = GetDiskInfoTags( 
+						GDI_StringNameInput, volumeName,
+						GDI_InfoData, &info, TAG_END );
+
+				SetProcWindow(oldRequest);
+				
+				if (result)
+				{
+					struct stringData *ret = alloc_amos_string( strlen(volumeName) +30 );
+					if (ret)
+					{
+						uint64_t freeBlocks = (uint64_t) info.id_NumBlocks - (uint64_t) info.id_NumBlocksUsed;
+						uint64_t freeBytes = freeBlocks * (uint64_t) info.id_BytesPerBlock;
+
+						sprintf(&(ret->ptr),"%s%lld",volumeName, freeBytes);
+						ret -> size = strlen( &(ret -> ptr) );
+						setStackStr(ret);
+						return NULL;
+					}
+				}
 			}
+
+			{
+				struct stringData ret;
+				ret.ptr =0;
+				ret.size = 0;
+				setStackStrDup(&ret);
+			}
+
 			break;
 		default:
 			popStack( stack - data -> stack );
@@ -1972,4 +2061,95 @@ char *discRun(struct nativeCommand *disc, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+//---
 
+int have_drive( struct stringData *name)
+{
+	char buffer[256];
+	struct DosList *dl;
+	ULONG flags;
+
+	flags = LDF_DEVICES|LDF_READ;
+	dl = LockDosList(flags);
+
+	while(( dl = NextDosEntry(dl,flags) ))
+	{
+		if (dl -> dol_Port)
+		{
+			if (DevNameFromPort(dl -> dol_Port,  buffer, sizeof(buffer), TRUE))
+			{
+				if (strcasecmp( &name -> ptr , buffer ) == 0 )
+				{
+					UnLockDosList(flags);
+					return -1;
+				}
+			}
+		}
+	}
+
+	UnLockDosList(flags);
+	return 0;
+}
+
+
+char *_discDrive( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data -> stack +1;
+	struct stringData *volumeName;
+	int ret = 0;
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	switch (args)
+	{
+		case 1:
+			volumeName = getStackString( stack );
+			if (volumeName)
+			{
+				ret = have_drive( volumeName );
+			}
+			setStackNum(ret);
+
+			break;
+		default:
+			popStack( stack - data -> stack );
+			setError(23,data-> tokenBuffer);
+			break;
+	}
+
+	return NULL;
+}
+
+char *discDrive(struct nativeCommand *disc, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _discDrive, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_discPort( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data -> stack +1;
+//	struct stringData *volumeName;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	switch (args)
+	{
+		case 1:
+			setStackNum(-1);	// always true (fix me if I'm wrong)
+			break;
+		default:
+			popStack( stack - data -> stack );
+			setError(23,data-> tokenBuffer);
+			break;
+	}
+
+	return NULL;
+}
+
+char *discPort(struct nativeCommand *disc, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _discPort, tokenBuffer );
+	return tokenBuffer;
+}

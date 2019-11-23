@@ -7,13 +7,17 @@
 
 // --------- debug options --------------- (most common debug options)
 
-#define show_error_at_file_yes
 #define show_proc_names_no
 #define show_token_numbers_no
 #define show_debug_printf_no
+
+//--------- other options ------------
+
+#define show_error_at_file_no
 #define show_debug_amal_no
 #define show_array_no
 #define enable_engine_debug_output_no
+#define enable_audio_debug_output_no
 
 // --------- debug options pass1 ----------- (debug options for pretest)
 
@@ -43,7 +47,17 @@ void dump_banks();
 void dump_end_of_program();
 void dumpLineAddress();
 void dump_680x0_regs();
-void dumpScreenInfo();
+void dump_screens();
+void dump_zones();
+
+#ifdef __amigaos__
+extern struct Window *debug_Window;
+#endif
+
+
+void open_debug_window();
+void close_debug_window();
+ 
 int getLineFromPointer( char *address );
 uint32_t mem_crc( char *mem, uint32_t size );
 
@@ -89,5 +103,7 @@ void Printf_iso(const char *fmt,...);
 #define Printf_iso(fmt,...) fprintf(engine_fd,fmt,__VA_ARGS__)
 #endif
 
+void debug_draw_wave(struct wave *wave);
 
 #define NYI(name) printf("%s not yet implemented\n",name)
+

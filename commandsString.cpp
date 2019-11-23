@@ -22,7 +22,7 @@
 #include "commands.h"
 #include "commandsData.h"
 #include "debug.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "amosString.h"
 
 extern int last_var;
@@ -164,7 +164,7 @@ char *_right( struct glueCommands *data, int nextToken )
 char *_instr( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack + 1 ;
-	struct stringData *_str,*_find, *ret;
+	struct stringData *_str,*_find;
 	int  _pos = 0;
 	int _start = 0;
 
@@ -215,32 +215,34 @@ char *_instr( struct glueCommands *data, int nextToken )
 char *_cmdStr( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack + 1;
-	int num;
-	struct stringData *_str = alloc_amos_string( 50 );
 
 	proc_names_printf("%s: args %d\n",__FUNCTION__,args);
 
 	switch (args)
 	{
 		case 1:
-				num = getStackNum( stack );
+				{
+					struct stringData *_str = alloc_amos_string( 50 );
+					int num;
+					num = getStackNum( stack );
 
-				if (num>-1)
-					sprintf(&_str->ptr," %d",num);
-				else
-					sprintf(&_str->ptr,"%d",num);
-
-				_str->size = strlen(&_str->ptr);				
+					if (_str)
+					{
+						if (num>-1)
+							sprintf(&_str->ptr," %d",num);
+						else
+							sprintf(&_str->ptr,"%d",num);
+	
+						_str->size = strlen(&_str->ptr);				
+						setStackStr(_str);
+						return NULL;
+					}
+				}
 				break;
-		default:
-				setError(22,data->tokenBuffer);
 	}
 
 	popStack(stack - data->stack);
-
-	_str -> size = strlen( &_str->ptr );
-	setStackStr(_str);
-
+	setError(22,data->tokenBuffer);
 	return NULL;
 }
 
@@ -337,7 +339,7 @@ char *_flip( struct glueCommands *data, int nextToken )
 	{
 		_str = getStackString( stack  );
 
-		if (str)
+		if (_str)
 		{
 			l = _str -> size;
 			str = &_str -> ptr;
@@ -489,8 +491,6 @@ char *_val( struct glueCommands *data, int nextToken )
 		// skip spaces in the start of the string.
 		while (*c == ' ') c++;
 
-		printf("%s\n",c);
-
 		// check for symbol until first space or end of string.
 		for (; (*c)  && (*c != ' ') ;c++)
 		{
@@ -505,8 +505,6 @@ char *_val( struct glueCommands *data, int nextToken )
 		if (type_count<2)
 		{
 			success = true;
-
-			printf("type %d\n",type);
 
 			switch (type)
 			{

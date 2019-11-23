@@ -13,6 +13,9 @@ extern void	setStackStrDup(struct stringData *str);
 extern void	setStackNone( void );
 extern unsigned short getLastProgStackToken();
 
+#define getLastProgStackFn()	((cmdStack) ? cmdTmp[cmdStack-1].cmd : NULL)
+#define getLastProgStackToken() ((cmdStack) ? cmdTmp[cmdStack-1].token : 0 )
+
 #define setStackHiddenCondition()			\
 			kittyStack[stack].str = NULL;		\
 			kittyStack[stack].state = state_hidden_subData;	\
@@ -44,6 +47,7 @@ extern bool dropProgStackToFlag( int flag );
 extern bool dropProgStackAllFlag( int flag );
 
 extern void stack_get_if_int( int n, int *ret );
+extern bool stack_is_number( int n );
 
 #define incStack 	stack++; kittyStack[stack].state = state_none;	kittyStack[stack].type = type_none; 
 

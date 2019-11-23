@@ -910,10 +910,11 @@ struct amalTab *find_amal_command(const char *str , int class_flags )
 			if (strncasecmp(str, tab -> name, l) == 0)
 			{
 				next_c = *(str+l);
-				symbol = find_amal_symbol( str + l );
 
 				if (next_c != ':')	// chack if its a label
 				{
+					symbol = find_amal_symbol( str + l );
+
 					if ((next_c == ' ') || (symbol) || (next_c == 0))
 					{
 						 return tab;
@@ -930,6 +931,32 @@ struct amalTab *find_amal_command(const char *str , int class_flags )
 					{
 						return tab;
 					}
+				}
+			}
+		}
+	}
+	return NULL;
+}
+
+struct amalTab *find_amal_command_ends_with_number(const char *str , int class_flags )
+{
+	char next_c;
+	int l;
+	struct amalTab *symbol = NULL;
+
+	for (struct amalTab *tab = amalCmds; tab -> name ; tab++ )
+	{
+		l = strlen(tab->name);
+
+		if ( tab -> Class & class_flags )
+		{
+			if (strncasecmp(str, tab -> name, l) == 0)
+			{
+				next_c = *(str+l);
+
+				if ((next_c >= '0')&&(next_c <='9'))	// chack if its a number
+				{
+					return tab;
 				}
 			}
 		}
@@ -1043,7 +1070,7 @@ bool asc_to_amal_tokens( struct kittyChannel  *channel )
 	allocAmalBuf( amalProg, 60 );
 #endif
 
-	printf("script: '%s'\n",script);
+	printf("script: '%s'\n",&script -> ptr);
 
 	data.pos = 0;
 	autotest_start_ptr_offset = -1;
@@ -1060,6 +1087,7 @@ bool asc_to_amal_tokens( struct kittyChannel  *channel )
 		else
 		{
 			found = find_amal_command(s, amal::class_cmd_normal);
+			if (!found) found = find_amal_command_ends_with_number(s, amal::class_cmd_normal);
 		}
 
 		if (!found) found = find_amal_symbol(s);
@@ -1209,14 +1237,14 @@ void amal_run_one_cycle(struct kittyChannel  *channel, void *(**prog) API_AMAL_C
 			call = (void* (**)(kittyChannel*, void**, unsigned int)) ret;
 		}
 
-		if (channel -> status == channel_status::paused) 	// if amal program gets paused, we break loop
+		if (channel -> amalStatus == channel_status::paused) 	// if amal program gets paused, we break loop
 		{
-			channel -> status = channel_status::active;
+			channel -> amalStatus = channel_status::active;
 			call++;
 			break;
 		}
 
-		if (channel -> status == channel_status::wait) 
+		if (channel -> amalStatus == channel_status::wait) 
 		{
 			break;
 		}
@@ -1232,7 +1260,7 @@ void amal_run_one_cycle(struct kittyChannel  *channel, void *(**prog) API_AMAL_C
 			printf("code at %08x\n",channel -> amalProg.call_array );
 
 			AmalPrintf("%s:%s:%d - amal program ended, offset %d\n",__FILE__,__FUNCTION__,__LINE__, (unsigned int) call - (unsigned int) channel -> amalProg.call_array );
-			channel -> status = channel_status::done;
+			channel -> amalStatus = channel_status::done;
 		}
 	}
 	else	// autotest prog

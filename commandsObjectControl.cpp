@@ -9,6 +9,8 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/retroMode.h>
+#include <proto/intuition.h>
+#include <intuition/pointerclass.h>
 #endif
 
 #ifdef __linux__
@@ -20,14 +22,17 @@
 #include "debug.h"
 #include <string>
 #include <iostream>
+#include <vector>
 
 #include "stack.h"
 #include "amosKittens.h"
 #include "commandsGfx.h"
 #include "commandsScreens.h"
-#include "errors.h"
+#include "kittyErrors.h"
 #include "engine.h"
 #include "amosstring.h"
+
+#include "commandsData.h"
 
 extern int sig_main_vbl;
 
@@ -43,6 +48,15 @@ extern int autoView;
 extern struct retroScreen *screens[8] ;
 extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
+extern std::vector<int> engineCmdQue;
+
+extern void __wait_vbl();
+
+extern int bobDoUpdate;
+extern int bobAutoUpdate;
+extern int bobUpdateEvery;
+extern int bobDoUpdateEnable;
+extern int bobUpdateOnce;
 
 int priorityReverse = 0;
 
@@ -56,7 +70,6 @@ extern UWORD *ImagePointer ;
 extern uint32 *ImagePointer ;
 extern Object *objectPointer ;
 #endif
-
 
 int find_zone_in_any_screen_hard( int hx, int hy)
 {
@@ -99,6 +112,7 @@ int find_zone_in_any_screen_pixel( int hx, int hy)
 			}
 		}
 	}
+
 	return -1;
 }
 
@@ -143,19 +157,31 @@ int find_zone_in_only_screen_pixel( int screen, int x, int y)
 
 char *ocXMouse(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	setStackNum(engine_mouse_x);
+	setStackNum(engine_mouse_x/2+hardware_upper_left);
 	return tokenBuffer;
 }
 
 char *ocYMouse(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	setStackNum(engine_mouse_y);
+	setStackNum(engine_mouse_y/2+hardware_upper_top);
 	return tokenBuffer;
 }
 
 char *ocMouseKey(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	unsigned short next_token = *((short *) (tokenBuffer));
+
+	if ( correct_order( getLastProgStackToken(),  next_token ) == false )
+	{
+		dprintf("---hidden ( symbol \n");
+		setStackHiddenCondition();
+	}
+
 	setStackNum(engine_mouse_key);
+
+	kittyStack[stack].state = state_none;
+	flushCmdParaStack( next_token );
+
 	return tokenBuffer;
 }
 
@@ -189,9 +215,48 @@ char *ocShow(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_ocMouseLimit( struct glueCommands *data, int nextToken )
 {
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	int args = stack - data->stack +1 ;
+	//proc_names_
+	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	NYI(__FUNCTION__);
+	printf("args: %d\n",args);
+
+	switch (args)
+	{
+		case 1:	if (kittyStack[stack].type == type_none)
+				{
+					engine_lock();	
+					engine -> limit_mouse = false;
+					engineCmdQue.push_back(kitty_limit_mouse);
+					engine_unlock();
+				}
+				else
+				{
+					setError( 22, data -> tokenBuffer );
+				}
+				break;
+		case 4:
+				{
+					int x0 = getStackNum( stack-3 );
+					int y0 = getStackNum( stack-2 );
+					int x1 = getStackNum( stack-1 );
+					int y1 = getStackNum( stack );
+
+					engine -> limit_mouse_x0 = (x0 - 128) * 2;
+					engine -> limit_mouse_y0 = (y0 - 50) * 2;
+					engine -> limit_mouse_x1 = (x1 - 128) * 2;
+					engine -> limit_mouse_y1 = (y1 - 50) * 2;
+					engine -> limit_mouse = true;
+
+					engine_lock();
+					engineCmdQue.push_back(kitty_limit_mouse);
+					engine_unlock();
+				}
+				break;
+		default:
+				setError( 22, data -> tokenBuffer );
+				break;
+	}
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -201,6 +266,7 @@ char *ocMouseLimit(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	stackCmdNormal( _ocMouseLimit, tokenBuffer );
+	setStackNone();
 	return tokenBuffer;
 }
 
@@ -271,8 +337,6 @@ char *_ocZoneStr( struct glueCommands *data, int nextToken )
 char *ocZoneStr(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-
 	stackCmdParm( _ocZoneStr, tokenBuffer );
 	return tokenBuffer;
 }
@@ -283,6 +347,7 @@ char *ocMouseZone(struct nativeCommand *cmd, char *tokenBuffer)
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	int rz = find_zone_in_any_screen_hard( engine_mouse_x, engine_mouse_y );
+
 	setStackNum( rz );
 
 	return tokenBuffer;
@@ -396,6 +461,11 @@ void frameToPointer(struct retroFrameHeader *frame)
 
 	if (objectPointer)
 	{
+		SetAttrs( objectPointer, 
+			POINTERA_XOffset, -frame -> XHotSpot * 2,
+			POINTERA_YOffset, -frame -> YHotSpot * 2,
+			TAG_END);
+
 		SetWindowPointer( engine -> window, 
 				WA_Pointer, objectPointer, TAG_END );
 	}
@@ -526,12 +596,14 @@ char *ocResetZone(struct nativeCommand *cmd, char *tokenBuffer)
 char *ocShowOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	NYI(__FUNCTION__);
 	return tokenBuffer;
 }
 
 char *ocHideOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	NYI(__FUNCTION__);
 	return tokenBuffer;
 }
 
@@ -539,12 +611,14 @@ char *ocHideOn(struct nativeCommand *cmd, char *tokenBuffer)
 char *ocPriorityOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	NYI(__FUNCTION__);
 	return tokenBuffer;
 }
 
 char *ocPriorityOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	NYI(__FUNCTION__);
 	return tokenBuffer;
 }
 
@@ -585,21 +659,40 @@ char *ocView(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *ocUpdateOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	int prev = bobAutoUpdate;
+	bobAutoUpdate = 0;
+	bobDoUpdateEnable = 0;
+	return tokenBuffer;
+}
+
+char *ocUpdateOn(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	int prev = bobAutoUpdate;
+	bobAutoUpdate = 1;
+	bobDoUpdateEnable = 1;
 	return tokenBuffer;
 }
 
 char *ocUpdate(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	printf("bobAutoUpdate %d\n",bobAutoUpdate);
+	engine_lock();		// Stop half of the bobs from being drawn.
+	bobUpdateOnce = 1;
+	engine_unlock();
+	__wait_vbl();
 	return tokenBuffer;
 }
 
 char *ocSynchroOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	NYI(__FUNCTION__);
 	return tokenBuffer;
 }
 
 char *ocSynchroOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	NYI(__FUNCTION__);
 	return tokenBuffer;
 }
 
@@ -710,6 +803,8 @@ char *_ocSynchro( struct glueCommands *data, int nextToken )
 	int args = stack - data->stack +1 ;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
+	NYI(__FUNCTION__);
+
 	if (args == 1)
 	{
 	}
@@ -726,11 +821,6 @@ char *ocSynchro(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *ocUpdateOn(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	return tokenBuffer;
-}
 
 char *_ocUpdateEvery( struct glueCommands *data, int nextToken )
 {
@@ -739,6 +829,7 @@ char *_ocUpdateEvery( struct glueCommands *data, int nextToken )
 
 	if (args == 1)
 	{
+		bobUpdateEvery = getStackNum(stack);
 	}
 	else setError(22,data->tokenBuffer);;
 
@@ -804,8 +895,6 @@ char *ocMakeMask(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-
-
 char *_ocHZone( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
@@ -829,8 +918,6 @@ char *_ocHZone( struct glueCommands *data, int nextToken )
 		default:
 				setError(22, data-> tokenBuffer);
 	}
-
-	printf("HZone(%d,%d,%d) is %d\n",s,x,y,ret);
 
 	popStack( stack - data->stack );
 	setStackNum( ret );
@@ -879,10 +966,9 @@ char *_ocZone( struct glueCommands *data, int nextToken )
 char *ocZone(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	stackCmdParm( _ocHZone, tokenBuffer );
+	stackCmdParm( _ocZone, tokenBuffer );
 	return tokenBuffer;
 }
-
 
 char *_ocJoy( struct glueCommands *data, int nextToken )
 {
@@ -909,6 +995,7 @@ char *ocJoy(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+/*
 char *_ocIconMakeMask( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
@@ -932,12 +1019,30 @@ char *ocIconMakeMask(struct nativeCommand *cmd, char *tokenBuffer)
 	stackCmdNormal( _ocIconMakeMask, tokenBuffer );
 	return tokenBuffer;
 }
+*/
 
 char *ocMouseScreen(struct nativeCommand *cmd, char *tokenBuffer)
 {
+	struct retroScreen *screen;
+	int x,y;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	NYI(__FUNCTION__);
+	for (int s=0;s<8;s++)
+	{
+		if (screen = screens[s])
+		{
+			x = XScreen_formula( screen, engine_mouse_x );
+			y = YScreen_formula( screen, engine_mouse_y );
+
+			if	((y>=0)&&(y<screen -> displayHeight)
+			&&	(x>=0)&&(x<screen -> displayWidth))
+			{
+				setStackNum(s);
+				return tokenBuffer;
+			}
+		}
+	}
+	setStackNum(-123456789);
 
 	return tokenBuffer;
 }

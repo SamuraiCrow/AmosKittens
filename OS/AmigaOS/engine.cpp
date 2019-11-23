@@ -7,6 +7,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
+#include <intuition/intuition.h>
 #include <intuition/imageclass.h>
 #include <intuition/gadgetclass.h>
 #include <proto/graphics.h>
@@ -51,6 +52,7 @@ bool engine_stopped = false;
 bool engine_key_repeat = false;
 bool engine_key_down = false;
 bool engine_mouse_hidden = false;
+bool engine_bob_update = true;
 
 extern bool curs_on;
 extern int _keyshift;
@@ -60,14 +62,20 @@ extern APTR engine_mx ;
 extern ChannelTableClass *channels;
 std::vector<struct keyboard_buffer> keyboardBuffer;
 std::vector<struct amos_selected> amosSelected;
+std::vector<int> engineCmdQue;
 
 
-int engine_mouse_key = 0;
-int engine_mouse_x = 0;
-int engine_mouse_y = 0;
+int		engine_mouse_key = 0;
+int		engine_mouse_x = 0;
+int		engine_mouse_y = 0;
+uint32_t	engine_back_color = 0x000000;
+
 int autoView = 1;
 int bobDoUpdate = 0;			// when we are ready to update bobs.
+int bobDoUpdateEnable = 1;
 int bobAutoUpdate = 1;
+int bobUpdateOnce = 0;
+int bobUpdateEvery = 1;
 int bobUpdateNextWait = 0;
 int cursor_color = 3;
 
@@ -315,10 +323,7 @@ void atomic_add_key( ULONG eventCode, ULONG Code, ULONG Qualifier, char Char )
 	engine_unlock();
 }
 
-#define limit_step( step ) \
-		if ( step <-0x11) step=-0x11; \
-		if ( step >0x11) step=0x11; \
-
+#define limit_step( step ) if ( step <-0x11) { step=-0x11; } else if ( step >0x11) { step=0x11; }
 
 void retroFadeScreen_beta(struct retroScreen * screen)
 {
@@ -332,13 +337,11 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 		}
 		else
 		{
-			int changed_at = 0;
+			int changed = 0;
 			int n = 0;
 			struct retroRGB *opal = screen -> orgPalette;
 			struct retroRGB *rpal = screen -> rowPalette;
 			struct retroRGB *npal = screen -> fadePalette;
-
-			Printf("doing a fade\n");
 
 			for (n=0;n<256;n++)
 			{
@@ -350,7 +353,7 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 				limit_step(dg);
 				limit_step(db);
 
-				changed_at = dr | dg | db;
+				changed |= dr | dg | db;
 
 				opal->r += dr;
 				opal->g += dg;
@@ -364,10 +367,7 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 			}
 
 			screen -> fade_count = 1;
-			if (changed_at == 0)
-			{
-				screen -> fade_speed = 0;
-			}
+			if (changed == 0) screen -> fade_speed = 0;
 		}
 	}
 }
@@ -392,12 +392,12 @@ void DrawSprite(
 	struct retroRGB *rgb;
 	struct retroRGB *rgb2;
 	unsigned int color;
+	struct retroFrameHeader *frame;
 
-	if (image > sprite -> number_of_frames) image = sprite -> number_of_frames;
+	if (image >= sprite -> number_of_frames) image = sprite -> number_of_frames-1;
 	if (image < 0) image = 0;
 
-	struct retroFrameHeader *frame = sprite -> frames + image;
-
+	frame = sprite -> frames + image;
 	width = frame -> width ;
 	height = frame -> height ;
 
@@ -431,7 +431,7 @@ void DrawSprite(
 		destination_row_ptr = destination_row_start;
 		destination_row_ptr2 = destination_row_start + video -> width;
 
-		rgb = video -> scanlines[0].orgPalette;
+		rgb = video -> scanlines[0].scanline[0].orgPalette;
 
 		for ( source_row_ptr = source_row_start;  source_row_ptr < source_row_end ; source_row_ptr++ )
 		{
@@ -495,6 +495,52 @@ void engine_ShowMouse( ULONG enable )
 	}
 
 	engine_mouse_hidden = !enable;
+}
+
+extern std::vector<struct amosMenuItem *> menuitems;
+
+struct amosMenuItem *find_menu_shortcut_by_rawkey( ULONG code, ULONG qualifier )
+{
+	int i;
+
+	for ( i=0; i< (int) menuitems.size();i++ )
+	{
+		if (menuitems[i])
+		{
+			if ((menuitems[i] -> scancode == code ) &&
+				(menuitems[i] -> qualifier == qualifier ) )
+			{
+				return menuitems[i];
+			}
+		}
+	}
+
+	return NULL;
+}
+
+#define MKEYS (IEQUALIFIER_RALT | IEQUALIFIER_LALT | IEQUALIFIER_RSHIFT | IEQUALIFIER_LSHIFT | IEQUALIFIER_RCOMMAND | IEQUALIFIER_LCOMMAND) 
+
+bool menu_shortcut( ULONG Code ,  ULONG Qualifier)
+{
+	struct amosMenuItem *menuItem ;
+
+	menuItem = find_menu_shortcut_by_rawkey( Code &~IECODE_UP_PREFIX, Qualifier & MKEYS  );
+
+	if (menuItem)
+	{
+		if (Code & IECODE_UP_PREFIX)
+		{
+			engine_lock();
+			selected.menu = menuItem -> index[0]-1;
+			selected.item = menuItem -> index[1]-1;
+			selected.sub = menuItem -> index[2]-1;
+			amosSelected.push_back(selected);
+			engine_unlock();
+		}
+		return true;
+	}
+
+	return false;
 }
 
 void handel_window()
@@ -568,6 +614,8 @@ void handel_window()
 
 					case IDCMP_RAWKEY:
 
+							if (menu_shortcut( Code ,  Qualifier)) break;
+
 							_keyshift = Qualifier;
 							if (Qualifier & IEQUALIFIER_REPEAT) break;		// repeat done by Amos KIttens...
 							 
@@ -592,17 +640,16 @@ void handel_window()
 									for (p=F1_keys[idx];*p;p++) atomic_add_key( (Code & IECODE_UP_PREFIX) ? kitty_key_up : kitty_key_down, ccode, 0, *p );
 								}
 							}
+
+							if (Code & IECODE_UP_PREFIX)
+							{
+								atomic_add_key( kitty_key_up, ccode, Qualifier, 0 );
+							}
 							else
 							{
-								if (Code & IECODE_UP_PREFIX)
-								{
-									atomic_add_key( kitty_key_up, ccode, Qualifier, 0 );
-								}
-								else
-								{
-									atomic_add_key( kitty_key_down, ccode, Qualifier, 0 );
-								}
+								atomic_add_key( kitty_key_down, ccode, Qualifier, 0 );
 							}
+
 							break;
 				}
 			}
@@ -641,9 +688,32 @@ void swap_buffer(struct retroScreen *screen )
 }
 
 
+void limit_mouse()
+{
+	if ((engine -> window)&&(iconifyPort == NULL))	
+	{
+		if (engine -> limit_mouse == true)
+		{
+			struct IBox mouseLimit = {
+				engine -> window -> BorderLeft + engine -> limit_mouse_x0,
+				engine -> window -> BorderTop + engine -> limit_mouse_y0,
+				engine -> limit_mouse_x1 - engine -> limit_mouse_x0,
+				engine -> limit_mouse_y1 - engine -> limit_mouse_y0 };
+
+			ActivateWindow( engine -> window );
+			SetWindowAttrs( engine -> window, WA_MouseLimits, &mouseLimit, TAG_END);
+		}
+		else
+		{
+			SetWindowAttrs( engine -> window, 	WA_GrabFocus, 0, TAG_END);
+		}
+	}
+}
+
 void main_engine()
 {
 	int bobIsUpdated = 0; 
+	int bobUpdateOnceDone = 0;
 
 	Printf("init engine\n");
 
@@ -661,7 +731,7 @@ void main_engine()
 		Signal( &main_task->pr_Task, SIGF_CHILD );
 
 		Printf("clear video\n");
-		retroClearVideo(video);
+		retroClearVideo(video, engine_back_color);
 
 		Printf("init joysticks..\n");
 		init_joysticks();
@@ -692,10 +762,44 @@ void main_engine()
 
 			if (iconifyPort) handel_iconify();
 
+			engine_lock();
+
+			while (engineCmdQue.size() > 0)
+			{
+				switch ( engineCmdQue[0] )
+				{
+					case kitty_to_back:
+
+						if ((engine -> window)&&(iconifyPort == NULL))
+						{
+							empty_que( engine -> window -> UserPort );
+							enable_Iconify(); 
+							engine -> window = NULL;
+						}
+						break;
+
+					case kitty_to_front:
+
+						if (iconifyPort) 
+						{
+							disable_Iconify(); 
+							engine -> window = My_Window;
+							limit_mouse();
+						}
+						break;
+
+					case kitty_limit_mouse:
+
+						limit_mouse();
+						break;
+				}
+
+				engineCmdQue.erase( engineCmdQue.begin() );
+			}
+
 			if (autoView)
 			{
-				retroClearVideo( video );
-				engine_lock();
+				retroClearVideo( video, engine_back_color );
 
 				for (n=0; n<8;n++)
 				{
@@ -705,16 +809,31 @@ void main_engine()
 					{
 						retroFadeScreen_beta(screen);
 
+//						Printf("bobAutoUpdate %ld, bobDoUpdate %ld\n",bobAutoUpdate, bobDoUpdate);
+
 						if (screen -> Memory[1]) 	// has double buffer
 						{
 							if ((screen -> autoback!=0) || (screen -> force_swap))
 							{
-								drawBobsOnScreen(screen);
-								swap_buffer( screen );
-								clearBobsOnScreen(screen);
+								Printf("bobDoUpdate: %ld, bobAutoUpdate %ld\n ", bobDoUpdate, bobAutoUpdate );
+
+								if (bobUpdateOnce | ( bobDoUpdate & bobDoUpdateEnable ) | bobAutoUpdate )		// if "bob update off" is true, you need to do "bob update"
+								{
+									clearBobsOnScreen(screen);
+									drawBobsOnScreen(screen);
+
+									swap_buffer( screen );
+
+									bobUpdateOnceDone = bobUpdateOnce ? 1: 0;
+									bobIsUpdated = 1;
+								}
+								else if (bobDoUpdateEnable == 1)
+								{
+									swap_buffer( screen );
+								}
 							}
 						}
-						else if (bobDoUpdate)
+						else if (bobDoUpdate & bobDoUpdateEnable)
 						{
 							clearBobsOnScreen(screen);
 							drawBobsOnScreen(screen);
@@ -724,6 +843,12 @@ void main_engine()
 				}	// next
 
 				retroDrawVideo( video );
+
+				if (bobUpdateOnceDone)
+				{
+					bobUpdateOnceDone = 0;
+					bobUpdateOnce = 0;
+				}
 
 				if (bobIsUpdated)
 				{
@@ -767,10 +892,9 @@ void main_engine()
 					}
 				}
 #endif		
-				engine_unlock();
-
-
 			}	// end if (autoView)
+
+			engine_unlock();
 
 			if (My_Window)
 			{
@@ -798,7 +922,7 @@ void main_engine()
 				if (sig_main_vbl) Signal( &main_task->pr_Task, 1<<sig_main_vbl );
 			}
 
-			Delay(4);
+			Delay(1);
 		} // while
 	}
 	else
