@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include <proto/exec.h>
-#include <proto/Amigainput.h>
+#include <proto/dos.h>
 
 #include "AmosKittens.h"
 #include "joysticks.h"
@@ -34,14 +34,21 @@ static BOOL get_joy (AIN_Device *device, struct joystick *joy)
 	BOOL ret = FALSE;
 	int connected = 0;
 
+	Printf("%s\n",__FUNCTION__);
+
 	if (device->Type == AINDT_JOYSTICK) 
 	{
+		Printf("is a joystick\n");
+
 		AIN_Query(joy ->controller, device -> DeviceID,AINQ_CONNECTED,0,&connected,4 );
 		if (connected)
 		{
 			if (found_joysticks==joy->num)
 			{
-				printf("devce Type %i \tID %x \tdevce Name %s \n",device->Type , device -> DeviceID,device -> DeviceName);
+				Printf("Devce Type %ld \tID %lx \tdevce Name %s\n",
+					device -> Type, 
+					device -> DeviceID,
+					device -> DeviceName);
 
 				ret = TRUE;
 				joy -> id = device -> DeviceID;
@@ -49,41 +56,53 @@ static BOOL get_joy (AIN_Device *device, struct joystick *joy)
 			found_joysticks ++;
 		}
 	}
+	else
+	{
+		Printf("Not a joystick, device type is %ld\n",device->Type);
+	}
 
 	return ret;
 }
 
 void init_joysticks()
 {
+	int nn;
 	int n;
 	struct TagItem AIN_Tags[2];
 
 	joystick_msgport = (struct MsgPort *) AllocSysObjectTags(ASOT_PORT, TAG_END );	
 	if (!joystick_msgport) return ;
 
-	for (n=0;n<4;n++)
+	AIN_Tags[0].ti_Tag = AINCC_Port;
+	AIN_Tags[0].ti_Data = (ULONG) joystick_msgport;
+	AIN_Tags[1].ti_Tag = TAG_END;
+
+	for (nn=0;nn<4;nn++)
 	{
+		// joy0 is mouse port on Amiga (2 player games)
+		// joy1 is joystick port (1 player games)
+
+		switch (nn)
+		{
+			case 0: n=1;	break;
+			case 1: n=0;	break;
+			default: n=nn;	break;
+		}
+
 		joysticks[n].id = -1;
-		joysticks[n].num = n;
-		joysticks[n].controller = AIN_CreateContext (1, NULL);
+		joysticks[n].num = nn;
+		joysticks[n].controller = AIN_CreateContext (1, (TagItem*) &AIN_Tags);
 
 		if (joysticks[n].controller)
 		{
-			printf("looking for joystcik #%d\n",n);
-
-			AIN_Tags[0].ti_Tag = AINCC_Port;
-			AIN_Tags[0].ti_Data = (ULONG) joystick_msgport;
-			AIN_Tags[1].ti_Tag = TAG_END;
-
-			AIN_Set(joysticks[n].controller,AIN_Tags);
+			Printf("looking for joystcik #%ld\n",n);
 
 			found_joysticks = 0;
 			AIN_EnumDevices(joysticks[n].controller, (void *) get_joy, (void *) &joysticks[n] );
-
 		}
 		else
 		{
-			printf("sorry failed\n");
+			Printf("Amiga input can't create context\n");
 		}
 	}
 
@@ -92,7 +111,7 @@ void init_joysticks()
 	{
 		if (joysticks[n].id>0)
 		{
-			 printf("joystick #%d Using device ID %x\n",n,joysticks[n].id);
+			 Printf("joystick #%ld Using device ID %lx\n",n,joysticks[n].id);
 		}
 	}
 
@@ -141,13 +160,13 @@ void close_joysticks()
 
 unsigned int dir[]={ 0x00, 
 				joy_up, 				// 1
-				joy_up | joy_left, 
-				joy_left, 				// 3
-				joy_down | joy_left, 
-				joy_down, 			// 5
+				joy_up | joy_right, 
+				joy_right, 				// 3
 				joy_down | joy_right, 
-				joy_right, 				// 7
-				joy_right | joy_up
+				joy_down, 			// 5
+				joy_down | joy_left, 
+				joy_left, 				// 7
+				joy_left | joy_up
 				};
 
 void print_bin(unsigned int v)
@@ -155,6 +174,33 @@ void print_bin(unsigned int v)
 	int n;
 	for (n=31;n>=0;n--) printf("%c", (v & (1L<<n)) ? '1' : '0' );
 }
+
+static int lot[]=
+	{
+		1<<0,		//0
+		1<<0,		//1
+		1<<0,		//2
+		1<<0,		//3
+		1<<0,		//4
+		1<<1,		//5	// fire2
+		1<<0,		//6	// fire1
+		1<<2,		//7
+		1<<3,		//8
+		1<<4,		//9
+		1<<5,		//10
+		1<<6,		//11
+		1<<7,		//12
+		1<<8,		//13
+		1<<9,		//14
+		1<<10,		//15
+		1<<11,		//16
+		1<<12,		//17
+		1<<13,		//18
+		1<<14,		//19
+		1<<15,		//20
+		1<<16,		//21
+		1<<17,		//22
+	};
 
 void joy_stick(int joy,void *controller)
 {
@@ -175,7 +221,11 @@ void joy_stick(int joy,void *controller)
 
 			case AINET_BUTTON:
 					{
-						unsigned int bit = 1 << (ain_mess -> Index - 4);
+						unsigned int bit = lot[ain_mess -> Index];
+
+
+//						Printf("value %ld index %ld\n",ain_mess -> Value, ain_mess -> Index);
+//						Delay(20);
 
 						if (ain_mess -> Value)
 						{

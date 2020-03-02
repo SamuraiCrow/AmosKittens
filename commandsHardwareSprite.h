@@ -9,9 +9,13 @@
 #include "amosKittens.h"
 
 char *hsSprite(struct nativeCommand *cmd, char *tokenBuffer);
+char *hsSpriteCol(struct nativeCommand *cmd, char *tokenBuffer);
 char *hsSpriteOff(struct nativeCommand *cmd, char *tokenBuffer);
 char *hsGetSprite(struct nativeCommand *cmd, char *tokenBuffer);
 char *hsGetSpritePalette(struct nativeCommand *cmd, char *tokenBuffer);
 char *hsSpriteBase(struct nativeCommand *cmd, char *tokenBuffer);
 char *hsSetSpriteBuffer(struct nativeCommand *cmd, char *tokenBuffer);
+char *hsXSprite(struct nativeCommand *cmd, char *tokenBuffer);
+char *hsYSprite(struct nativeCommand *cmd, char *tokenBuffer);
+char *hsISprite(struct nativeCommand *cmd, char *tokenBuffer);
 

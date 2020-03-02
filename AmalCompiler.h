@@ -14,11 +14,19 @@ namespace amal
 	enum Class
 	{
 		class_cmd_arg = 1,
-		class_cmd_normal = 2
+		class_cmd_operator = 2,
+		class_cmd_all_args = 3,
+		class_cmd_normal = 4
 	};
 };
 
 #define API_AMAL_CALL_ARGS ( struct kittyChannel *self, void **code, unsigned int opt )
+
+struct amalNested
+{
+	int cmd;
+	unsigned int offset;
+};
 
 struct amalBuf
 {
@@ -56,10 +64,18 @@ struct amalTab
 	void *(*call) API_AMAL_CALL_ARGS;
 };
 
+struct amalCallBack;
+
+struct amalDebugitem
+{
+	void* (*fn)(kittyChannel*, amalCallBack*);
+	const char *name;
+};
+
 extern void pushBackAmalCmd( amal::Flags flags, void **code, struct kittyChannel *channel, void *(*cmd)  (struct kittyChannel *self, struct amalCallBack *cb)  ) ;
 extern void dumpAmalStack( struct kittyChannel *channel );
 extern void dumpAmalRegs(struct kittyChannel *channel);
-extern bool asc_to_amal_tokens( struct kittyChannel  *channel );
+extern int asc_to_amal_tokens( struct kittyChannel  *channel );
 extern void amal_run_one_cycle(struct kittyChannel  *channel, void *(**prog) API_AMAL_CALL_ARGS, bool save );
 extern bool amal_fix_labels( void **code );
 extern void amal_clean_up_labels();

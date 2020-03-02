@@ -165,7 +165,9 @@ char *_procAndArgs( struct glueCommands *data, int nextToken )
 					stackCmdProc( _procedure, data -> tokenBuffer2);  
 
 					cmdTmp[cmdStack-1].stack = oldStack;	// carry stack.
-					dprintf("Goto %08x -- line %d\n", globalVars[idx].var.tokenBufferPos, getLineFromPointer(globalVars[idx].var.tokenBufferPos ) );
+
+					dgetLineFromPointer(globalVars[idx].var.tokenBufferPos );
+					dprintf("Goto %08x -- line %d\n", globalVars[idx].var.tokenBufferPos, lineFromPtr.line );
 
 					tokenMode = mode_store;
 					stack_frame_up( idx );
@@ -183,7 +185,9 @@ char *_procAndArgs( struct glueCommands *data, int nextToken )
 					stackCmdProc( _procedure, data->tokenBuffer+sizeof(struct reference)+ref->length ) ;
 
 					cmdTmp[cmdStack-1].stack = oldStack;	// carry stack.
-					dprintf("Goto %08x -- line %d\n", globalVars[idx].var.tokenBufferPos, getLineFromPointer(globalVars[idx].var.tokenBufferPos ) );
+
+					dgetLineFromPointer(globalVars[idx].var.tokenBufferPos );
+					dprintf("Goto %08x -- line %d\n", globalVars[idx].var.tokenBufferPos, lineFromPtr.line );
 
 					tokenMode = mode_store;
 					stack_frame_up( idx);
@@ -276,12 +280,36 @@ char *_repeat( struct glueCommands *data, int nextToken )
 	return 0;
 }
 
+char *set_tokenBuffer;
+
+const char *traced_vars[]={"JUMP","FALL","Y","DEAD",NULL};
+
+void trace_vars( struct kittyData *var ,const char **array )
+{
+	const char **item;
+
+	for (item = array ; *item ; item++)
+	{
+		if (var_has_name(var,*item))
+		{
+			getLineFromPointer( set_tokenBuffer );
+			printf("line %d,  %s=%d\n",lineFromPtr.line, *item, var -> integer.value);
+			getchar();
+			return;
+		}
+	}
+}
+
+
 BOOL setVarInt( struct kittyData *var )
 {
 	switch (kittyStack[stack].type)
 	{
 		case type_int:
 			var->integer.value = kittyStack[stack].integer.value;
+
+//			trace_vars( var , traced_vars );
+
 			return TRUE;
 
 		case type_float:
@@ -421,6 +449,8 @@ char *_setVar( struct glueCommands *data, int nextToken )
 	var = &globalVars[data -> lastVar-1].var;
 
 	success = FALSE;
+
+	set_tokenBuffer = data -> tokenBuffer;
 
 	switch (var->type)
 	{
@@ -591,7 +621,7 @@ char *setVar(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *cmdIf(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d - line %d\n",__FUNCTION__,__LINE__, getLineFromPointer( tokenBuffer ));
+	proc_names_printf("%s:%d \n",__FUNCTION__,__LINE__);
 
 	token_is_fresh = false;
 
@@ -644,7 +674,7 @@ char *nextCmd(nativeCommand *cmd, char *ptr);
 
 char *cmdElse(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	proc_names_printf("%s:%d - line %d\n",__FUNCTION__,__LINE__, getLineFromPointer( tokenBuffer ));
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	token_is_fresh = true;
 
@@ -697,7 +727,7 @@ char *_else_if( struct glueCommands *data, int nextToken )
 
 char *cmdElseIf(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	proc_names_printf("%s:%d - line %d\n",__FUNCTION__,__LINE__, getLineFromPointer( tokenBuffer ));
+	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if (cmdStack)
 	{
@@ -1169,6 +1199,7 @@ char *do_to_default( struct nativeCommand *, char * )
 char *cmdTo(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 	if (do_to[parenthesis_count])
 	{
 		char *ret = do_to[parenthesis_count]( cmd, tokenBuffer );	
@@ -1191,11 +1222,9 @@ char *_step( struct glueCommands *data, int nextToken )
 		{
 			case glue_option_for_int:
 					gcmd -> optionsInt.step = (var -> type == type_int) ? var -> integer.value :  (int) var -> decimal.value ;
-					dprintf("step (int %d)\n", gcmd -> optionsInt.step);
 					break;
 			case glue_option_for_float:
 					gcmd -> optionsFloat.step = (var -> type == type_int) ? (double) var -> integer.value : var -> decimal.value ;
-					dprintf("step (float %lf)\n", gcmd -> optionsFloat.step);
 					break;
 		}
 	}
@@ -1273,6 +1302,7 @@ char *cmdNext(struct nativeCommand *cmd, char *tokenBuffer )
 	char *new_ptr = NULL;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 
 	if ( cmdTmp[cmdStack-1].cmd == _for )
 	{
@@ -1430,8 +1460,6 @@ char *cmdProcedure(struct nativeCommand *cmd, char *tokenBuffer )
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	struct procedure *proc = (struct procedure *) tokenBuffer;
 
-	printf("Goto %08x -- line %d\n",proc -> EndOfProc, getLineFromPointer(proc -> EndOfProc ));
-
 	return proc -> EndOfProc - sizeof(struct procedure);
 }
 
@@ -1458,7 +1486,7 @@ char *cmdProcAndArgs(struct nativeCommand *cmd, char *tokenBuffer )
 
 	proc = get_proc_num_from_ref(ref->ref);
 
-	if (proc)
+	if (proc)	// setup local vars.. before calling procedure.
 	{
 		clear_local_vars( proc );
 	}
@@ -1615,15 +1643,32 @@ char *read_kitty_args(char *tokenBuffer, int read_stack, unsigned short end_toke
 
 char *cmdBracket(struct nativeCommand *cmd, char *tokenBuffer )
 {
-	char *(*scmd )( struct glueCommands *data, int nextToken ) = NULL;
-
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	if (cmdStack) scmd = cmdTmp[cmdStack-1].cmd ;
-
-	if ( scmd == _procedure )
+	if (*(( unsigned short *) tokenBuffer)==0x008C)		// no args
 	{
-		return read_kitty_args(tokenBuffer, cmdTmp[cmdStack-1].stack, 0x0000 );
+		unsigned int flags;
+
+		while (cmdStack)	// empty prog stack if needed, should not be needed...
+		{
+			flags = cmdTmp[cmdStack-1].flag;
+
+			if  ( flags & (cmd_loop | cmd_never | cmd_onEol | cmd_proc | cmd_normal)) break;
+			cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
+		}
+
+		return tokenBuffer+2;	// skip end bracket 
+	}
+	else
+	{
+		char *(*scmd )( struct glueCommands *data, int nextToken ) = NULL;
+
+		if (cmdStack) scmd = cmdTmp[cmdStack-1].cmd ;
+
+		if ( scmd == _procedure )		// this is at "procedure name[ .... ]"
+		{
+			return read_kitty_args(tokenBuffer, cmdTmp[cmdStack-1].stack, 0x0000 );
+		}
 	}
 
 	return tokenBuffer;
@@ -1647,7 +1692,7 @@ char *cmdBracketEnd(struct nativeCommand *cmd, char *tokenBuffer )
 		cmdTmp[cmdStack-1].tokenBuffer2 = tokenBuffer;
 	}
 
-	if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _endProc ) tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+	if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _endProc ) return cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
 
 	return tokenBuffer;
 }
@@ -2230,6 +2275,7 @@ char *cmdTimer(struct nativeCommand *cmd, char *tokenBuffer )
 	unsigned short next_token = *((short *) tokenBuffer);
 	unsigned int ms_before;
 	unsigned int ms_after;
+	unsigned int timer_diff;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -2244,7 +2290,14 @@ char *cmdTimer(struct nativeCommand *cmd, char *tokenBuffer )
 	ms_before = (timer_before.tv_sec * 1000) + (timer_before.tv_usec/1000);
 	ms_after = (timer_after.tv_sec * 1000) + (timer_after.tv_usec/1000);
 
-	setStackNum( ((ms_after - ms_before) / 20) + timer_offset );		// 1/50 sec = every 20 ms
+	timer_diff = (ms_after - ms_before) / 33 ;
+
+	if (timer_diff) timer_before = timer_after ;
+
+	timer_offset += timer_diff;
+	
+
+	setStackNum( timer_offset );		// 1/50 sec = every 20 ms
 	kittyStack[stack].state = state_none;
 	flushCmdParaStack( next_token );
 
@@ -2423,7 +2476,8 @@ char *cmdExtension( struct nativeCommand *cmd, char *tokenBuffer )
 	}
 	else
 	{
-		printf("*** warning extensions not yet supported, extention %d, token %04x at line %d ****\n", ext-> ext, ext-> token,getLineFromPointer( tokenBuffer ));
+		getLineFromPointer( tokenBuffer );
+		printf("*** warning extensions not yet supported, extention %d, token %04x at line %d ****\n", ext-> ext, ext-> token, lineFromPtr.line );
 		stackCmdNormal( cmdFlushStack, tokenBuffer );
 	}
 

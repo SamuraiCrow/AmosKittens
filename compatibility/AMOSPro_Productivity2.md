@@ -8,4 +8,8 @@ Works
 
 **Wonderland/wonderland.Amos**
 
-Missing token 1D38 - command "Make Mask"
+Game is playable
+
+Screen was opened in hires should be lowres.
+(some thing strange about the image)
+

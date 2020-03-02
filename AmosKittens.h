@@ -50,11 +50,6 @@ typedef void* APTR;
 #define token_gosub			0x02B2
 #define token_proc				0x0386
 
-#define joy_up 1
-#define joy_down 2
-#define joy_left 4
-#define joy_right 8
-
 extern unsigned int amiga_joystick_dir[4];
 extern unsigned int amiga_joystick_button[4];
 
@@ -119,6 +114,21 @@ enum
 	glue_option_for_float
 };
 
+struct fileContext
+{
+	char *path;
+	char *name;
+	unsigned int file;
+	unsigned int length;
+	unsigned int tokenLength;
+	unsigned char *lineStart;
+	unsigned char *start;
+	unsigned char *ptr;
+	unsigned char *end;
+	unsigned int lineNumber;
+	unsigned int bankSize;
+	unsigned char *bank;
+};
 
 struct kittyForInt
 {
@@ -378,8 +388,12 @@ struct kittyField
 
 struct lineAddr
 {
-	char *start;
-	char *end;
+	unsigned int file;
+	unsigned int lineNumber;
+	unsigned int srcStart;
+	unsigned int srcEnd;
+	unsigned int start;
+	unsigned int end;
 };
 
 struct kittyFile
@@ -538,10 +552,10 @@ extern int zones_allocated;
 extern int currentLine;
 extern int parenthesis_count;
 
-extern BOOL equal_symbol;
+extern bool equal_symbol;
 extern struct nativeCommand NativeCommand[];
 extern int findNativeCommand(unsigned short lastToken,unsigned short token);
-extern BOOL findSymbol(unsigned short token);
+extern bool findSymbol(unsigned short token);
 extern int commandCnt;
 
 extern struct kittyData kittyStack[];

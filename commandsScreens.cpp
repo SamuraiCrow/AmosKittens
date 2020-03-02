@@ -40,6 +40,47 @@ extern struct retroRGB DefaultPalette[256];
 extern struct retroTextWindow *newTextWindow( struct retroScreen *screen, int id );
 extern void freeAllTextWindows(struct retroScreen *screen);
 
+extern void __erase_bobs_on_screen__(int screen_id);
+
+#define true_lowres 0x0
+#define true_hires 0x8000
+#define true_laced 0x4
+
+unsigned int amosModeToRetro(unsigned int aMode)
+{
+	unsigned int retMode = 0;
+
+	switch (aMode)
+	{
+		case true_lowres: 
+			retMode = retroLowres; break;
+
+		case true_hires:
+			 retMode = retroHires; break;
+
+		case (true_lowres | true_laced): 
+			retMode = retroLowres | retroInterlaced; break;
+
+		case (true_hires | true_laced): 
+			retMode = retroHires | retroInterlaced; break;
+	 }
+
+	return retMode;
+}
+
+unsigned int retroModeToAmosMode(unsigned int rMode)
+{
+	unsigned int retMode = 0;
+
+	if (rMode & retroLowres) retMode |= true_lowres;
+	if (rMode & retroLowres_pixeld) retMode |= true_lowres;
+	if (rMode & retroHires) retMode |= true_hires;
+	if (rMode & retroInterlaced) retMode |= true_laced;
+
+	return retMode;
+}
+
+
 int	physical( retroScreen *screen )
 {
 	return  (screen ->Memory[1]) ? 1-screen -> double_buffer_draw_frame : 0;
@@ -102,21 +143,21 @@ char *_gfxScreenOpen( struct glueCommands *data, int nextToken )
 
 		if ((screen_num>-1)&&(screen_num<8))
 		{
-			int mode;
+			int mode = 0;
 			struct retroScreen *screen;
 			current_screen = screen_num;
 
-			// Kitty ignores colors we don't care, allways 256 colors.
-
 			colors = getStackNum( stack-1 );
+			mode = amosModeToRetro(getStackNum( stack ));
+
+			if (colors == 4096) mode |= retroHam6 ;
+			if (colors == -6) mode |= retroHam6 ;
+			if (colors == -8) mode |= retroHam8 ;
 
 			engine_lock();
 			if (screens[screen_num]) retroCloseScreen(&screens[screen_num]);
 
-			mode = getStackNum( stack );
-			if (mode == 0) mode = retroLowres;
-
-			screens[screen_num] = retroOpenScreen(getStackNum( stack-3 ),getStackNum( stack-2 ),(colors == 4096 ? retroHam6 : 0) | mode);
+			screens[screen_num] = retroOpenScreen(getStackNum( stack-3 ),getStackNum( stack-2 ),mode);
 			if (screen = screens[screen_num])
 			{
 				init_amos_kittens_screen_default_text_window(screen, colors);
@@ -144,7 +185,9 @@ bool kitten_screen_close(int screen_num )
 	{
 		engine_lock();
 		freeAllTextWindows( screens[screen_num]  );
+
 		freeScreenBobs( screen_num );
+
 		if (screens[screen_num]) retroCloseScreen(&screens[screen_num]);
 
 		// find a open screen, and set current screen to that.
@@ -160,6 +203,7 @@ bool kitten_screen_close(int screen_num )
 				}
 			}
 		}
+
 		engine_unlock();
 		return true;
 	}
@@ -232,7 +276,12 @@ char *_gfxScreenClone( struct glueCommands *data, int nextToken )
 					copy_pal( screens[current_screen] -> rowPalette, screens[screen_num] -> rowPalette );
 					copy_pal( screens[current_screen] -> fadePalette, screens[screen_num] -> fadePalette );
 
-					retroApplyScreen( screens[screen_num], video, 0, 100, screens[screen_num]->displayWidth, screens[screen_num]->displayHeight );
+					retroApplyScreen( screens[screen_num], video, 
+							screens[screen_num]->scanline_x, 
+							screens[screen_num]->scanline_y, 
+							screens[screen_num]->displayWidth, 
+							screens[screen_num]->displayHeight );
+
 					video -> refreshAllScanlines = TRUE;
 				}
 
@@ -384,14 +433,13 @@ char *gfxScreenOpen(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *gfxLowres(struct nativeCommand *cmd, char *tokenBuffer)
 {
-//	setStackNum(retroLowres); 
-	setStackNum(retroLowres_pixeld);
+	setStackNum( true_lowres );
 	return tokenBuffer;
 }
 
 char *gfxHires(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	setStackNum(retroHires);
+	setStackNum( true_hires );
 	return tokenBuffer;
 }
 
@@ -861,24 +909,75 @@ extern void floydChannel( double *image, int w, int h );
 
 extern void floyd(struct RastPort *rp, int w, int h, struct retroScreen *screen);
 
-void LoadIff( char *name, const int sn )
+void dmode( const char *name, uint64_t mode )
+{
+	uint64_t n = 1;
+
+	while (n<= 0x80000000)
+	{
+		if (mode & n) printf("%08llx: %s %08llx\n",n,name, mode );
+		n=n<<1;
+	}
+}
+
+unsigned int AmigaModeToRetro( unsigned int modeid )
+{
+	unsigned int mode = 0;
+	unsigned int encoding = modeid & (0x800 | 0x1000 | 0x8000);
+
+	switch (encoding)
+	{
+		case 0x0800:
+				mode |= retroHam6;
+				break;
+
+		case 0x8800:					// this is set in HAM8 file I'm testing.
+				mode |= retroHam8;
+				break;
+		case 0x1000:					// this was set in anim8 file I'm testing.
+				mode |= retroHam6;
+				break;
+	}
+
+	if (modeid & (0x0100 | 0x0008 | 0x0004)) 
+	{
+		mode |= retroInterlaced;
+		printf("Interlaced\n");
+	}
+
+	if (modeid & 0x8000)
+	{
+		mode |= retroHires;
+		printf("hires\n");
+	}
+	else
+	{
+		mode |= retroLowres;
+		printf("lowres\n");
+	}
+
+	return mode;
+}
+
+void LoadIff( char *name,  int sn )
 {
 	struct DataType *dto = NULL;
 	struct BitMapHeader *bm_header;
 	struct BitMap *dt_bitmap;
 	struct ColorRegister *cr;
-	ULONG modeid; 
+	ULONG modeid = 0; 
 	ULONG colors;
 	ULONG bformat;
 	ULONG mode;
+
+	// new screen if no current screen, or if it asks for new screen.
+
+	BOOL new_screen = (sn >-1 ) || screens[current_screen];
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if(dto = (struct DataType *) NewDTObject( name, DTA_GroupID, GID_PICTURE, TAG_DONE))
 	{
-
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
 		SetDTAttrs ( (Object*) dto, NULL,NULL,	PDTA_DestMode, (ULONG) PMODE_V43,TAG_DONE);
 		DoDTMethod ( (Object*) dto,NULL,NULL,DTM_PROCLAYOUT,NULL,TRUE); 
 		GetDTAttrs ( (Object*) dto,PDTA_BitMapHeader, (ULONG *) &bm_header, 	
@@ -888,29 +987,41 @@ void LoadIff( char *name, const int sn )
 					PDTA_ModeID, &modeid,
 					TAG_DONE);
 
-	bformat = GetBitMapAttr(dt_bitmap,BMA_PIXELFORMAT);
+		bformat = GetBitMapAttr(dt_bitmap,BMA_PIXELFORMAT);
 
-	dprintf("colors %d\n",colors);
-	dprintf("mode id %08x\n",modeid);
-	dprintf("bformat %d\n",bformat);
-	dprintf("%d,%d\n",bm_header -> bmh_Width,bm_header -> bmh_Height);
+		printf("colors %d\n",colors);
+		printf("mode id %08x\n",modeid);
+		printf("bformat %d\n",bformat);
+		printf("%d,%d\n",bm_header -> bmh_Width,bm_header -> bmh_Height);
 	
-	switch (modeid)
-	{
-		case 0x800: 
-			mode = retroLowres | retroHam6;
-			break;
-
-		default:
+		if (modeid != (ULONG) ~0)
+		{
+			switch (bformat)
+			{
+				case PIXF_NONE:
+				case PIXF_CLUT:
+					mode = AmigaModeToRetro (modeid);
+					break;		
+				default:
+					mode = (bm_header -> bmh_Width>=640) ? retroHires : retroLowres;
+					mode |= (bm_header -> bmh_Height>256) ? retroInterlaced : 0;
+			}
+		}
+		else
+		{
 			mode = (bm_header -> bmh_Width>=640) ? retroHires : retroLowres;
 			mode |= (bm_header -> bmh_Height>256) ? retroInterlaced : 0;
-	 }
+		}
 
-		if (screens[sn]) 	kitten_screen_close( sn );	// this function locks engine ;-)
+		if (new_screen) if (screens[sn]) kitten_screen_close( sn );	// this function locks engine ;-)
 
 		engine_lock();
 
-		screens[sn] = retroOpenScreen(bm_header -> bmh_Width,bm_header -> bmh_Height, mode);
+		if (new_screen)
+		{
+			screens[sn] = retroOpenScreen(bm_header -> bmh_Width,bm_header -> bmh_Height, mode);
+		}
+		else sn = current_screen;
 
 		if (screens[sn])
 		{
@@ -919,11 +1030,12 @@ void LoadIff( char *name, const int sn )
 			int x,y;
 			InitRastPort(&rp);
 
-			init_amos_kittens_screen_default_text_window(screens[sn], 256);
+			if (new_screen)	init_amos_kittens_screen_default_text_window(screens[sn], 256);
 
 			retroApplyScreen( screens[sn], video, 0, 0, screens[sn] -> realWidth,screens[sn]->realHeight );
 			retroBAR( screens[sn], 0, 0,0, screens[sn] -> realWidth,screens[sn]->realHeight, screens[sn] -> paper );
-			set_default_colors( screens[sn] );
+
+			if (new_screen) set_default_colors( screens[sn] );
 
 			current_screen = sn;
 
@@ -931,7 +1043,7 @@ void LoadIff( char *name, const int sn )
 
 			if (cr)
 			{
-				if (bformat==PIXF_NONE)
+				if ((bformat==PIXF_NONE) || (bformat==PIXF_CLUT))
 				{
 					for (c=0;c<colors;c++)		
 					{
@@ -948,9 +1060,7 @@ void LoadIff( char *name, const int sn )
 				}
 			}
 
-
-
-			if (bformat==PIXF_NONE)
+			if ((bformat==PIXF_NONE) || (bformat==PIXF_CLUT))
 			{
 				for (y=0;y<screens[sn]->realHeight;y++)
 				{
@@ -964,13 +1074,10 @@ void LoadIff( char *name, const int sn )
 			{
 //				floyd( &rp, screens[sn]->realWidth,  screens[sn]-> realHeight , screens[sn] );
 
-
 				for (y=0;y<screens[sn]->realHeight;y++)
 				{
 					argbToGrayScale( &rp, y, screens[sn] );
 				}
-
-
 			}
 		}
 
@@ -979,21 +1086,21 @@ void LoadIff( char *name, const int sn )
 	}
 }
 
-void copy_palette(int bformat, struct ColorRegister *cr ,struct RastPort *rp,  struct retroScreen *screen , ULONG &colors )
+void copy_palette(int bformat, struct ColorRegister *cr ,struct RastPort *rp,  struct retroScreen *screen , ULONG *colors )
 {
 	ULONG c;
 
 	if (bformat==PIXF_NONE)
 	{
-		for (c=0;c<colors;c++)		
+		for (c=0;c<*colors;c++)		
 		{
 			retroScreenColor(screen,c,cr[c].red,cr[c].green,cr[c].blue);
 		}
 	}
 	else
 	{
-		colors = 256;
-		grayScalePalette( screen, colors );
+		*colors = 256;
+		grayScalePalette( screen, *colors );
 		get_most_used_colors( rp, screen->realHeight,  screen->realWidth, screen);
 	}
 }
@@ -1035,7 +1142,8 @@ char *_gfxLoadIff( struct glueCommands *data, int nextToken )
 		case 1:	// load iff image to current screen.
 				{
 					struct stringData *name= getStackString( stack );
-					if (name)	LoadIff(&(name->ptr),current_screen);
+
+					if (name)	LoadIff(&(name->ptr),-1);
 				}
 				break;
 		case 2:	// load iff image to new screen.
@@ -1168,15 +1276,16 @@ char *gfxSaveIff(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+extern void clearBobs();
+
 char *gfxDoubleBuffer(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	struct retroScreen *screen = screens[current_screen];
 
 	if (screen)
 	{
-		freeScreenBobs( current_screen );
-
 		engine_lock();
+		clearBobs();
 		retroAllocDoubleBuffer( screen );
 		video -> refreshAllScanlines = TRUE;
 		engine_unlock();
@@ -1426,7 +1535,7 @@ char *_gfxScreenMode( struct glueCommands *data, int nextToken )
 
 		if (screens[screen_num])
 		{
-			ret = screens[screen_num]->videomode;
+			ret = retroModeToAmosMode(screens[screen_num]->videomode);
 			setStackNum(ret);
 			return NULL;
 		}
@@ -1567,7 +1676,7 @@ char *gfxDualPlayfield(struct nativeCommand *cmd, char *tokenBuffer)
 char *gfxLaced(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackNum(retroInterlaced);
+	setStackNum( true_laced );
 	return tokenBuffer;
 }
 

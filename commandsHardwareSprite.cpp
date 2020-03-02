@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <vector>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
@@ -28,6 +29,9 @@
 #include "kittyErrors.h"
 #include "engine.h"
 
+int XScreen_formula( struct retroScreen *screen, int x );
+int YScreen_formula( struct retroScreen *screen, int y );
+
 extern int sig_main_vbl;
 
 extern int last_var;
@@ -38,11 +42,21 @@ extern int tokenlength;
 
 extern int current_screen;
 
-
 extern struct retroScreen *screens[8] ;
 extern struct retroSprite *sprite;
 extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
+
+extern std::vector<int> collided;
+extern bool has_collided(int id);
+extern void flush_collided();
+
+extern int XSprite_formula(int x);
+extern int YSprite_formula(int y);
+extern int from_XSprite_formula(int x);
+extern int from_YSprite_formula(int y);
+
+#define getSprite(num) &(video -> sprites[num])
 
 char *_hsGetSpritePalette( struct glueCommands *data, int nextToken )
 {
@@ -56,6 +70,8 @@ char *_hsGetSpritePalette( struct glueCommands *data, int nextToken )
 	{
 		if ((sprite)&&(screen))
 		{
+			screen -> fade_speed = 0;
+
 			switch (kittyStack[stack].type)
 			{
 				case type_none:
@@ -93,9 +109,6 @@ char *hsGetSpritePalette(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-extern int XSprite_formula(int x);
-extern int YSprite_formula(int y);
-
 char *_hsSprite( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
@@ -107,10 +120,15 @@ char *_hsSprite( struct glueCommands *data, int nextToken )
 	engine_lock();
 	num = getStackNum( stack - 3 );
 	sprite = &video -> sprites[num];
+
+	sprite -> id = num;
+
 	if (stack_is_number( stack - 2)) sprite->x = XSprite_formula(getStackNum( stack - 2 ));
 	if (stack_is_number( stack - 1)) sprite->y = YSprite_formula(getStackNum( stack - 1 ));
 	sprite->image = getStackNum( stack );
 	engine_unlock();
+
+//	printf("sprite %d,%d,%d,%d\n",num,sprite->x,sprite->y,sprite->image);
 
 	popStack( stack - data->stack );
 	return NULL;
@@ -195,7 +213,7 @@ char *_hsSpriteBase( struct glueCommands *data, int nextToken )
 	{
 		pick = getStackNum(stack);
 
-		if (sprite)	if ((pick>0)&&(pick<sprite->number_of_frames))
+		if (sprite)	if ((pick>0)&&(pick<=sprite->number_of_frames))
 		{
 			ret = &sprite -> frames[pick-1] ;
 		}
@@ -237,3 +255,141 @@ char *hsSetSpriteBuffer(struct nativeCommand *cmd, char *tokenBuffer)
 	stackCmdNormal( _hsSetSpriteBuffer, tokenBuffer );
 	return tokenBuffer;
 }
+
+int spriteColAll( unsigned short Sprite );
+int spriteColRange( unsigned short Sprite, unsigned short start, unsigned short end );
+
+char *_hsSpriteCol( struct glueCommands *data, int nextToken )
+{
+	int args = stack - data->stack +1 ;
+	int num = 0;
+	int ret = 0;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	flush_collided();
+
+	if (args==1)
+	{
+		num = getStackNum(stack);
+
+//		Printf("Sprite Col(%ld)\n",num);
+
+		if (num>=0) ret = spriteColAll( num );
+
+	}
+	else setError(22, data->tokenBuffer);
+
+	popStack( stack - data->stack );
+	setStackNum( (int) ret );
+	return NULL;
+}
+
+char *hsSpriteCol(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _hsSpriteCol, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_hsXSprite( struct glueCommands *data, int nextToken )
+{
+	struct retroSpriteObject *object;
+	int args = stack - data->stack +1 ;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+		object = getSprite( getStackNum(stack) );
+
+		if (object == NULL)
+		{
+			setError(23,data->tokenBuffer);
+			return NULL;
+		}
+
+		setStackNum(from_XSprite_formula(object -> x));
+		return NULL;	// don't need to pop stack.
+	} 
+
+	setError(23,data->tokenBuffer);
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *hsXSprite(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _hsXSprite, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_hsYSprite( struct glueCommands *data, int nextToken )
+{
+	struct retroSpriteObject *object;
+	int args = stack - data->stack +1 ;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+		object = getSprite( getStackNum(stack) );
+
+		if (object == NULL)
+		{
+			setError(23,data->tokenBuffer);
+			return NULL;
+		}
+
+		setStackNum(from_YSprite_formula( object -> y ));
+		return NULL;	// don't need to pop stack.
+	} 
+
+	setError(23,data->tokenBuffer);
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *hsYSprite(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _hsYSprite, tokenBuffer );
+	return tokenBuffer;
+}
+
+char *_hsISprite( struct glueCommands *data, int nextToken )
+{
+	struct retroSpriteObject *object;
+	int args = stack - data->stack +1 ;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==1)
+	{
+		object = getSprite( getStackNum(stack) );
+
+		if (object == NULL)
+		{
+			setError(23,data->tokenBuffer);
+			return NULL;
+		}
+
+		setStackNum( object -> image );
+		return NULL;	// don't need to pop stack.
+	} 
+
+	setError(23,data->tokenBuffer);
+	popStack( stack - data->stack );
+	return NULL;
+}
+
+char *hsISprite(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _hsISprite, tokenBuffer );
+	return tokenBuffer;
+}
+
+
+

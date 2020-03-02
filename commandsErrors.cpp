@@ -34,6 +34,7 @@ extern struct globalVar globalVars[];
 extern unsigned short last_token;
 extern int tokenMode;
 extern int tokenlength;
+extern char *tokenbufferResume;
 
 extern int findVarPublic( char *name, int type );
 extern std::vector<struct label> labels;
@@ -73,9 +74,20 @@ char *errOnError(nativeCommand *cmd, char *tokenBuffer)
 				if (name)
 				{
 					struct label *label =  findLabel(name, procStcakFrame[proc_stack_frame].id);
-					on_error_goto_location = label -> tokenLocation;
-					onError = onErrorGoto;
 					free(name);
+
+					if (label)
+					{
+						on_error_goto_location = label -> tokenLocation;
+					}
+					else
+					{
+						printf("label not found, code broken\n");
+						setError(40, tokenBuffer);
+						return NULL;
+					}
+
+					onError = onErrorGoto;
 				}
 				break;
 

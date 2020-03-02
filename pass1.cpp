@@ -26,8 +26,6 @@
 #include "label.h"
 #include "amosstring.h"
 
-const char *types[]={"","#","$",""};
-
 extern struct globalVar globalVars[1000];	// 0 is not used.
 extern unsigned int global_var_count;
 extern int globalVarsSize;
@@ -40,8 +38,6 @@ extern std::vector<struct label> labels;
 extern std::vector<struct lineAddr> linesAddress;
 extern std::vector<struct defFn> defFns;
 char *lastLineAddr;
-
-void addLineAddress( char *_start, char *_end );
 
 int ifCount = 0;
 int endIfCount = 0;
@@ -118,18 +114,6 @@ struct nested *find_nest_loop()
 
 char *FinderTokenInBuffer( char *ptr, unsigned short token , unsigned short token_eof1, unsigned short token_eof2, char *_eof_ );
 
-char *dupRef( struct reference *ref )
-{
-	char *tmp = (char *) malloc( ref->length + 2 );
-	if (tmp)
-	{
-		memcpy(tmp, ((char *) ref) + sizeof(struct reference), ref->length );
-			tmp[ ref->length ] =0;
-			tmp[ ref->length + 1 ] =0;
-		sprintf(tmp + strlen(tmp),"%s", types[ ref -> flags & 3 ] );
-	}
-	return tmp;
-}
 
 // find Public variables not defined as global
 
@@ -147,22 +131,6 @@ int findVarPublic( char *name, int type )
 			&& (globalVars[n].var.type == type)
 			&& (globalVars[n].proc == 0)
 			&& (globalVars[n].isGlobal == FALSE))
-		{
-			return n+1;
-		}
-	}
-	return 0;
-}
-
-int findProc( char *name )
-{
-	unsigned int n;
-
-	for (n=0;n<global_var_count;n++)
-	{
-		if (globalVars[n].varName == NULL) return 0;
-
-		if ( (strcasecmp( globalVars[n].varName, name)==0) && (globalVars[n].var.type & type_proc) )
 		{
 			return n+1;
 		}
@@ -224,68 +192,6 @@ int findVar( char *name, bool is_first_token, int type, int _proc )
 	}
 
 	return 0;
-}
-
-
-struct label *findLabel( char *name, int _proc )
-{
-	unsigned int n;
-	struct label *label;
-
-	dprintf("%s(%s,%d)\n",__FUNCTION__,name,_proc);
-
-	for (n=0;n<labels.size();n++)
-	{
-		label = &labels[n];
-
-		if (label -> proc == _proc)
-		{
-			if (strcasecmp( label -> name, name)==0)
-			{
-				return label;
-			}
-		}
-	}
-
-	return NULL;
-}
-
-int findLabelRef( char *name, int _proc )
-{
-	unsigned int n;
-	struct label *label;
-
-	printf("%s(%s,%d)\n",__FUNCTION__,name,_proc);
-
-	for (n=0;n<labels.size();n++)
-	{
-		label = &labels[n];
-
-		if (label -> proc == _proc)
-		{
-			if (strcasecmp( label -> name, name)==0)
-			{
-				return n+1;
-			}
-		}
-	}
-	return 0;
-}
-
-int QuoteByteLength(char *ptr)
-{
-	unsigned short length = *((unsigned short *) ptr);
-	length += (length & 1);		// align to 2 bytes
-	return length;
-}
-
-int ReferenceByteLength(char *ptr)
-{
-	struct reference *ref = (struct reference *) ptr;
-	unsigned short length = ref -> length;
-
-	length += (length & 1);		// align to 2 bytes
-	return length;
 }
 
 struct globalVar *add_var_from_ref( struct reference *ref, char **tmp, int type )
@@ -440,9 +346,10 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 
 			if ((next_token == 0x0000) || (next_token == 0x0054) || (next_token == 0x0084))
 			{
-//ifdef show_pass1_procedure_fixes_yes
+#ifdef show_pass1_procedure_fixes_yes
 				printf("this looks alot like a procedure call\n");
-//endif
+
+#endif
 				pass1CallProcedures.push_back(ref);
 				is_proc_call = true;
 			}
@@ -753,7 +660,6 @@ char *FinderTokenInBuffer( char *ptr, unsigned short token , unsigned short toke
 			case 0x000C:	token_size = ReferenceByteLength(ptr)+sizeof(struct reference); break;
 			case 0x0012:	token_size = ReferenceByteLength(ptr)+sizeof(struct reference); break;
 			case 0x0018:	token_size = ReferenceByteLength(ptr)+sizeof(struct reference); break;
-			case 0x0386:   token_size = ReferenceByteLength(ptr)+sizeof(struct reference); break;
 			case 0x0026:	token_size = QuoteByteLength(ptr)+2; break;
 			case 0x002E:	token_size = QuoteByteLength(ptr)+2; break;
 			case 0x064A:	token_size = QuoteByteLength(ptr)+2; break;
@@ -780,9 +686,6 @@ char *FinderTokenInBuffer( char *ptr, unsigned short token , unsigned short toke
 
 	return 0;
 }
-
-int getLineFromPointer( char *address );
-
 
 void set_nested_if_condition( char *ptr )
 {
@@ -902,7 +805,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 		if (token == cmd->id )
 		{
 			pass1_printf("%08x %20s:%08d stack is %d cmd stack is %d flag %d token %04x - name %s\n",
-						ptr, __FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token, TokenName(token));
+						ptr-_file_start_, __FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token, TokenName(token));
 
 
 			// ptr points to data of the token. (+2)
@@ -913,9 +816,11 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 			{
 				case 0x0000:	eol( ptr );
 							currentLine++;
-							addLineAddress( lastLineAddr, ptr );
 							lastLineAddr = ptr;
 							pass1_token_count = 0;
+							break;
+
+				case 0x0386:	pass1_token_count = 0;
 							break;
 
 				case 0x0006:	pass1var( ptr, (pass1_token_count == 1), false, false );
@@ -1146,7 +1051,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 		}
 	}
 
-	printf("'%20s:%08d stack is %d cmd stack is %d flag %d token %04x\n",
+	printf("ERROR    %20s:%08d stack is %d cmd stack is %d flag %d token %04x\n",
 					__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token);
 
 	setError(35,ptr);
@@ -1166,7 +1071,11 @@ char *token_reader_pass1( char *start, char *ptr, unsigned short lastToken, unsi
 	}
 #endif 
 
-	if ( ptr  >= file_end ) return NULL;
+	if ( ptr  >= file_end ) 
+	{
+		printf(" ptr is over file end %08x\n", file_end);
+		return NULL;
+	}
 
 	return ptr;
 }
@@ -1186,6 +1095,7 @@ bool findRefAndFixProcCall( struct reference *toFind )
 		{
 			if ( strcasecmp( var->varName, toFindName ) == 0 )
 			{
+				*((unsigned short*) ((char *) toFind-2)) = 0x0012;
 				toFind -> ref = n + 1;
 				free(toFindName);
 				return true;
@@ -1205,7 +1115,9 @@ void pass1_reader( char *start, char *file_end )
 	unsigned int n;
 
 	lastLineAddr = start;
-	ptr = start;
+	token = *((short *) start);
+	ptr = start +2;
+
 	while (( ptr = token_reader_pass1(  start, ptr,  last_tokens[parenthesis_count], token, file_end ) ) && ( kittyError.code == 0))
 	{
 		if (ptr == NULL) break;
@@ -1214,7 +1126,6 @@ void pass1_reader( char *start, char *file_end )
 		token = *((short *) ptr);
 		ptr += 2;	// next token.
 	}
-	addLineAddress( lastLineAddr, ptr );
 
 	if (kittyError.code == 0)	// did not exit on error.
 	{
@@ -1251,6 +1162,8 @@ void pass1_reader( char *start, char *file_end )
 		if ( findRefAndFixProcCall(pass1CallProcedures[n])  )
 		{
 //ifdef show_pass1_procedure_fixes_yes
+
+			
 			printf("fixed at: %08x ref is %d\n", pass1CallProcedures[n], pass1CallProcedures[n] -> ref - 1 );
 //endif
 		}
@@ -1295,12 +1208,5 @@ void pass1_reader( char *start, char *file_end )
 	nested_count = 0;
 }
 
-void addLineAddress( char *_start, char *_end )
-{
-	struct lineAddr line;
-	line.start = _start;
-	line.end = _end;
-	linesAddress.push_back( line );
-}
 
 

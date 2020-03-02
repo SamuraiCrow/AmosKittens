@@ -239,38 +239,45 @@ void setStackDecimal( double decimal )
 void setStackStrDup( struct stringData *str)
 {
 	if (kittyStack[stack].str)	free(kittyStack[stack].str);
-	kittyStack[stack].str = str ? amos_strdup( str ) : NULL;
+	kittyStack[stack].str = str ? amos_strdup( str ) : alloc_amos_string( 0);
 	kittyStack[stack].state = state_none;
 	kittyStack[stack].type = type_string;
 }
 
 void setStackStr( struct stringData *str)
 {
-	if ((str != kittyStack[stack].str)&&(kittyStack[stack].str))
+	struct kittyData *item = &kittyStack[stack];
+
+	if ((str != item -> str)&&(item -> str))
 	{
-		if (kittyStack[stack].str) free(kittyStack[stack].str);	
+		free(item -> str);	
 	}
 
 	if (str)
 	{
-		kittyStack[stack].str = str ;
+		item -> str = str ;
 	}
 	else
 	{
-		printf("setStackStr(): string is a NULL pointer??\n");
-		kittyStack[stack].str = 0 ;
+		item -> str = alloc_amos_string( 0) ;
 	}
 
-	kittyStack[stack].state = state_none;
-	kittyStack[stack].type = type_string;
+	item -> state = state_none;
+	item -> type = type_string;
 }
 
 void setStackParenthesis()
 {
-	if (kittyStack[stack].str) free(kittyStack[stack].str);
-	kittyStack[stack].str = NULL ;
-	kittyStack[stack].state = state_subData;
-	kittyStack[stack].type = type_none;
+	struct kittyData *item = &kittyStack[stack];
+
+	if (item -> str)
+	{
+		free(item -> str);
+		item -> str = NULL ;
+	}
+
+	item -> state = state_subData;
+	item -> type = type_none;
 }
 
 bool stackStrAddValue(struct kittyData *item0, struct kittyData *item1)

@@ -1,16 +1,23 @@
 **Amosteroids.AMOS**
 
-Game start, but the atroids are not moving.
-some glitches here and there is expected.
+Game is playable.
 
 **Castle_Amos.AMOS**
 
-Work, (need to retest)
+Game is playable.
+
+Problems:
+
+* Menu system is too fast.
+* Some minor graphic glitches.
 
 **Magic_Forest.AMOS**
 
-There are some problems with AMAL.
-the intro screen used to look ok, but some how got broken.
+Game is not playable.
+
+Problems:
+
+* Picking the flute and game lucks up.
 
 **Number_Leap.AMOS**
 

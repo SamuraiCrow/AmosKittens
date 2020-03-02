@@ -162,6 +162,7 @@ struct stringData *toAmosString_char(char *adr, char t)
 			d++;
 			ret -> size++;
 		}
+		*d = 0;
 	}
 	return ret;
 }
@@ -173,7 +174,7 @@ struct stringData *toAmosString_len_or_char(char *adr, int len, char t)
 	char *adr_end;
 	int size = 0;
 
-	for (c=adr;*c!=t;c++) size++;
+	for (c=adr;(*c!=t)&&(size<len);c++) size++;
 
 	ret = (struct stringData *) malloc( sizeof(struct stringData) + size );
 	if (ret)
@@ -187,6 +188,7 @@ struct stringData *toAmosString_len_or_char(char *adr, int len, char t)
 			d++;
 			ret -> size++;
 		}
+		*d=0;
 	}
 	return ret;
 }

@@ -52,7 +52,11 @@ bool engine_stopped = false;
 bool engine_key_repeat = false;
 bool engine_key_down = false;
 bool engine_mouse_hidden = false;
-bool engine_bob_update = true;
+
+
+bool synchro_on = true;
+
+uint32_t engine_update_flags = rs_bob_moved | rs_force_swap;
 
 extern bool curs_on;
 extern int _keyshift;
@@ -79,10 +83,8 @@ int bobUpdateEvery = 1;
 int bobUpdateNextWait = 0;
 int cursor_color = 3;
 
-void clearBobs();
 void clearBobsOnScreen(retroScreen *screen);
-void drawBobs();
-void drawBobsOnScreen(retroScreen *screen);
+void drawBobsOnScreenExceptBob( struct retroScreen *screen, struct retroSpriteObject *exceptBob );
 
 struct Gadeget *IcoGad = NULL;
 struct Image * IcoImg = NULL;
@@ -291,7 +293,7 @@ void main_engine();
 bool start_engine()
 {
 #ifdef enable_engine_debug_output_yes
-	BPTR engine_debug_output = Open("CON:660/50/600/480/Kittens engine",MODE_NEWFILE);
+	BPTR engine_debug_output = Open("CON:850/100/600/480/Kittens engine",MODE_NEWFILE);
 #else
 	BPTR engine_debug_output = NULL;
 #endif
@@ -341,13 +343,13 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 			int n = 0;
 			struct retroRGB *opal = screen -> orgPalette;
 			struct retroRGB *rpal = screen -> rowPalette;
-			struct retroRGB *npal = screen -> fadePalette;
+			struct retroRGB *fpal = screen -> fadePalette;
 
 			for (n=0;n<256;n++)
 			{
-				dr = (int) npal->r - (int) opal->r;
-				dg = (int) npal->g - (int) opal->g;
-				db = (int) npal->b - (int) opal->b;
+				dr = (int) fpal->r - (int) opal->r;
+				dg = (int) fpal->g - (int) opal->g;
+				db = (int) fpal->b - (int) opal->b;
 
 				limit_step(dr);
 				limit_step(dg);
@@ -363,7 +365,7 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 
 				opal++;
 				rpal++;
-				npal++;
+				fpal++;
 			}
 
 			screen -> fade_count = 1;
@@ -677,13 +679,6 @@ void handel_iconify()
 
 void swap_buffer(struct retroScreen *screen )
 {
-/*
-	memcpy( 
-		screen -> Memory[1 - screen -> double_buffer_draw_frame], 
-		screen -> Memory[screen -> double_buffer_draw_frame],
-		screen -> bytesPerRow * screen -> realHeight );
-*/
-
 	screen -> double_buffer_draw_frame = 1 - screen -> double_buffer_draw_frame ;
 }
 
@@ -710,11 +705,28 @@ void limit_mouse()
 	}
 }
 
+void run_amal_scripts()
+{
+	if (channels)
+	{
+		struct kittyChannel *item;
+		int i;
+
+		for (i=0;i<channels -> _size();i++)
+		{
+			if (item = channels -> item(i))
+			{
+				if (item->amal_script) channel_amal( item );
+				if (item->anim_script) channel_anim( item );
+				if (item->movex_script) channel_movex( item );
+				if (item->movey_script) channel_movey( item );
+			}
+		}
+	}
+}
+
 void main_engine()
 {
-	int bobIsUpdated = 0; 
-	int bobUpdateOnceDone = 0;
-
 	Printf("init engine\n");
 
 	if (init_engine())		// libs open her.
@@ -751,9 +763,23 @@ void main_engine()
 			{
 				for (n=0;n<4;n++)
 				{
-					if (joysticks[n].id>0)
+					if (joysticks[n].connected)
 					{
 						joy_stick(n,joysticks[n].controller);
+					}
+				}
+			}
+			else
+			{
+				for (n=0;n<4;n++)
+				{
+					if (joysticks[n].id)
+					{
+						AIN_Query(
+							joysticks[n].controller, 
+							joysticks[n].id,
+							AINQ_CONNECTED,0,
+							&joysticks[n].connected,4 );
 					}
 				}
 			}
@@ -809,71 +835,33 @@ void main_engine()
 					{
 						retroFadeScreen_beta(screen);
 
-//						Printf("bobAutoUpdate %ld, bobDoUpdate %ld\n",bobAutoUpdate, bobDoUpdate);
+//						Printf("screen id: %ld, flags %08lx,%08lx\n",n, screen -> event_flags , engine_update_flags);
+//						dump_channels();
+//						dump_anim();
 
-						if (screen -> Memory[1]) 	// has double buffer
+						if (screen -> event_flags & engine_update_flags)
 						{
-							if ((screen -> autoback!=0) || (screen -> force_swap))
-							{
-								Printf("bobDoUpdate: %ld, bobAutoUpdate %ld\n ", bobDoUpdate, bobAutoUpdate );
-
-								if (bobUpdateOnce | ( bobDoUpdate & bobDoUpdateEnable ) | bobAutoUpdate )		// if "bob update off" is true, you need to do "bob update"
-								{
-									clearBobsOnScreen(screen);
-									drawBobsOnScreen(screen);
-
-									swap_buffer( screen );
-
-									bobUpdateOnceDone = bobUpdateOnce ? 1: 0;
-									bobIsUpdated = 1;
-								}
-								else if (bobDoUpdateEnable == 1)
-								{
-									swap_buffer( screen );
-								}
-							}
-						}
-						else if (bobDoUpdate & bobDoUpdateEnable)
-						{
+							// dump_bobs_on_screen( n );
 							clearBobsOnScreen(screen);
-							drawBobsOnScreen(screen);
-							bobIsUpdated = 1;
+							drawBobsOnScreenExceptBob(screen,NULL);
+
+							if (screen -> Memory[1]) 	// has double buffer
+							{
+								swap_buffer( screen );
+							}
+
 						}
+						screen -> event_flags = 0;
 					}
 				}	// next
 
 				retroDrawVideo( video );
 
-				if (bobUpdateOnceDone)
+				if (synchro_on == true) 
 				{
-					bobUpdateOnceDone = 0;
-					bobUpdateOnce = 0;
+					Printf("running amal from VBL %ld\n",synchro_on);
+					run_amal_scripts();
 				}
-
-				if (bobIsUpdated)
-				{
-					bobIsUpdated = 0;
-					bobDoUpdate = 0;
-				}
-
-#if 1
-				if (channels)
-				{
-					struct kittyChannel *item;
-					int i;
-
-					for (i=0;i<channels -> _size();i++)
-					{
-						if (item = channels -> item(i))
-						{
-							if (item->amal_script) channel_amal( item );
-							if (item->anim_script) channel_anim( item );
-							if (item->movex_script) channel_movex( item );
-							if (item->movey_script) channel_movey( item );
-						}
-					}
-				}
-#endif
 
 #if 1
 				if ((sprite)&&(video -> sprites))

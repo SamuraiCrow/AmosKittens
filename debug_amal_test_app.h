@@ -9,12 +9,12 @@
 
 #define show_proc_names_no
 #define show_token_numbers_no
-#define show_debug_printf_no
+#define show_debug_printf_yes
 
 //--------- other options ------------
 
 #define show_error_at_file_no
-#define show_debug_amal_no
+#define show_debug_amal_yes
 #define show_array_no
 #define enable_limit_mouse_no
 #define enable_engine_debug_output_no
@@ -55,11 +55,6 @@ void dump_680x0_regs();
 void dump_screens();
 void dump_zones();
 void dump_sprite();
-void dump_all_bobs();
-void dump_bobs_on_screen(int screen_id);
-void dump_channels();
-void dump_anim();
-bool var_has_name( struct kittyData *var, const char *name );
 
 #ifdef __amigaos__
 extern struct Window *debug_Window;

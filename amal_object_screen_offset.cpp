@@ -30,26 +30,26 @@ static int getMax ( void )
 	return 8;
 }
 
-static int getImage (int object)
+static int getImage (unsigned int object)
 {
 	return 0;
 }
 
-static int getX (int object)
+static int getX (unsigned int object)
 {
 	return screens[object]->offset_x;
 }
 
-static int getY (int object)
+static int getY (unsigned int object)
 {
 	return screens[object]->offset_y;
 }
 
-static void setImage (int object,int image)
+static void setImage (unsigned int object,int image)
 {
 }
 
-static void setX (int object,int x)
+static void setX (unsigned int object,int x)
 {
 	screens[object]->offset_x = x;
 
@@ -57,12 +57,17 @@ static void setX (int object,int x)
 	video -> refreshSomeScanlines = TRUE;
 }
 
-static void setY (int object,int y)
+static void setY (unsigned int object,int y)
 {
 	screens[object]->offset_y = y;
 
  	screens[object] -> refreshScanlines = TRUE;
 	video -> refreshSomeScanlines = TRUE;
+}
+
+static struct retroScreen *getScreen(unsigned int object)
+{
+	return NULL;
 }
 
 struct channelAPI screen_offset_api = 
@@ -73,6 +78,7 @@ struct channelAPI screen_offset_api =
 	getY,
 	setImage,
 	setX,
-	setY
+	setY,
+	getScreen
 };
 

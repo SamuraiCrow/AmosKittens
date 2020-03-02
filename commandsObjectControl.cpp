@@ -31,6 +31,7 @@
 #include "kittyErrors.h"
 #include "engine.h"
 #include "amosstring.h"
+#include "joysticks.h"
 
 #include "commandsData.h"
 
@@ -52,11 +53,15 @@ extern std::vector<int> engineCmdQue;
 
 extern void __wait_vbl();
 
+extern int bobUpdateEvery;
+
+/*
 extern int bobDoUpdate;
 extern int bobAutoUpdate;
-extern int bobUpdateEvery;
+
 extern int bobDoUpdateEnable;
 extern int bobUpdateOnce;
+*/
 
 int priorityReverse = 0;
 
@@ -86,11 +91,11 @@ int find_zone_in_any_screen_hard( int hx, int hy)
 				x = XScreen_formula( s, hx );
 				y = YScreen_formula( s, hy );
 				zz = &zones[z];
-				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z;
+				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z+1;
 			}
 		}
 	}
-	return -1;
+	return 0;
 }
 
 int find_zone_in_any_screen_pixel( int hx, int hy)
@@ -108,12 +113,12 @@ int find_zone_in_any_screen_pixel( int hx, int hy)
 				x = XScreen_formula( s, hx );
 				y = YScreen_formula( s, hy );
 				zz = &zones[z];
-				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z;
+				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z+1;
 			}
 		}
 	}
 
-	return -1;
+	return 0;
 }
 
 int find_zone_in_only_screen_hard( int screen, int hx, int hy)
@@ -131,11 +136,11 @@ int find_zone_in_only_screen_hard( int screen, int hx, int hy)
 				x = XScreen_formula( s, hx );
 				y = YScreen_formula( s, hy );
 				zz = &zones[z];
-				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z;
+				if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z+1;
 			}
 		}
 	}
-	return -1;
+	return 0;
 }
 
 int find_zone_in_only_screen_pixel( int screen, int x, int y)
@@ -148,10 +153,10 @@ int find_zone_in_only_screen_pixel( int screen, int x, int y)
 		if (zones[z].screen == screen)
 		{
 			zz = &zones[z];
-			if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z;
+			if ((x>zz->x0)&&(y>zz->y0)&&(x<zz->x1)&&(y<zz->y1))	return z+1;
 		}
 	}
-	return -1;
+	return 0;
 }
 
 
@@ -225,10 +230,12 @@ char *_ocMouseLimit( struct glueCommands *data, int nextToken )
 	{
 		case 1:	if (kittyStack[stack].type == type_none)
 				{
+#ifdef enable_limit_mouse_yes
 					engine_lock();	
 					engine -> limit_mouse = false;
 					engineCmdQue.push_back(kitty_limit_mouse);
 					engine_unlock();
+#endif
 				}
 				else
 				{
@@ -247,10 +254,11 @@ char *_ocMouseLimit( struct glueCommands *data, int nextToken )
 					engine -> limit_mouse_x1 = (x1 - 128) * 2;
 					engine -> limit_mouse_y1 = (y1 - 50) * 2;
 					engine -> limit_mouse = true;
-
+#ifdef enable_limit_mouse_yes
 					engine_lock();
 					engineCmdQue.push_back(kitty_limit_mouse);
 					engine_unlock();
+#endif 
 				}
 				break;
 		default:
@@ -520,7 +528,7 @@ char *_ocSetZone( struct glueCommands *data, int nextToken )
 
 	if (args == 5)
 	{
-		int z = getStackNum( stack -4 );
+		int z = getStackNum( stack -4 ) - 1;
 		int x0 = getStackNum( stack -3 );
 		int y0 = getStackNum( stack -2 );
 		int x1 = getStackNum( stack -1 );
@@ -659,42 +667,33 @@ char *ocView(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *ocUpdateOff(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	int prev = bobAutoUpdate;
-	bobAutoUpdate = 0;
-	bobDoUpdateEnable = 0;
+	engine_update_flags = rs_force_update;
 	return tokenBuffer;
 }
 
 char *ocUpdateOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int prev = bobAutoUpdate;
-	bobAutoUpdate = 1;
-	bobDoUpdateEnable = 1;
+
+	engine_update_flags = rs_bob_moved | rs_force_swap;
+
 	return tokenBuffer;
 }
 
 char *ocUpdate(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	printf("bobAutoUpdate %d\n",bobAutoUpdate);
 	engine_lock();		// Stop half of the bobs from being drawn.
-	bobUpdateOnce = 1;
+
+	if (screens[current_screen])
+	{
+		screens[current_screen] -> event_flags |= rs_force_update;
+	}
+
 	engine_unlock();
 	__wait_vbl();
 	return tokenBuffer;
 }
 
-char *ocSynchroOn(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	NYI(__FUNCTION__);
-	return tokenBuffer;
-}
-
-char *ocSynchroOff(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	NYI(__FUNCTION__);
-	return tokenBuffer;
-}
 
 char *_ocJUp( struct glueCommands *data, int nextToken )
 {
@@ -709,8 +708,6 @@ char *_ocJUp( struct glueCommands *data, int nextToken )
 	else setError(22,data->tokenBuffer);;
 	popStack( stack - data->stack );
 	setStackNum( ret );
-
-	if (ret) 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	return NULL;
 }
@@ -732,11 +729,10 @@ char *_ocJDown( struct glueCommands *data, int nextToken )
 		int j = getStackNum( stack );
 		if ((j>-1)&&(j<4)) ret = (amiga_joystick_dir[j] & joy_down) ? TRUE : FALSE;
 	}
-	else setError(22,data->tokenBuffer);;
+	else setError(22,data->tokenBuffer);
+
 	popStack( stack - data->stack );
 	setStackNum( ret );
-
-	if (ret) 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 	return NULL;
 }
 
@@ -757,12 +753,10 @@ char *_ocJLeft( struct glueCommands *data, int nextToken )
 		int j = getStackNum( stack );
 		if ((j>-1)&&(j<4)) ret = (amiga_joystick_dir[j] & joy_left) ? TRUE : FALSE;
 	}
-	else setError(22,data->tokenBuffer);;
+	else setError(22,data->tokenBuffer);
+
 	popStack( stack - data->stack );
 	setStackNum( ret );
-
-	if (ret) 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-
 	return NULL;
 }
 
@@ -783,11 +777,10 @@ char *_ocJRight( struct glueCommands *data, int nextToken )
 		int j = getStackNum( stack );
 		if ((j>-1)&&(j<4)) ret = (amiga_joystick_dir[j] & joy_right) ? TRUE : FALSE;
 	}
-	else setError(22,data->tokenBuffer);;
+	else setError(22,data->tokenBuffer);
+
 	popStack( stack - data->stack );
 	setStackNum( ret );
-	if (ret) 	printf("%s:%d\n",__FUNCTION__,__LINE__);
-
 	return NULL;
 }
 
@@ -798,26 +791,29 @@ char *ocJRight(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *_ocSynchro( struct glueCommands *data, int nextToken )
+char *ocSynchroOn(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	int args = stack - data->stack +1 ;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	synchro_on = true;
+	return tokenBuffer;
+}
 
-	NYI(__FUNCTION__);
-
-	if (args == 1)
-	{
-	}
-	else setError(22,data->tokenBuffer);;
-
-	popStack( stack - data->stack );
-	return NULL;
+char *ocSynchroOff(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	synchro_on = false;	
+	return tokenBuffer;
 }
 
 char *ocSynchro(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	stackCmdParm( _ocSynchro, tokenBuffer );
+
+	if (!synchro_on)
+	{
+		run_amal_scripts();
+	}
+
 	return tokenBuffer;
 }
 
@@ -869,37 +865,15 @@ char *ocFire(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *_ocMakeMask( struct glueCommands *data, int nextToken )
-{
-	int args = stack - data->stack +1 ;
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-	switch (args)
-	{
-		case 0:
-		case 1:
-			break;
-		default:
-			setError(22,data->tokenBuffer);;
-			break;
-	}
-
-	popStack( stack - data->stack );
-	return NULL;
-}
-
-char *ocMakeMask(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	stackCmdNormal( _ocMakeMask, tokenBuffer );
-	return tokenBuffer;
-}
-
 char *_ocHZone( struct glueCommands *data, int nextToken )
 {
 	int args = stack - data->stack +1 ;
-	int ret = -1;
 	int s=-1,x=-1,y=-1;
+
+	// this function should return 0, if no zone is found.
+
+	int ret = 0;
+
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)

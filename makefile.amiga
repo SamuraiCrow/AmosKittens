@@ -77,6 +77,12 @@ main_objects = commands.cpp \
 			os/amigaos/animation.cpp \
 			AmosString.cpp \
 			floyd.cpp \
+			nativeCommands.cpp \
+			include.cpp \
+			bobCol.cpp \
+			spriteCol.cpp \
+			bobSpriteCol.cpp \
+			amalBank.cpp
 
 
 objects_in_dir = ${main_objects:%.cpp=${objects_dir}%.o}
@@ -93,7 +99,7 @@ debug:
 $(objects_dir)%.o:	%.cpp debug.h 
 	g++ $(warnings) -c -O2  $(COPT) $(inc) $(@:${objects_dir}%.o=%.cpp) -o $@
 
-amosKittens.exe:	config.h	AmosKittens.cpp	 $(objects_in_dir)
+AmosKittens.exe:	config.h	AmosKittens.cpp	 $(objects_in_dir)
 	g++ $(warnings) -O2 $(COPT) $(@:.exe=.cpp) $(objects_in_dir) -o $@
 
 %.exe:		%.cpp $(objects_in_dir)

@@ -20,30 +20,61 @@ namespace channel_status
 {
 	enum status
 	{
-		uninitialized,	// No amal program.
-		initialized,		// Have amal program
-		done,		// Amal program is done.
-		active,		// Amal program is running.
-		paused,		// Same as exit amal prgram at VBL
-		frozen,		// Stops the amal program, until its unfrozen.
-		wait,			// same as frozen, but triggered by wait command.
-		direct		// if direct, then amal program counter is set. status reset.
+		uninitialized	= 0x01,	// No amal program.
+		done		= 0x02,	// Amal program is done.
+		initialized		= 0x04,	// Have amal program
+		active		= 0x08,	// Amal program is running.
+		paused		= 0x10,	// Same as exit amal prgram at VBL
+		frozen		= 0x20,	// Stops the amal program, until its unfrozen.
+		wait			= 0x40,	// only Execute autotest
+		direct		= 0x80,	// exit autotest, early, and AMAL start ptr.
+		error			= 0x100	// error (used by play command)
 	};
 };
 
 struct channelAPI
 {
 	int (*getMax) ( void );
-	int (*getImage) (int object);
-	int (*getX) (int object);
-	int (*getY) (int object);
-	void (*setImage) (int object,int);
-	void (*setX) (int object,int);
-	void (*setY) (int object,int);
+	int (*getImage) (unsigned int object);
+	int (*getX) (unsigned int object);
+	int (*getY) (unsigned int object);
+	void (*setImage) (unsigned int object,int);
+	void (*setX) (unsigned int object,int);
+	void (*setY) (unsigned int object,int);
+	struct retroScreen *(*getScreen)( unsigned int object );
 };
 
-struct kittyChannel
+struct amalPlayContext
 {
+	signed char *data;
+	int repeat;
+	int size;
+	signed char value;
+};
+
+class amalBankPlay
+{
+	public:
+		unsigned short *offset_tab;
+		unsigned short *size_tab;
+		char *name_tab;
+		char *move_data;
+		int lx;
+
+		struct amalPlayContext cdx;
+		struct amalPlayContext cdy;
+
+	amalBankPlay(char *start);
+};
+
+
+class kittyChannel
+{
+	public:
+
+	kittyChannel( int channel );
+	~kittyChannel();
+
 	unsigned short id;
 	unsigned short token;
 	unsigned short number;
@@ -77,9 +108,9 @@ struct kittyChannel
 
 	struct channelAPI *objectAPI;
 
-	channel_status::status animStatus;
-	channel_status::status amalStatus;
-	channel_status::status moveStatus;
+	uint32_t animStatus;
+	uint32_t amalStatus;
+	uint32_t moveStatus;
 
 	int reg[10];	// local reg 0 to 9 
 	int parenthses;
@@ -89,8 +120,14 @@ struct kittyChannel
 	struct amalCallBack *progStack;
 	unsigned int progStackCount;
 	unsigned int loopCount; 
+	unsigned int autotest_loopCount;
 	unsigned int last_reg;
+
 	void *(*pushBackFunction)  (struct kittyChannel *self, struct amalCallBack *cb);
+	unsigned short next_arg;
+	unsigned short let;
+
+	struct amalBankPlay *amalPlayBank;
 };
 
 
@@ -98,8 +135,8 @@ class ChannelTableClass
 {
 private:
 	struct kittyChannel **tab;
-	int allocated;
-	int used;
+	unsigned int allocated;
+	unsigned int used;
 public:
 	ChannelTableClass()
 	{
@@ -108,20 +145,17 @@ public:
 		tab = (struct kittyChannel **) malloc(sizeof(struct kittyChannel *) * allocated );
 	}
 
-	~ChannelTableClass()
-	{
-		if (tab) free(tab);
-		tab = NULL;
-	}
+	~ChannelTableClass();
 
 	struct kittyChannel *newChannel( int channel );
 	struct kittyChannel *getChannel( int channel );
 	struct kittyChannel *item( int index );
+	struct kittyChannel *findChannelByItem(int token, int number);
 	int _size();
 };
 
 extern void setChannelAmal( struct kittyChannel *item, struct stringData *str);
-extern void setChannelAnim( struct kittyChannel *item, struct stringData *str);
+extern void setChannelAnim( struct kittyChannel *item, struct stringData *str, bool enable);
 extern void setChannelMoveX( struct kittyChannel *item, struct stringData *str);
 extern void setChannelMoveY( struct kittyChannel *item, struct stringData *str);
 extern void initChannel( struct kittyChannel *item, int channel );

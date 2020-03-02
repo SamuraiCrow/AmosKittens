@@ -23,6 +23,8 @@ extern FILE *engine_fd;
 
 #include "amosKittens.h"
 #include "commands.h"
+#include "AmalCompiler.h"
+#include "channel.h"
 #include "debug.h"
 #include <vector>
 
@@ -31,11 +33,17 @@ extern std::vector<struct lineAddr> linesAddress;
 extern std::vector<struct label> labels;
 extern std::vector<struct kittyBank> kittyBankList;
 extern std::vector<struct wave *> waves;
+extern std::vector<int> collided;
+
+extern ChannelTableClass *channels;
 extern int global_var_count;
 
 extern struct retroScreen *screens[8] ;
-extern struct retroSpriteObject bobs[64];
+extern  std::vector<struct retroSpriteObject *> bobs;
+extern struct retroSprite *sprite;
 extern int current_screen ;
+
+struct lineFromPtr lineFromPtr;
 
 // _lessOrEqualData
 
@@ -100,6 +108,7 @@ char *_gfxScreenCopy( struct glueCommands *data, int nextToken );
 char *_setVar( struct glueCommands *data, int nextToken );
 char *_set_amreg_fn( struct glueCommands *data, int nextToken );
 char *_set_amreg_channel_fn( struct glueCommands *data, int nextToken );
+char *_gfxColour( struct glueCommands *data, int nextToken );
 
 
 struct stackDebugSymbol
@@ -165,6 +174,7 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_setVar,"set var"},
 	{_set_amreg_fn,"_set_amreg_fn" },
 	{_set_amreg_channel_fn,"_set_amreg_channel_fn" },
+	{_gfxColour, "Colour" },
 	{NULL, NULL}
 };
 
@@ -190,6 +200,31 @@ void dump_labels()
 				labels[n].tokenLocation, 
 				labels[n].name, labels[n].proc);
 
+	}
+}
+
+void dump_sprite()
+{
+	int image;
+	struct retroFrameHeader *frame;
+
+	if (sprite)
+	{
+		for (image=0;image<sprite -> number_of_frames;image++)
+		{
+			frame = &sprite -> frames[image];
+
+			printf("sprite %-3d, w %-3d, h %-3d, bpr %-3d, hotspot x %-3d, hotspot y %-3d, data %08x, mask %08x - alpha %d\n", 
+				image+1,
+				frame -> width,
+				frame -> height,
+				frame -> bytesPerRow,
+				frame -> XHotSpot,
+				frame -> YHotSpot,
+				frame -> data,
+				frame -> mask,
+				frame -> alpha );
+		}
 	}
 }
 
@@ -259,18 +294,25 @@ void dump_var( int n )
 
 				if (globalVars[n].var.procDataPointer == 0)
 				{
+					getLineFromPointer( globalVars[n].var.tokenBufferPos );
+
 					printf("%d -- %d::%s%s[]=%04X (line %d)\n",n,
 						globalVars[n].proc, "Proc ",
 						globalVars[n].varName, 
-						globalVars[n].var.tokenBufferPos, getLineFromPointer( globalVars[n].var.tokenBufferPos ) );
+						globalVars[n].var.tokenBufferPos, lineFromPtr.line );
 				}
 				else
 				{
+					int tokenBufferLine;
+					getLineFromPointer( globalVars[n].var.tokenBufferPos );
+					tokenBufferLine = lineFromPtr.line;
+					getLineFromPointer( globalVars[n].var.procDataPointer );
+
 					printf("%d -- %d::%s%s[]=%04X (line %d)  --- data read pointer %08x (line %d)\n",n,
 						globalVars[n].proc, "Proc ",
 						globalVars[n].varName, 
-						globalVars[n].var.tokenBufferPos, getLineFromPointer( globalVars[n].var.tokenBufferPos ),
-						globalVars[n].var.procDataPointer, getLineFromPointer( globalVars[n].var.procDataPointer ) );
+						globalVars[n].var.tokenBufferPos, tokenBufferLine,
+						globalVars[n].var.procDataPointer, lineFromPtr.line );
 				}
 
 				break;
@@ -318,11 +360,15 @@ void dump_var( int n )
 					globalVars[n].varName,
 					globalVars[n].var.count);
 #ifdef show_array_yes
-				for (i=0; i<globalVars[n].var.count; i++)
-				{
-					strptr =(&(globalVars[n].var.str_array -> ptr))[i];
 
-					printf("[%d]=%s ,",i, strptr ? &(strptr -> ptr) : "<NULL>");
+				{
+					struct stringData *strptr;
+					for (i=0; i<globalVars[n].var.count; i++)
+					{
+						strptr =(&(globalVars[n].var.str_array -> ptr))[i];
+
+						printf("[%d]=%s ,",i, strptr ? &(strptr -> ptr) : "<NULL>");
+					}
 				}
 #else
 				printf("...");
@@ -373,8 +419,10 @@ void dump_prog_stack()
 
 		name = findDebugSymbolName( cmdTmp[n].cmd );
 
+		getLineFromPointer(cmdTmp[n].tokenBuffer);
+
 		printf("cmdTmp[%d].cmd = %08x (%s) \n", n, cmdTmp[n].cmd, name ? name : "?????" );
-		printf("cmdTmp[%d].tokenBuffer = %08x  - at line: %d \n", n, cmdTmp[n].tokenBuffer, getLineFromPointer(cmdTmp[n].tokenBuffer));
+		printf("cmdTmp[%d].tokenBuffer = %08x  - at line: %d \n", n, cmdTmp[n].tokenBuffer, lineFromPtr.line );
 		printf("cmdTmp[%d].flag = %08x\n", n, cmdTmp[n].flag);
 		printf("cmdTmp[%d].lastVar = %d\n", n, cmdTmp[n].lastVar);
 		printf("cmdTmp[%d].token = %04x\n", n, cmdTmp[n].token);
@@ -439,6 +487,26 @@ void dump_stack()
 	}
 }
 
+bool var_has_name( struct kittyData *var, const char *name )
+{
+	int n;
+
+	for (n=0;n<global_var_count;n++)
+	{
+		if (var == &globalVars[n].var)
+		{
+			if (globalVars[n].varName)
+			{
+				if (strcasecmp( globalVars[n].varName, name ) == 0)
+				{
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
 void dump_banks()
 {
 	unsigned int n = 0;
@@ -479,33 +547,60 @@ void dump_end_of_program()
 	dump_banks();
 }
 
-int getLineFromPointer( char *address )
+void getLineFromPointer( char *address )
 {
 	unsigned int n = 0;
+	unsigned int offset = 0;
+
+	offset = address - _file_start_;
 
 	for (n=0;n<linesAddress.size();n++)
 	{
-		if ( (linesAddress[n].start >= address) && (address < linesAddress[n].end) )
+		if ( (linesAddress[n].start >= offset) && (offset < linesAddress[n].end) )
 		{
-			return n-1;
+			lineFromPtr.file =  linesAddress[n].file;
+			lineFromPtr.line =  linesAddress[n].lineNumber;
+			return;
 		}
 	}
 
 	if ( linesAddress.size() )
 	{
-		if ( linesAddress[linesAddress.size()-1].end < address ) return linesAddress.size()-2;
+		if ( linesAddress[linesAddress.size()-1].end < offset ) 
+		{
+			n = linesAddress.size()-1;
+			lineFromPtr.file =  linesAddress[n].file;
+			lineFromPtr.line =  linesAddress[n].lineNumber;
+			return;
+		}
 	}
 
-	return -1;
+	lineFromPtr.file =  -1;
+	lineFromPtr.line =  -1;
 }
 
-void dumpLineAddress()
+void dump_lines()
 {
 	unsigned int n = 0;
+	unsigned int offset =0;
+	unsigned char *ptr;
 
 	for (n=0;n<linesAddress.size();n++)
 	{
-		printf("Line %08d, start %08x end %08x\n", n-1, linesAddress[n].start , linesAddress[n].end );
+		printf("File %04d Line %04d, token start %d, end %d: (from src %d and %d)\n", 
+				linesAddress[n].file, 
+				linesAddress[n].lineNumber, 
+				linesAddress[n].start, 
+				linesAddress[n].end,
+				linesAddress[n].srcStart, 
+				linesAddress[n].srcEnd );
+
+		for (offset = linesAddress[n].start; offset < linesAddress[n].end ; offset+=2 )
+		{
+			ptr = (unsigned char *) _file_start_ + offset;
+			printf("%04x ",*((unsigned short *) ptr));
+		}
+		printf("\n");
 	}
 }
 
@@ -533,22 +628,45 @@ void dump_pal(struct retroScreen *s, int colors)
 	Printf("\n");
 }
 
-void dump_bobs(int screen_id)
+void dump_all_bobs()
 {
-	int n;
-	Printf("      ");
+	unsigned int n;
 
-	for (n =0;n<64;n++)
+	Printf_iso("dump_all_bobs\n");
+
+	for (n =0;n<bobs.size();n++)
 	{
-		if (screen_id == bobs[n].screen_id)
+		if (bobs[n] -> image != -1)
 		{
-			if (bobs[n].image != -1)
+			Printf_iso("bob %ld, %4ld,%4ld,%4ld -> screen %ld\n",
+				bobs[n] -> id,
+				bobs[n] -> x,
+				bobs[n] -> y,
+				bobs[n] -> image,
+				bobs[n] -> screen_id );
+		}
+	}
+	Printf("\n");
+}
+
+
+void dump_bobs_on_screen(int screen_id)
+{
+	unsigned int n;
+
+	Printf_iso("dump_bobs on screen %ld",screen_id);
+
+	for (n =0;n<bobs.size();n++)
+	{
+		if (screen_id == bobs[n] -> screen_id)
+		{
+			if (bobs[n] -> image != -1)
 			{
 				Printf_iso("[ %ld, %4ld,%4ld,%4ld ] ",
-					n,
-					bobs[n].x,
-					bobs[n].y,
-					bobs[n].image);
+					bobs[n] -> id,
+					bobs[n] -> x,
+					bobs[n] -> y,
+					bobs[n] -> image);
 			}
 		}
 	}
@@ -573,6 +691,53 @@ void dump_zones()
 	}
 }
 
+void dump_anim()
+{
+	struct kittyChannel *item;
+
+	Printf("\nDump anim channels\n");
+
+	for ( int n  = 0 ; n < channels -> _size();n++ )
+	{
+		item = channels -> item(n);
+
+		if (item)
+		{	
+			Printf("id: %ld, anim_loops: %ld, anim_sleep %ld, anim_sleep_to: %ld, status %ld\n",
+				item -> id,
+				item -> anim_loops,
+				item -> anim_sleep,
+				item -> anim_sleep_to,
+				item -> animStatus);
+
+			if (item -> anim_script) Printf("anim: '%s'\n",&(item -> anim_script -> ptr));
+		}
+	}
+}
+
+
+void dump_channels()
+{
+	struct kittyChannel *item;
+
+	Printf("\nDump channels\n");
+
+	for ( int n  = 0 ; n < channels -> _size();n++ )
+	{
+		item = channels -> item(n);
+
+		if (item)
+		{	
+			Printf("id: %ld, amal status: %ld amal script %s, anim status: %ld, anim script: %s\n",
+				item -> id,
+				item -> amalStatus,
+				item -> amal_script ? "Yes" : "No",
+				item -> animStatus,
+				item -> anim_script ? "Yes" : "No"
+				);
+		}
+	}
+}
 
 void dump_screens()
 {
@@ -595,7 +760,7 @@ void dump_screens()
 				screens[n]->fade_speed);
 
 //				dump_pal( screens[n] , 8 );						
-				dump_bobs( n );
+				dump_bobs_on_screen( n );
 		}
 	}
 };
@@ -689,4 +854,12 @@ void debug_draw_hline(int x)
 		printf("debug gfx window not open\n");
 	}
 #endif 
+}
+
+void dump_collided()
+{
+	for (unsigned int n=0;n<collided.size();n++)
+	{
+		printf("collided id: %d\n",collided[n]);
+	}
 }
