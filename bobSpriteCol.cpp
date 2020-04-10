@@ -11,6 +11,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/retroMode.h>
+#include <amoskittens.h>
 #endif
 
 #ifdef __linux__
@@ -21,11 +22,7 @@
 
 #include "commandsScreens.h"
 
-extern struct retroScreen *screens[8] ;
-
-extern struct retroSprite *sprite;
 extern std::vector<int> collided;
-extern struct retroVideo *video;
 extern std::vector<struct retroSpriteObject *> bobs;
 
 extern struct retroSpriteObject *getBob(unsigned int id);
@@ -39,7 +36,7 @@ extern int from_XSprite_formula(int x);
 extern int from_YSprite_formula(int y);
 
 extern int inSprite( struct retroMask *thisMask, int minX,int minY, int maxX, int maxY, struct retroSpriteObject *otherBob );
-#define getSprite(num) &(video -> sprites[num])
+#define getSprite(num) &(instance.video -> sprites[num])
 
 int bobSpriteColAll( unsigned short bob )
 {
@@ -62,9 +59,9 @@ int bobSpriteColAll( unsigned short bob )
 
 	if (thisBob -> image == 0) return 0;
 
-	frame = &sprite -> frames[ thisBob -> image-1 ];
+	frame = &instance.sprites -> frames[ thisBob -> image-1 ];
 
-	screen = screens[thisBob -> screen_id ];
+	screen = instance.screens[thisBob -> screen_id ];
 	if (screen == NULL) return 0;
 
 	minX =  thisBob -> x - frame -> XHotSpot ;
@@ -75,7 +72,7 @@ int bobSpriteColAll( unsigned short bob )
 	minX = XSprite_formula(XHard_formula( screen, minX ));
 	minY = YSprite_formula(YHard_formula( screen, minY ));
 
-	for (n=0;n<sprite -> number_of_frames;n++)
+	for (n=0;n<instance.sprites -> number_of_frames;n++)
 	{
 		otherSprite = getSprite(n);
 
@@ -118,9 +115,9 @@ int bobSpriteColRange( unsigned short bob, unsigned short start, unsigned short 
 
 	if (thisBob -> image < 1) return 0;	// does not have image.
 
-	frame = &sprite -> frames[ thisBob -> image-1 ];
+	frame = &instance.sprites -> frames[ thisBob -> image-1 ];
 
-	screen = screens[thisBob -> screen_id ];
+	screen = instance.screens[thisBob -> screen_id ];
 	if (screen == NULL) return 0;
 
 	minX =  thisBob -> x - frame -> XHotSpot ;

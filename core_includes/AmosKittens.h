@@ -13,6 +13,29 @@ typedef void* APTR;
 #endif
 #define __amoskittens_h__
 
+#ifdef __linux__
+#define allocStruct(name,items) (struct type *) malloc( sizeof(struct type) * items )
+#define allocArrayData(type,size) (struct type ## ArrayData *) malloc( sizeof(struct type ## ArrayData) + size )
+#define freeStruct(adr) free( adr )
+#define sys_free FreeVec
+#define freeString(adr) sys_free(adr)
+#endif
+
+#if defined(__amigaos4__)
+#define allocStruct(name,items) (struct name*) AllocVecTags( sizeof(struct name) * items , AVT_Type, MEMF_SHARED, TAG_END )
+#define allocType(name,items) (name *) AllocVecTags( sizeof(name) * items , AVT_Type, MEMF_SHARED, TAG_END )
+#define allocArrayData(type,size) (struct type ## ArrayData *) AllocVecTags( sizeof(struct type ## ArrayData) + size , AVT_Type, MEMF_SHARED, TAG_END )
+#define freeStruct(adr) FreeVec( adr )
+#define sys_public_alloc(size) AllocVecTags( size, AVT_Type, MEMF_SHARED, TAG_END )
+#define sys_public_alloc_clear(size) AllocVecTags( size, AVT_Type, MEMF_SHARED, AVT_ClearWithValue, 0, TAG_END )
+#define sys_priv_alloc(size) AllocVecTags( size, AVT_Type, MEMF_PRIVATE, TAG_END )
+#define sys_priv_alloc_clear(size) AllocVecTags( size, AVT_Type, MEMF_PRIVATE, AVT_ClearWithValue, 0, TAG_END )
+#define sys_memavail_gfxmem()
+#define sys_memavail_sysmem() AvailMem(MEMF_ANY)
+#define sys_free FreeVec
+#define freeString(ptr) FreeVec(ptr)
+#endif
+
 #define PROC_STACK_SIZE 1000
 #define VAR_BUFFERS 1000
 #define MAX_PARENTHESIS_COUNT 1000
@@ -100,12 +123,22 @@ enum
 	type_array = 8	,	// I'm sure AMOS don't use this, but we do.
 };
 
+struct KittyInstance;
+
+#ifdef __amoskittens__
+#define KITTENS_CMD_ARGS (struct nativeCommand *cmd, char *tokenBuffer)
+#define EXT_CMD_ARGS (struct KittyInstance *instance , struct nativeCommand *cmd, char *tokenBuffer)
+#else
+#define KITTENS_CMD_ARGS (struct KittyInstance *instance , struct nativeCommand *cmd, char *tokenBuffer)
+#endif
+
+
 struct nativeCommand
 {
 	int id;
 	const char *name;
 	int size;
-	char *(*fn) (struct nativeCommand *cmd, char *tokenBuffer);
+	char *(*fn) KITTENS_CMD_ARGS;
 };
 
 enum 
@@ -142,6 +175,8 @@ struct kittyForDouble
 	double have_to;
 };
 
+struct KittyInstance;
+
 struct glueCommands
 {
 	char *(*cmd) ( struct glueCommands *data, int nextToken );	// can return token location
@@ -168,6 +203,7 @@ struct glueCommands
 
 	int stack;
 	int parenthesis_count;
+	struct KittyInstance *instance;
 };
 
 struct proc 
@@ -199,22 +235,12 @@ struct extension_lib
 	uint32_t crc;
 };
 
-struct dataBase
+struct stringData 
 {
 #ifdef _MSC_VER
 #pragma pack(push, 1)
 #endif
 	uint16_t type;
-#ifdef _MSC_VER
-#pragma pack(pop)
-#endif
-} PACKED;
-
-struct stringData : dataBase
-{
-#ifdef _MSC_VER
-#pragma pack(push, 1)
-#endif
 	uint16_t size;
 	char ptr;
 #ifdef _MSC_VER
@@ -222,33 +248,36 @@ struct stringData : dataBase
 #endif
 } PACKED;
 
-struct desimalData :  dataBase
+struct desimalData 
 {
 #ifdef _MSC_VER
 #pragma pack(push, 1)
 #endif
+	uint16_t type;
 	double value;
 #ifdef _MSC_VER
 #pragma pack(pop)
 #endif
 } PACKED;
 
-struct valueData : dataBase
+struct valueData 
 {
 #ifdef _MSC_VER
 #pragma pack(push, 1)
 #endif
+	uint16_t type;
 	int value;
 #ifdef _MSC_VER
 #pragma pack(pop)
 #endif
 } PACKED;
 
-struct stringArrayData : dataBase
+struct stringArrayData 
 {
 #ifdef _MSC_VER
 #pragma pack(push, 1)
 #endif
+	uint16_t type;
 	uint16_t size;
 	struct stringData *ptr;
 #ifdef _MSC_VER
@@ -256,11 +285,12 @@ struct stringArrayData : dataBase
 #endif
 } PACKED;
 
-struct desimalArrayData : dataBase
+struct desimalArrayData 
 {
 #ifdef _MSC_VER
 #pragma pack(push, 1)
 #endif
+	uint16_t type;
 	uint16_t size;
 	struct desimalData ptr;
 #ifdef _MSC_VER
@@ -268,11 +298,12 @@ struct desimalArrayData : dataBase
 #endif
 } PACKED;
 
-struct valueArrayData : dataBase
+struct valueArrayData 
 {
 #ifdef _MSC_VER
 #pragma pack(push, 1)
 #endif
+	uint16_t type;
 	uint16_t size;
 	struct valueData ptr;
 #ifdef _MSC_VER
@@ -304,7 +335,6 @@ struct kittyData
 	union
 	{
 		int *sizeTab;
-		char *procDataPointer;
 	};
 
 	struct valueData integer;
@@ -352,16 +382,23 @@ struct globalVar
 {
 	struct kittyData var;
 	char *varName;
+	union
+	{
+		int localIndex;
+		int localIndexSize;
+	};
 	int proc;	// so vars can be attached to proc.
 	int pass1_shared_to;	// pass1 should only use this, as it will change.
 	bool isGlobal;
+	char *procDataPointer;
 };
 
 struct stackFrame
 {
 	int id;
-//	struct kittyData *var;
 	char *dataPointer;
+	struct kittyData *localVarData;
+	struct kittyData *localVarDataNext;
 };
 
 struct defFn
@@ -457,100 +494,129 @@ struct kittyLib
 	struct Library *base;
 };
 
+#ifdef __amoskittens__
+#define __cmdStack instance.cmdStack
+#define __stack instance.stack
+#define instance_stack instance.stack
+#define instance_cmdStack instance.cmdStack
+#define instance_parenthesis_count instance.parenthesis_count
+#define instance_token_is_fresh instance.token_is_fresh
+#define this_instance_one
+#define this_instance_first
+#define opt_instance_one
+#define opt_instance_first
+#define instance_
+#define instance_cmdstack_opts
+#else
+#define __cmdStack instance->cmdStack
+#define __stack instance->stack
+#define instance_stack instance->stack
+#define instance_cmdStack instance->cmdStack
+#define instance_parenthesis_count instance->parenthesis_count
+#define instance_token_is_fresh instance->token_is_fresh
+#define this_instance_one struct KittyInstance *instance
+#define this_instance_first struct KittyInstance *instance,
+#define opt_instance_one instance
+#define opt_instance_first instance,
+#define instance_cmdstack_opts \
+		cmdTmp[__cmdStack].instance = instance;
+#endif
+
 #define stackIfSuccess()					\
-	cmdTmp[cmdStack].cmd = _ifSuccess;		\
-	cmdTmp[cmdStack].tokenBuffer = NULL;	\
-	cmdTmp[cmdStack].flag = cmd_never | cmd_true;	\
-	cmdStack++; \
+	cmdTmp[__cmdStack].cmd = _ifSuccess;		\
+	cmdTmp[__cmdStack].tokenBuffer = NULL;	\
+	cmdTmp[__cmdStack].flag = cmd_never | cmd_true;	\
+	__cmdStack++; \
 
 #define stackIfNotSuccess()					\
-	cmdTmp[cmdStack].cmd = _ifNotSuccess;		\
-	cmdTmp[cmdStack].tokenBuffer = NULL;	\
-	cmdTmp[cmdStack].flag = cmd_never | cmd_false;	\
-	cmdStack++; \
+	cmdTmp[__cmdStack].cmd = _ifNotSuccess;		\
+	cmdTmp[__cmdStack].tokenBuffer = NULL;	\
+	cmdTmp[__cmdStack].flag = cmd_never | cmd_false;	\
+	__cmdStack++; \
 
 #define stackCmdNormal( fn, buf )				\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = cmd_normal | cmd_onNextCmd | cmd_onEol;	\
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].token = 0; \
-	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
-	cmdStack++; \
-	token_is_fresh = false; 
+	instance_cmdstack_opts ; \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = buf;	\
+	cmdTmp[__cmdStack].flag = cmd_normal | cmd_onNextCmd | cmd_onEol;	\
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	cmdTmp[__cmdStack].token = 0; \
+	cmdTmp[__cmdStack].parenthesis_count =instance_parenthesis_count; \
+	__cmdStack++; \
+	instance_token_is_fresh = false; 
 
 #define stackCmdLoop( fn, buf )				\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = cmd_loop;	\
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdStack++; \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = buf;	\
+	cmdTmp[__cmdStack].flag = cmd_loop;	\
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	__cmdStack++; \
 
 #define stackCmdProc( fn, buf )				\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = cmd_proc;	\
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdStack++; \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = buf;	\
+	cmdTmp[__cmdStack].flag = cmd_proc;	\
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	__cmdStack++; \
 
 #define stackCmdFlags( fn, buf, flags )				\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = flags;	\
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdStack++; \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = buf;	\
+	cmdTmp[__cmdStack].flag = flags;	\
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	__cmdStack++; \
 
 #define stackCmdIndex( fn, buf )	{			\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = cmd_index ;	\
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].token = token_index ; \
-	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
-	cmdStack++; } \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = buf;	\
+	cmdTmp[__cmdStack].flag = cmd_index ;	\
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	cmdTmp[__cmdStack].token = token_index ; \
+	cmdTmp[__cmdStack].parenthesis_count =instance_parenthesis_count; \
+	__cmdStack++; } \
 
 #define stackCmdParm( fn, buf )				\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = cmd_para | cmd_onComma | cmd_onNextCmd | cmd_onEol;	\
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].token = 0; \
-	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
-	cmdStack++; \
-	token_is_fresh = false; 
+	instance_cmdstack_opts ; \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = buf;	\
+	cmdTmp[__cmdStack].flag = cmd_para | cmd_onComma | cmd_onNextCmd | cmd_onEol;	\
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	cmdTmp[__cmdStack].token = 0; \
+	cmdTmp[__cmdStack].parenthesis_count =instance_parenthesis_count; \
+	__cmdStack++; \
+	instance_token_is_fresh = false; 
 
 #define stackCmdMathOperator(fn,_buffer,_token)				\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = _buffer;	\
-	cmdTmp[cmdStack].flag = cmd_para | cmd_onComma | cmd_onNextCmd | cmd_onEol; \
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].token = _token; \
-	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
-	cmdStack++; \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = _buffer;	\
+	cmdTmp[__cmdStack].flag = cmd_para | cmd_onComma | cmd_onNextCmd | cmd_onEol; \
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	cmdTmp[__cmdStack].token = _token; \
+	cmdTmp[__cmdStack].parenthesis_count =instance_parenthesis_count; \
+	__cmdStack++; \
 
 #define stackCmdOnBreakOrNewCmd(fn,buf,_token)				\
-	cmdTmp[cmdStack].cmd = fn;		\
-	cmdTmp[cmdStack].tokenBuffer = buf;	\
-	cmdTmp[cmdStack].flag = cmd_para | cmd_onBreak | cmd_onComma | cmd_onNextCmd | cmd_onEol;	\
-	cmdTmp[cmdStack].lastVar = last_var;	\
-	cmdTmp[cmdStack].stack = stack; \
-	cmdTmp[cmdStack].token = _token; \
-	cmdTmp[cmdStack].parenthesis_count =parenthesis_count; \
-	cmdStack++; \
+	cmdTmp[__cmdStack].cmd = fn;		\
+	cmdTmp[__cmdStack].tokenBuffer = buf;	\
+	cmdTmp[__cmdStack].flag = cmd_para | cmd_onBreak | cmd_onComma | cmd_onNextCmd | cmd_onEol;	\
+	cmdTmp[__cmdStack].lastVar = last_var;	\
+	cmdTmp[__cmdStack].stack = __stack; \
+	cmdTmp[__cmdStack].token = _token; \
+	cmdTmp[__cmdStack].parenthesis_count =instance_parenthesis_count; \
+	__cmdStack++; \
 
 
 extern struct zone *zones;
 extern int zones_allocated;
 
 extern int currentLine;
-extern int parenthesis_count;
 
 extern bool equal_symbol;
 extern struct nativeCommand NativeCommand[];
@@ -558,26 +624,13 @@ extern int findNativeCommand(unsigned short lastToken,unsigned short token);
 extern bool findSymbol(unsigned short token);
 extern int commandCnt;
 
-extern struct kittyData kittyStack[];
-extern struct glueCommands cmdTmp[];
 extern struct proc procStack[];
 
 extern struct extension_lib	kitty_extensions[32];
-
-extern int stack;
-extern int cmdStack;
 extern int procStackCount;
-
-//extern unsigned short last_tokens[MAX_PARENTHESIS_COUNT];
-
-extern char *(*jump_mode) (struct reference *ref, char *ptr);
-extern char *jump_mode_goto (struct reference *ref, char *ptr);
-extern char *jump_mode_gosub (struct reference *ref, char *ptr);
-
 extern struct stringData *var_param_str;
 extern int var_param_num;
 extern double var_param_decimal;
-
 extern int proc_stack_frame;
 
 extern struct stackFrame procStcakFrame[PROC_STACK_SIZE];
@@ -589,15 +642,81 @@ extern APTR contextDir;
 
 extern struct kittyFile kittyFiles[10];
 
-extern void do_std_next_arg(nativeCommand *cmd, char *ptr);
-extern char *do_to_default( struct nativeCommand *cmd, char *tokenbuffer );
+extern void (*do_breakdata) ( struct nativeCommand *cmd, char *tokenBuffer );
 
+extern struct glueCommands input_cmd_context;
+
+struct errorAt
+{
+	int code;
+	int trapCode;
+	char *posResume;
+	char *pos;
+	bool newError;
+};
+
+enum
+{
+	e_cmdTo_default = 1
+};
+
+struct kittyApi
+{
+	void (*freeScreenBobs) (int);
+	void *(*newTextWindow) ( struct retroScreen *, int );
+	void (*freeAllTextWindows) ( struct retroScreen * );
+	void (*engine_lock) (void);
+	void (*engine_unlock)( void );
+	struct kittyBank *(*findBank) (int);
+	struct kittyBank *(*reserveAs) ( int, int ,int, const char *, char * );
+	void (*freeBank) (int);
+	void (*setError) (int,char *);
+	void (*dumpStack) (void);
+	void (*setCmdTo) (int option);
+};
+
+struct KittyInstance
+{
+	int last_var;
+	struct globalVar *globalVars;
+	unsigned short last_token;
+	int tokenMode;
+	int tokenlength;
+	struct retroScreen *screens[8] ;
+	struct retroVideo *video;
+	struct retroRGB DefaultPalette[256];
+	int current_screen;
+	struct retroSprite *sprites ;
+	struct retroSprite *icons ;
+	int stack ;
+	int cmdStack ;
+	struct kittyData *kittyStack;
+	struct glueCommands *cmdTmp;
+	struct errorAt kittyError;
+	char *tokenBufferResume;
+	struct kittyApi api;
+	bool token_is_fresh;
+	int parenthesis_count;
+	void *extensions_context[32];
+	int current_extension;
+	int engine_mouse_key ;
+	int engine_mouse_x ;
+	int engine_mouse_y ;
+};
+
+#ifdef __amoskittens__
+extern char *(*jump_mode) (struct reference *ref, char *ptr);
+extern char *jump_mode_goto (struct reference *ref, char *ptr);
+extern char *jump_mode_gosub (struct reference *ref, char *ptr);
 extern void (**do_input) ( struct nativeCommand *cmd, char *tokenBuffer );
 extern char *(**do_to) ( struct nativeCommand *cmd, char *tokenBuffer );
-
-extern void (*do_breakdata) ( struct nativeCommand *cmd, char *tokenBuffer );
-extern bool token_is_fresh;
-extern struct glueCommands input_cmd_context;
+extern char *do_to_default( struct nativeCommand *cmd, char *tokenbuffer );
+extern void do_std_next_arg(nativeCommand *cmd, char *ptr);
+extern struct KittyInstance instance;
+extern struct kittyData kittyStack[];
+extern struct glueCommands cmdTmp[];
+#define last_var instance.last_var
+#endif
 
 #endif
 

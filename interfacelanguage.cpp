@@ -44,14 +44,11 @@ extern FILE *engine_fd;
 #include "engine.h"
 #include "bitmap_font.h"
 #include "amosstring.h"
-#include "ext_compact.h"
 
 extern struct TextFont *topaz8_font;
 
 extern int sig_main_vbl;
 
-extern int current_screen;
-extern struct retroScreen *screens[8] ;
 extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
 
@@ -199,7 +196,7 @@ bool get_resource_block( struct kittyBank *bank1, int block_nr, int x0, int y0, 
 {
 	struct resourcebank_header *header = (resourcebank_header*) bank1->start;
 	int pos;
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	if (!screen) return false;
 
@@ -237,6 +234,8 @@ bool get_resource_block( struct kittyBank *bank1, int block_nr, int x0, int y0, 
 	pos = header -> img_offset + 2 + block_nr*4;
 	pos = getLong( bank1->start, pos );
 
+#if 0
+
 	if (pos)
 	{
 		struct PacPicContext context;
@@ -256,6 +255,8 @@ bool get_resource_block( struct kittyBank *bank1, int block_nr, int x0, int y0, 
 			}
 		}
 	}
+
+#endif
 
 	return false;
 }
@@ -457,7 +458,7 @@ void _icmd_Print( struct cmdcontext *context, struct cmdinterface *self )
 
 	if (context -> stackp>=4)
 	{
-		struct retroScreen *screen = screens[current_screen];
+		struct retroScreen *screen = instance.screens[instance.current_screen];
 
 		if (screen)
 		{
@@ -549,7 +550,7 @@ void icmd_Comma( struct cmdcontext *context, struct cmdinterface *self )
 
 void draw_HyperText(struct zone_hypertext *zh)
 {
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 	int _x = 0, _y=-zh->pos;
 	char *c;
 
@@ -658,7 +659,7 @@ void _icmd_PrintOutline( struct cmdcontext *context, struct cmdinterface *self )
 
 	if (context -> stackp>=5)
 	{
-		struct retroScreen *screen = screens[current_screen];
+		struct retroScreen *screen = instance.screens[instance.current_screen];
 
 		if (screen)
 		{
@@ -739,7 +740,7 @@ void icmd_SetVar( struct cmdcontext *context, struct cmdinterface *self )
 
 void _icmd_ImageBox( struct cmdcontext *context, struct cmdinterface *self )
 {
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if ( (screen) && (context -> stackp>=5) )
@@ -862,7 +863,7 @@ void icmd_ImageBox( struct cmdcontext *context, struct cmdinterface *self )
 
 void _icmd_Imagehline( struct cmdcontext *context, struct cmdinterface *self )
 {
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if ( (screen) && (context -> stackp>=4) )
@@ -935,7 +936,7 @@ void icmd_Imagehline( struct cmdcontext *context, struct cmdinterface *self )
 
 void _icmd_imagevline( struct cmdcontext *context, struct cmdinterface *self )
 {
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if ( (screen) && (context -> stackp>=4) )
@@ -1053,7 +1054,7 @@ void icmd_Message( struct cmdcontext *context, struct cmdinterface *self )
 
 void _icmd_GraphicLine( struct cmdcontext *context, struct cmdinterface *self )
 {
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
@@ -1094,7 +1095,7 @@ void icmd_GraphicLine( struct cmdcontext *context, struct cmdinterface *self )
 
 void _icmd_GraphicBox( struct cmdcontext *context, struct cmdinterface *self )
 {
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
@@ -1139,7 +1140,7 @@ void render_hslider(struct zone_slider *zl)
 {
 	int t0;
 	int t1;
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	t0 = zl->w * zl -> pos / zl->total;
 	t1 = zl->w * (zl->pos+zl->trigger) / zl->total;
@@ -1156,7 +1157,7 @@ void render_vslider(struct zone_slider *zl)
 {
 	int t0;
 	int t1;
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	t0 = zl->h * zl -> pos / zl->total;
 	t1 = zl->h * (zl->pos+zl->trigger) / zl->total;
@@ -1202,15 +1203,15 @@ void mouse_event_hslider(struct cmdcontext *context, int mx, int my, int zid, st
 
 		if ((mx>=t0)&&(mx<=t1))
 		{
-			struct retroScreen *screen = screens[current_screen];
+			struct retroScreen *screen = instance.screens[instance.current_screen];
 			int dx = mx-t0;
 			int x;
 			int handel = zl->w * zl->trigger / zl->total;
 			int tpos;
 
-			while (engine_mouse_key)
+			while (instance.engine_mouse_key)
 			{
-				mx = XScreen_formula( screen, engine_mouse_x );
+				mx = XScreen_formula( screen, instance.engine_mouse_x );
 
 				x = mx - zl->x0 - dx;
 				if (x<0) x=0;
@@ -1224,7 +1225,7 @@ void mouse_event_hslider(struct cmdcontext *context, int mx, int my, int zid, st
 
 				printf("mx  %d, mouse x  %d, x %d, dx %d, t0 %d tpos %d\n",
 						mx,
-						engine_mouse_x, 
+						instance.engine_mouse_x, 
 						x, 
 						dx,
 						t0, tpos );
@@ -1284,15 +1285,15 @@ void mouse_event_vslider(struct cmdcontext *context, int mx, int my, int zid, st
 
 		if ((my>=t0)&&(my<=t1))
 		{
-			struct retroScreen *screen = screens[current_screen];
+			struct retroScreen *screen = instance.screens[instance.current_screen];
 			int dy = my-t0;
 			int y;
 			int handel = zl->h * zl->trigger / zl->total;
 			int tpos;
 
-			while (engine_mouse_key)
+			while (instance.engine_mouse_key)
 			{
-				my = YScreen_formula( screen, engine_mouse_y );
+				my = YScreen_formula( screen, instance.engine_mouse_y );
 
 				y = my - zl->y0 - dy;
 				if (y<0) y=0;
@@ -1473,7 +1474,7 @@ void icmd_HorizontalSlider( struct cmdcontext *context, struct cmdinterface *sel
 
 void _icmd_GraphicSquare( struct cmdcontext *context, struct cmdinterface *self )
 {
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
@@ -1612,16 +1613,16 @@ void _icmd_Run( struct cmdcontext *context, struct cmdinterface *self )
 			{
 				if (event & 2)	// mouse key
 				{
-					if (engine_mouse_key)
+					if (instance.engine_mouse_key)
 					{
-						struct retroScreen *screen = screens[current_screen];
+						struct retroScreen *screen = instance.screens[instance.current_screen];
 						int n;
 						context -> mouse_key = true;
 
 						if (screen)
 						{
-							int mx = XScreen_formula( screen, engine_mouse_x );
-							int my = YScreen_formula( screen, engine_mouse_y );
+							int mx = XScreen_formula( screen, instance.engine_mouse_x );
+							int my = YScreen_formula( screen, instance.engine_mouse_y );
 
 							for (n=0;n<20;n++)
 							{
@@ -1975,7 +1976,7 @@ void icmd_Unpack( struct cmdcontext *context, struct cmdinterface *self )
 
 void _icmd_Save( struct cmdcontext *context, struct cmdinterface *self )
 {
-	retroScreen *screen = screens[current_screen];
+	retroScreen *screen = instance.screens[instance.current_screen];
 
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
@@ -2042,7 +2043,7 @@ void _icmd_bb( struct cmdcontext *context, struct cmdinterface *self )
 
 	if (context -> stackp>=5)
 	{
-		struct retroScreen *screen = screens[current_screen]; 
+		struct retroScreen *screen = instance.screens[instance.current_screen]; 
 		struct ivar &nr = context -> stack[context -> stackp-5];	// id
 		struct ivar &x = context -> stack[context -> stackp-4];	// x
 		struct ivar &y = context -> stack[context -> stackp-3];	// y
@@ -2369,7 +2370,7 @@ void icmd_cx( struct cmdcontext *context, struct cmdinterface *self )
 
 		if ( arg1.type == type_string ) 
 		{
-			struct retroScreen *screen = screens[current_screen];
+			struct retroScreen *screen = instance.screens[instance.current_screen];
 
 			if (screen)
 			{
@@ -2398,9 +2399,9 @@ void icmd_ScreenWidth( struct cmdcontext *context, struct cmdinterface *self )
 {
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
-	if (screens[current_screen])	// check if current screen is open.
+	if (instance.screens[instance.current_screen])	// check if current screen is open.
 	{
-		push_context_num( context,screens[current_screen] -> realWidth);
+		push_context_num( context,instance.screens[instance.current_screen] -> realWidth);
 	}
 }
 
@@ -2408,9 +2409,9 @@ void icmd_ScreenHeight( struct cmdcontext *context, struct cmdinterface *self )
 {
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 
-	if (screens[current_screen])	// check if current screen is open.
+	if (instance.screens[instance.current_screen])	// check if current screen is open.
 	{
-		push_context_num( context,screens[current_screen] -> realHeight);
+		push_context_num( context,instance.screens[instance.current_screen] -> realHeight);
 	}
 }
 

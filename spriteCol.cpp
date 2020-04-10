@@ -12,6 +12,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/retroMode.h>
+#include <amoskittens.h>
 #endif
 
 #ifdef __linux__
@@ -22,13 +23,8 @@
 
 #include "engine.h"
 
-extern struct retroScreen *screens[8] ;
-extern struct retroSprite *sprite;
-extern struct retroVideo *video;
 extern std::vector<int> collided;
 extern std::vector<struct retroSpriteObject *> bobs;
-
-extern int current_screen;
 
 extern struct retroSpriteObject *getBob(unsigned int id);
 extern struct retroSpriteObject *getBobOnScreen(unsigned int id,int screen);
@@ -41,16 +37,16 @@ extern int cmpMask( struct retroMask *leftMask, struct retroMask *rightMask, int
 int inSprite( struct retroMask *thisMask, int minX,int minY, int maxX, int maxY, struct retroSpriteObject *otherBob );
 
 
-#define getSprite(num) &(video -> sprites[num])
+#define getSprite(num) &(instance.video -> sprites[num])
 
 void spriteBox( int x0,int y0,int x1,int y1, int c)
 {
-//	x0=XScreen_formula( screens[current_screen], x0 );
-//	y0=YScreen_formula( screens[current_screen], y0 );
-//	x1=XScreen_formula( screens[current_screen], x1 );
-//	y1=YScreen_formula( screens[current_screen], y1 );
+//	x0=XScreen_formula( instance.screens[current_screen], x0 );
+//	y0=YScreen_formula( instance.screens[current_screen], y0 );
+//	x1=XScreen_formula( instance.screens[current_screen], x1 );
+//	y1=YScreen_formula( instance.screens[current_screen], y1 );
 
-	retroBox( screens[current_screen], 0, x0,y0,x1,y1,c );
+	retroBox( instance.screens[instance.current_screen], 0, x0,y0,x1,y1,c );
 }
 
 int spriteColAll( unsigned short Sprite )
@@ -74,7 +70,7 @@ int spriteColAll( unsigned short Sprite )
 
 	if (thisSprite -> image == 0) return 0;
 
-	frame = &sprite -> frames[ thisSprite -> image-1 ];
+	frame = &instance.sprites -> frames[ thisSprite -> image-1 ];
 
 	x = thisSprite -> x / 2;
 	y = thisSprite -> y / 2;
@@ -84,7 +80,7 @@ int spriteColAll( unsigned short Sprite )
 	maxX = minX + frame -> width;
 	maxY = minY + frame -> height;
 
-	for (n=0;n<sprite -> number_of_frames;n++)
+	for (n=0;n<instance.sprites -> number_of_frames;n++)
 	{
 		otherSprite = getSprite(n);
 
@@ -130,7 +126,7 @@ int spriteColRange( unsigned short Sprite, unsigned short start, unsigned short 
 
 	if (thisSprite -> image < 1) return 0;	// does not have image.
 
-	frame = &sprite -> frames[ thisSprite -> image-1 ];
+	frame = &instance.sprites -> frames[ thisSprite -> image-1 ];
 
 	x=thisSprite -> x/2;
 	y=thisSprite -> y/2;
@@ -165,7 +161,7 @@ int spriteColRange( unsigned short Sprite, unsigned short start, unsigned short 
 int inSprite( struct retroMask *thisMask, int minX,int minY, int maxX, int maxY, struct retroSpriteObject *otherBob )
 {
 	int x,y;
-	struct retroFrameHeader * otherFrame = &sprite -> frames[ otherBob -> image -1 ];
+	struct retroFrameHeader * otherFrame = &instance.sprites -> frames[ otherBob -> image -1 ];
 
 	x = otherBob -> x  / 2;
 	y  = otherBob -> y / 2;

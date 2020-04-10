@@ -6,6 +6,7 @@
 #ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
 #endif
 
 #ifdef __linux__
@@ -13,8 +14,8 @@
 #include "os/linux/stuff.h"
 #endif
 
-#include "stack.h"
-#include "amosKittens.h"
+#include <amosKittens.h>
+#include <stack.h>
 #include "commands.h"
 #include "engine.h"
 #include "debug.h"
@@ -36,13 +37,9 @@ extern char *dupRef( struct reference *ref );
 extern void stack_frame_up(int varIndex);
 extern int tokenMode;
 
-
 extern std::vector<struct label> labels;
 
-
-
 static unsigned int is_token_cmd = 0;
-extern int last_var;
 
 char *executeOnToken(char *ptr, unsigned short token)
 {
@@ -71,7 +68,7 @@ char *executeOnToken(char *ptr, unsigned short token)
 #ifdef show_token_numbers_yes
 			getLineFromPointer(ptr);
 			printf("ON READ %08d   %08X %20s:%08d stack is %d cmd stack is %d flag %d token %04x -- name %s\n",
-					lineFromPtr.line, ptr +2,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token , TokenName(token));	
+					lineFromPtr.line, ptr +2,__FUNCTION__,__LINE__, instance.stack, instance.cmdStack, kittyStack[__stack].state, token , TokenName(token));	
 #endif
 			ret = cmd -> fn( cmd, ptr ) ;
 			if (ret) ret += cmd -> size;
@@ -114,18 +111,18 @@ char *cmdOn(struct nativeCommand *cmd, char *tokenBuffer )
 	tokenBuffer += 4;	// skip ON data, maybe we don't need it.
 	tokenBuffer = collect_data(tokenBuffer);
 
-	while (cmdStack)
+	while (instance.cmdStack)
 	{
-		flags = cmdTmp[cmdStack-1].flag;
+		flags = cmdTmp[instance.cmdStack-1].flag;
 
 		if  ( flags & cmd_para )
 		{
-			cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
+			cmdTmp[--instance.cmdStack].cmd(&cmdTmp[instance.cmdStack], 0);
 		}
 		else break;
 	}
 
-	tokenBuffer = execute_on( getStackNum(stack), tokenBuffer, NULL, is_token_cmd );
+	tokenBuffer = execute_on( getStackNum(__stack), tokenBuffer, NULL, is_token_cmd );
 
 	return tokenBuffer-4;	// on function exit +4 is added.
 }
@@ -188,9 +185,9 @@ char *do_ON_command(uint16_t token_cmd,  uint16_t token_item, int ref_num, char 
 
 					{
 						int idx = ref_num - 1;
-						int oldStack = stack;
+						int oldStack = __stack;
 						stackCmdProc( _procedure, tokenBuffer);  
-						cmdTmp[cmdStack-1].stack = oldStack;	// carry stack.
+						cmdTmp[instance.cmdStack-1].stack = oldStack;	// carry stack.
 
 						tokenMode = mode_store;
 						stack_frame_up(idx);

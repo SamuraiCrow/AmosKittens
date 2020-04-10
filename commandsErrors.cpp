@@ -4,9 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <string>
+#include <iostream>
+#include <vector>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
+#include <proto/retroMode.h>
 #endif
 
 #ifdef __linux__
@@ -15,13 +19,10 @@
 #include <unistd.h>
 #endif
 
-#include "debug.h"
-#include <string>
-#include <iostream>
-#include <vector>
+#include <amosKittens.h>
+#include <stack.h>
 
-#include "stack.h"
-#include "amosKittens.h"
+#include "debug.h"
 #include "commands.h"
 #include "commandsErrors.h"
 #include "kittyErrors.h"
@@ -29,7 +30,6 @@
 #include "amosString.h"
 #include "var_helper.h"
 
-extern int last_var;
 extern struct globalVar globalVars[];
 extern unsigned short last_token;
 extern int tokenMode;
@@ -149,10 +149,10 @@ char *errResumeLabel(nativeCommand *cmd, char *tokenBuffer)
 
 			if (dropProgStackToProc( _procedure ))
 			{
-				if (cmdTmp[cmdStack-1].cmd == _procedure ) 
+				if (cmdTmp[instance.cmdStack-1].cmd == _procedure ) 
 				{
-					printf(" maybe need flush some stack here? %d - %d --\n", cmdTmp[cmdStack-1].stack, stack );
-					tokenBuffer=cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0) - 2;		// +2 will be added on exit.
+					printf(" maybe need flush some stack here? %d - %d --\n", cmdTmp[instance.cmdStack-1].stack,__stack );
+					tokenBuffer=cmdTmp[--instance.cmdStack].cmd(&cmdTmp[instance.cmdStack],0) - 2;		// +2 will be added on exit.
 				}
 			}
 			if ( resume_location ) tokenBuffer = resume_location -2;		// +2 will be added on exit.
@@ -183,13 +183,13 @@ char *onErrorIgnore(char *ptr)
 
 char *onErrorGoto(char *ptr)
 {
-	kittyError.newError = false;
+	instance.kittyError.newError = false;
 	return on_error_goto_location -2;
 }
 
 char *onErrorProc(char *ptr)
 {
-	kittyError.newError = false;
+	instance.kittyError.newError = false;
 	stackCmdLoop( _procedure, ptr);
 	return on_error_proc_location -2;
 }
@@ -197,14 +197,14 @@ char *onErrorProc(char *ptr)
 char *_errError( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args =__stack - data->stack +1 ;
 
 	if (args == 1)
 	{
-		setError( getStackNum(stack), data -> tokenBuffer );
+		setError( getStackNum(__stack), data -> tokenBuffer );
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -237,9 +237,9 @@ char *errResume(struct nativeCommand *cmd, char *tokenBuffer)
 		{
 			proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-			kittyError.code = 0;
-			kittyError.pos = 0;  
-			kittyError.newError = false;
+			instance.kittyError.code = 0;
+			instance.kittyError.pos = 0;  
+			instance.kittyError.newError = false;
 			return ret -2;
 		}
 
@@ -250,16 +250,16 @@ char *errResume(struct nativeCommand *cmd, char *tokenBuffer)
 	{
 		proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-		if (kittyError.posResume)
+		if (instance.kittyError.posResume)
 		{
-			tokenBuffer = kittyError.posResume - 2;		// -2 for location of the error, -2 for resume command.
+			tokenBuffer = instance.kittyError.posResume - 2;		// -2 for location of the error, -2 for resume command.
 
 			proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-			kittyError.code = 0;
-			kittyError.pos = 0;  
-			kittyError.posResume = 0;
-			kittyError.newError = false;
+			instance.kittyError.code = 0;
+			instance.kittyError.pos = 0;  
+			instance.kittyError.posResume = 0;
+			instance.kittyError.newError = false;
 			return tokenBuffer;
 		}
 		else 
@@ -282,11 +282,11 @@ char *_errTrap( struct glueCommands *data, int nextToken )
 		onError = onErrorTemp;
 		onErrorTemp = NULL;
 
-		if (kittyError.code)
+		if (instance.kittyError.code)
 		{
-			kittyError.trapCode = kittyError.code;
-			kittyError.code = 0;
-			kittyError.newError = false;
+			instance.kittyError.trapCode = instance.kittyError.code;
+			instance.kittyError.code = 0;
+			instance.kittyError.newError = false;
 		}
 	}
 
@@ -299,7 +299,7 @@ char *errTrap(nativeCommand *err, char *tokenBuffer)
 	onErrorTemp = onError;
 	onError = onErrorIgnore;
 	stackCmdFlags( _errTrap, tokenBuffer, cmd_onNextCmd | cmd_onEol );
-	kittyError.trapCode = 0;
+	instance.kittyError.trapCode = 0;
 	return tokenBuffer;
 }
 
@@ -307,21 +307,21 @@ char *errTrap(nativeCommand *err, char *tokenBuffer)
 char *errErrn(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackNum( kittyError.code );
+	setStackNum( instance.kittyError.code );
 	return tokenBuffer;
 }
 
 char *errErrTrap(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	setStackNum( kittyError.trapCode );
+	setStackNum( instance.kittyError.trapCode );
 	return tokenBuffer;
 }
 
 char *_errErrStr( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args =__stack - data->stack +1 ;
 	struct stringData *err_str = NULL;
 	int err = 0;
 
@@ -329,10 +329,10 @@ char *_errErrStr( struct glueCommands *data, int nextToken )
 
 	switch (args)
 	{
-		case 1: 	err = getStackNum(stack);
+		case 1: 	err = getStackNum(__stack);
 				break;
 		default:
-				popStack( stack - data->stack );
+				popStack(__stack - data->stack );
 				setError(22,data->tokenBuffer);
 				return NULL;
 	}

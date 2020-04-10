@@ -23,8 +23,8 @@
 #include <string>
 #include <iostream>
 
-#include "stack.h"
-#include "amosKittens.h"
+#include <amosKittens.h>
+#include <stack.h>
 #include "commandsGfx.h"
 #include "kittyErrors.h"
 #include "engine.h"
@@ -34,17 +34,11 @@ int YScreen_formula( struct retroScreen *screen, int y );
 
 extern int sig_main_vbl;
 
-extern int last_var;
 extern struct globalVar globalVars[];
 extern unsigned short last_token;
 extern int tokenMode;
 extern int tokenlength;
 
-extern int current_screen;
-
-extern struct retroScreen *screens[8] ;
-extern struct retroSprite *sprite;
-extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
 
 extern std::vector<int> collided;
@@ -56,39 +50,39 @@ extern int YSprite_formula(int y);
 extern int from_XSprite_formula(int x);
 extern int from_YSprite_formula(int y);
 
-#define getSprite(num) &(video -> sprites[num])
+#define getSprite(num) &(instance.video -> sprites[num])
 
 char *_hsGetSpritePalette( struct glueCommands *data, int nextToken )
 {
 	int n;
-	int args = stack - data->stack +1 ;
-	struct retroScreen *screen = screens[current_screen];
+	int args = __stack - data->stack +1 ;
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
-		if ((sprite)&&(screen))
+		if ((instance.sprites)&&(screen))
 		{
 			screen -> fade_speed = 0;
 
-			switch (kittyStack[stack].type)
+			switch (kittyStack[__stack].type)
 			{
 				case type_none:
 
 					for (n=0;n<256;n++)
 					{
-						retroScreenColor( screen, n, sprite -> palette[n].r, sprite -> palette[n].g, sprite -> palette[n].b );		
+						retroScreenColor( screen, n, instance.sprites -> palette[n].r, instance.sprites -> palette[n].g, instance.sprites -> palette[n].b );		
 					}
 					break;
 
 				case type_int:
 					{
-						int mask = kittyStack[stack].integer.value;
+						int mask = kittyStack[__stack].integer.value;
 
 						for (n=0;n<256;n++)
 						{
-							if (mask & n) retroScreenColor( screen, n, sprite -> palette[n].r, sprite -> palette[n].g, sprite -> palette[n].b );		
+							if (mask & n) retroScreenColor( screen, n, instance.sprites -> palette[n].r, instance.sprites -> palette[n].g, instance.sprites -> palette[n].b );		
 						}
 					}
 					break;
@@ -97,7 +91,7 @@ char *_hsGetSpritePalette( struct glueCommands *data, int nextToken )
 		}
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -111,26 +105,26 @@ char *hsGetSpritePalette(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_hsSprite( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	int num;
 	struct retroSpriteObject *sprite;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	engine_lock();
-	num = getStackNum( stack - 3 );
-	sprite = &video -> sprites[num];
+	num = getStackNum(__stack - 3 );
+	sprite = &instance.video -> sprites[num];
 
 	sprite -> id = num;
 
-	if (stack_is_number( stack - 2)) sprite->x = XSprite_formula(getStackNum( stack - 2 ));
-	if (stack_is_number( stack - 1)) sprite->y = YSprite_formula(getStackNum( stack - 1 ));
-	sprite->image = getStackNum( stack );
+	if (stack_is_number(__stack - 2)) sprite->x = XSprite_formula(getStackNum(__stack - 2 ));
+	if (stack_is_number(__stack - 1)) sprite->y = YSprite_formula(getStackNum(__stack - 1 ));
+	sprite->image = getStackNum(__stack );
 	engine_unlock();
 
 //	printf("sprite %d,%d,%d,%d\n",num,sprite->x,sprite->y,sprite->image);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -146,12 +140,12 @@ char *hsSprite(struct nativeCommand *cmd, char *tokenBuffer)
 char *_hsGetSprite( struct glueCommands *data, int nextToken )
 {
 	int n;
-	int args = stack - data->stack +1 ;
-	struct retroScreen *screen = screens[current_screen];
+	int args = __stack - data->stack +1 ;
+	struct retroScreen *screen = screens[instance.current_screen];
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -166,30 +160,30 @@ char *hsGetSprite(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_hsSpriteOff( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args == 1)
 	{
-		struct kittyData *s = &kittyStack[stack];
+		struct kittyData *s = &kittyStack[__stack];
 		engine_lock();
 		if (s -> type == type_int)
 		{
-			video -> sprites[ s -> integer.value ].image = -1;	// not deleted, just gone.
+			instance.video -> sprites[ s -> integer.value ].image = -1;	// not deleted, just gone.
 		}
 		else
 		{
 			int n;
 			for (n=0;n<64;n++)
 			{
-				video -> sprites[n].image = -1;
+				instance.video -> sprites[n].image = -1;
 			}
 		}
 		engine_unlock();
 		return NULL;
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -203,7 +197,7 @@ char *hsSpriteOff(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_hsSpriteBase( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	int pick = 0;
 	void *ret = NULL;
 
@@ -211,18 +205,18 @@ char *_hsSpriteBase( struct glueCommands *data, int nextToken )
 
 	if (args==1)
 	{
-		pick = getStackNum(stack);
+		pick = getStackNum(__stack);
 
-		if (sprite)	if ((pick>0)&&(pick<=sprite->number_of_frames))
+		if (instance.sprites)	if ((pick>0)&&(pick<=instance.sprites->number_of_frames))
 		{
-			ret = &sprite -> frames[pick-1] ;
+			ret = &instance.sprites -> frames[pick-1] ;
 		}
 
 		if (NULL == ret) setError(23,data->tokenBuffer);
 	}
 	else setError(22, data->tokenBuffer);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum( (int) ret );
 	return NULL;
 }
@@ -236,7 +230,7 @@ char *hsSpriteBase(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_hsSetSpriteBuffer( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -245,7 +239,7 @@ char *_hsSetSpriteBuffer( struct glueCommands *data, int nextToken )
 	}
 	else setError(22, data->tokenBuffer);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -261,7 +255,7 @@ int spriteColRange( unsigned short Sprite, unsigned short start, unsigned short 
 
 char *_hsSpriteCol( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	int num = 0;
 	int ret = 0;
 
@@ -271,7 +265,7 @@ char *_hsSpriteCol( struct glueCommands *data, int nextToken )
 
 	if (args==1)
 	{
-		num = getStackNum(stack);
+		num = getStackNum(__stack);
 
 //		Printf("Sprite Col(%ld)\n",num);
 
@@ -280,7 +274,7 @@ char *_hsSpriteCol( struct glueCommands *data, int nextToken )
 	}
 	else setError(22, data->tokenBuffer);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum( (int) ret );
 	return NULL;
 }
@@ -295,13 +289,13 @@ char *hsSpriteCol(struct nativeCommand *cmd, char *tokenBuffer)
 char *_hsXSprite( struct glueCommands *data, int nextToken )
 {
 	struct retroSpriteObject *object;
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
-		object = getSprite( getStackNum(stack) );
+		object = getSprite( getStackNum(__stack) );
 
 		if (object == NULL)
 		{
@@ -314,7 +308,7 @@ char *_hsXSprite( struct glueCommands *data, int nextToken )
 	} 
 
 	setError(23,data->tokenBuffer);
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -328,13 +322,13 @@ char *hsXSprite(struct nativeCommand *cmd, char *tokenBuffer)
 char *_hsYSprite( struct glueCommands *data, int nextToken )
 {
 	struct retroSpriteObject *object;
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
-		object = getSprite( getStackNum(stack) );
+		object = getSprite( getStackNum(__stack) );
 
 		if (object == NULL)
 		{
@@ -347,7 +341,7 @@ char *_hsYSprite( struct glueCommands *data, int nextToken )
 	} 
 
 	setError(23,data->tokenBuffer);
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -361,13 +355,13 @@ char *hsYSprite(struct nativeCommand *cmd, char *tokenBuffer)
 char *_hsISprite( struct glueCommands *data, int nextToken )
 {
 	struct retroSpriteObject *object;
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
-		object = getSprite( getStackNum(stack) );
+		object = getSprite( getStackNum(__stack) );
 
 		if (object == NULL)
 		{
@@ -380,7 +374,7 @@ char *_hsISprite( struct glueCommands *data, int nextToken )
 	} 
 
 	setError(23,data->tokenBuffer);
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 

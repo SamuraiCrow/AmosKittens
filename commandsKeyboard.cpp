@@ -25,9 +25,9 @@
 #include <retromode_lib.h>
 #endif
 
+#include <amosKittens.h>
+#include <stack.h>
 #include "debug.h"
-#include "stack.h"
-#include "amosKittens.h"
 #include "commands.h"
 #include "commandsData.h"
 #include "kittyErrors.h"
@@ -36,7 +36,6 @@
 
 extern std::vector<struct keyboard_buffer> keyboardBuffer;
 
-extern int last_var;
 extern ULONG *codeset_page;
 extern struct globalVar globalVars[];
 int _scancode;
@@ -46,8 +45,6 @@ int keyState[256];
 extern int bobDoUpdate ;
 extern int bobUpdateNextWait ;
 
-extern struct retroScreen *screens[8] ;
-extern int current_screen;
 
 extern bool next_print_line_feed;
 extern char *(*_do_set) ( struct glueCommands *data, int nextToken ) ;
@@ -216,7 +213,7 @@ void kitty_getline(string &input)
 
 	input = "";
 	
-	retroScreen *screen = screens[current_screen];
+	retroScreen *screen = instance.screens[instance.current_screen];
 	retroTextWindow *textWindow = NULL;
 
 	if (screen)
@@ -261,14 +258,14 @@ void kitty_getline(string &input)
 							input.erase(cursx,1);
 						}
 
-						clear_cursor( screens[current_screen] );
+						clear_cursor( instance.screens[instance.current_screen] );
 						textWindow -> locateX = rightx;
 
 						if (cursx - scrollx < 0) scrollx--;
 
-						__print_char_array( screens[current_screen], input.c_str() + scrollx,charspace);
-						clear_cursor( screens[current_screen] );
-						draw_cursor( screens[current_screen] );
+						__print_char_array( instance.screens[instance.current_screen], input.c_str() + scrollx,charspace);
+						clear_cursor( instance.screens[instance.current_screen] );
+						draw_cursor( instance.screens[instance.current_screen] );
 					}
 					break;
 
@@ -281,13 +278,13 @@ void kitty_getline(string &input)
 					input += str->ptr;
 					cursx ++;
 
-					clear_cursor( screens[current_screen] );
+					clear_cursor( instance.screens[instance.current_screen] );
 					textWindow -> locateX = rightx;
 
 					if (cursx - scrollx > charspace) scrollx++;
 					__print_char_array( screen, input.c_str() + scrollx,charspace);
 
-					draw_cursor( screens[current_screen] );
+					draw_cursor( instance.screens[instance.current_screen] );
 					break;	
 			}
 
@@ -323,7 +320,7 @@ char *cmdWaitKey(struct nativeCommand *cmd, char *tokenBuffer )
 
 	} while ( str->size == 0 );
 
-	free(str);
+	freeString(str);
 
 	return tokenBuffer;
 }
@@ -344,7 +341,7 @@ char *cmdInkey(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *_InputStrN( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args =__stack - data->stack +1 ;
 	struct stringData * str = alloc_amos_string( 1 );
 	string tmp;
 
@@ -354,7 +351,7 @@ char *_InputStrN( struct glueCommands *data, int nextToken )
 
 	if (args==1)
 	{
-		int n = getStackNum( stack );
+		int n = getStackNum(__stack );
 		while ((int) tmp.length()<n)
 		{
 			atomic_get_char( str);
@@ -429,7 +426,7 @@ char *cmdClearKey(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *_cmdKeyState( struct glueCommands *data,int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args =__stack - data->stack +1 ;
 	bool success = false;
 	int ret = 0;
 
@@ -437,7 +434,7 @@ char *_cmdKeyState( struct glueCommands *data,int nextToken )
 
 	if (args==1)
 	{
-		int key = getStackNum( stack );
+		int key = getStackNum(__stack );
 
 		if ((key>-1)&&(key<256))
 		{
@@ -448,7 +445,7 @@ char *_cmdKeyState( struct glueCommands *data,int nextToken )
 
 	if (success == false) setError(22,data->tokenBuffer);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum(ret);
 	return NULL;
 }
@@ -462,20 +459,20 @@ char *cmdKeyState(struct nativeCommand *cmd, char *tokenBuffer )
 
 char *_Input( struct glueCommands *data,int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 	_input_arg( NULL, NULL );
-	popStack( stack - data -> stack  );
-	do_input[parenthesis_count] = do_std_next_arg;
+	popStack(__stack - data -> stack  );
+	do_input[instance.parenthesis_count] = do_std_next_arg;
 	do_breakdata = NULL;
 	return NULL;
 }
 
 char *_LineInput( struct glueCommands *data,int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 	_inputLine_arg( NULL, NULL );
-	popStack( stack - data -> stack  );
-	do_input[parenthesis_count] = do_std_next_arg;
+	popStack(__stack - data -> stack  );
+	do_input[instance.parenthesis_count] = do_std_next_arg;
 	do_breakdata = NULL;
 	return NULL;
 }
@@ -493,23 +490,23 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	bool success = false;
 	int num;
 	double des;
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	if (cmd == NULL)
 	{
-		args = stack - cmdTmp[cmdStack].stack + 1;
+		args =__stack - cmdTmp[instance.cmdStack].stack + 1;
 	}
 	else
 	{
-		if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _Input)
+		if (instance.cmdStack) if (cmdTmp[instance.cmdStack-1].cmd == _Input)
 		{
-			args = stack - cmdTmp[cmdStack-1].stack + 1;
+			args =__stack - cmdTmp[instance.cmdStack-1].stack + 1;
 		}
 	}
 	
-	if ((input_count == 0)&&(stack))		// should be one arg.
+	if ((input_count == 0)&&(__stack))		// should be one arg.
 	{
-		struct stringData *str = getStackString( stack-args+1 );
+		struct stringData *str = getStackString(__stack-args+1 );
 		if (str)  __print_text( screen, str ,0 );
 	}
 	else if (input_str.empty())
@@ -550,7 +547,7 @@ void _input_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	}
 	while (!success && engine_ready());
 
-	clear_cursor( screens[current_screen] );
+	clear_cursor( instance.screens[instance.current_screen] );
 
 	__print_char_array( screen, "\n" ,0 );
 
@@ -591,23 +588,23 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	bool success = false;
 	int num;
 	double des;
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	if (cmd == NULL)
 	{
-		args = stack - cmdTmp[cmdStack].stack + 1;
+		args =__stack - cmdTmp[instance.cmdStack].stack + 1;
 	}
 	else
 	{
-		if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _Input)
+		if (instance.cmdStack) if (cmdTmp[instance.cmdStack-1].cmd == _Input)
 		{
-			args = stack - cmdTmp[cmdStack-1].stack + 1;
+			args =__stack - cmdTmp[instance.cmdStack-1].stack + 1;
 		}
 	}
 	
 	if (input_count == 0)		// should be one arg.
 	{
-		struct stringData *str = getStackString( stack );
+		struct stringData *str = getStackString(__stack );
 		bool have_question = false;
 
 		if (str) if (str -> size)
@@ -627,7 +624,7 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 	}
 
 	engine_lock();
-	draw_cursor( screens[current_screen] );
+	draw_cursor( instance.screens[instance.current_screen] );
 	engine_unlock();
 
 	do
@@ -636,7 +633,7 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 		{
 			while (input_str.empty() && engine_ready() ) kitty_getline(input_str);
 
-			clear_cursor( screens[current_screen] );
+			clear_cursor( instance.screens[instance.current_screen] );
 
 			arg = input_str; input_str = "";
 		}
@@ -686,14 +683,14 @@ void _inputLine_arg( struct nativeCommand *cmd, char *tokenBuffer )
 
 void breakdata_inc_stack( struct nativeCommand *cmd, char *tokenBuffer )
 {
-	stack++;
+	__stack++;
 }
 
 char *cmdInput(nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 	input_count = 0;
 	input_str = "";
 
@@ -701,7 +698,7 @@ char *cmdInput(nativeCommand *cmd, char *tokenBuffer)
 	if (next_print_line_feed == true) __print_char_array( screen, "\n",0);
 	next_print_line_feed = true;
 
-	do_input[parenthesis_count] = _input_arg;
+	do_input[instance.parenthesis_count] = _input_arg;
 	do_breakdata = breakdata_inc_stack;
 	stackCmdNormal( _Input, tokenBuffer );
 
@@ -715,7 +712,7 @@ char *cmdInputStrN(struct nativeCommand *cmd, char *tokenBuffer)
 	input_count = 0;
 	input_str = "";
 
-	do_input[parenthesis_count] = _input_arg;
+	do_input[instance.parenthesis_count] = _input_arg;
 	do_breakdata = breakdata_inc_stack;
 	stackCmdNormal( _InputStrN, tokenBuffer );
 
@@ -725,7 +722,7 @@ char *cmdInputStrN(struct nativeCommand *cmd, char *tokenBuffer)
 char *cmdLineInput(nativeCommand *cmd, char *tokenBuffer)
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	struct retroScreen *screen = screens[current_screen];
+	struct retroScreen *screen = instance.screens[instance.current_screen];
 
 	if (screen) clear_cursor(screen);
 	if (next_print_line_feed == true) __print_char_array(screen,"\n",0);
@@ -734,7 +731,7 @@ char *cmdLineInput(nativeCommand *cmd, char *tokenBuffer)
 	input_count = 0;
 	input_str = "";
 
-	do_input[parenthesis_count] = _inputLine_arg;
+	do_input[instance.parenthesis_count] = _inputLine_arg;
 	do_breakdata = breakdata_inc_stack;
 	stackCmdNormal( _LineInput, tokenBuffer );
 
@@ -743,11 +740,11 @@ char *cmdLineInput(nativeCommand *cmd, char *tokenBuffer)
 
 char *_cmdPutKey( struct glueCommands *data,int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	if (args==1)
 	{
-		struct stringData *str = getStackString(stack);
+		struct stringData *str = getStackString(__stack);
 		if (str)
 		{
 			char *c;
@@ -764,7 +761,7 @@ char *_cmdPutKey( struct glueCommands *data,int nextToken )
 		setError(22,data->tokenBuffer);
 	}
 
-	popStack( stack - data -> stack  );
+	popStack(__stack - data -> stack  );
 	return NULL;
 }
 
@@ -778,16 +775,16 @@ char *cmdPutKey(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_cmdKeySpeed( struct glueCommands *data,int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	if (args==2)
 	{
-		keyboardLag = getStackNum(stack-1) * 1000 / 50;
-		keyboardSpeed = getStackNum(stack) * 1000 / 50;
+		keyboardLag = getStackNum(__stack-1) * 1000 / 50;
+		keyboardSpeed = getStackNum(__stack) * 1000 / 50;
 	}
 	else setError(22,data->tokenBuffer);
 
-	popStack( stack - data -> stack  );
+	popStack(__stack - data -> stack  );
 	return NULL;
 }
 
@@ -815,7 +812,7 @@ char *_set_keyStr( struct glueCommands *data, int nextToken )
 			F1_keys[keyStr_index-1] = NULL;
 		}
 
-		F1_keys[keyStr_index-1] = amos_strdup(getStackString(stack));
+		F1_keys[keyStr_index-1] = amos_strdup(getStackString(__stack));
 	}
 
 	_do_set = _setVar;
@@ -824,14 +821,14 @@ char *_set_keyStr( struct glueCommands *data, int nextToken )
 
 char *_cmdKeyStr( struct glueCommands *data,int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
-	keyStr_index = getStackNum( stack );
+	keyStr_index = getStackNum(__stack );
 	_do_set = _set_keyStr;
 
-	popStack( stack - data -> stack  );
+	popStack(__stack - data -> stack  );
 	return NULL;
 }
 

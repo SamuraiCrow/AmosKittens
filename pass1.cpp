@@ -9,6 +9,7 @@
 #ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
 #endif
 
 #ifdef __linux__
@@ -27,7 +28,7 @@
 #include "amosstring.h"
 
 extern struct globalVar globalVars[1000];	// 0 is not used.
-extern unsigned int global_var_count;
+unsigned int var_count[2] = {0,0};		// global and local count
 extern int globalVarsSize;
 extern int nativeCommandsSize;
 extern struct nativeCommand nativeCommands[];
@@ -123,7 +124,7 @@ int findVarPublic( char *name, int type )
 
 	pass1_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		if (globalVars[n].varName == NULL) return 0;
 
@@ -144,7 +145,7 @@ int findVar( char *name, bool is_first_token, int type, int _proc )
 	unsigned int n;
 	pass1_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		if (globalVars[n].varName == NULL) return 0;
 
@@ -198,15 +199,19 @@ struct globalVar *add_var_from_ref( struct reference *ref, char **tmp, int type 
 {
 	struct globalVar *_new = NULL;
 
-	if ( global_var_count < VAR_BUFFERS )
+	if ( var_count[0] < VAR_BUFFERS )
 	{
-		global_var_count ++;
-		ref -> ref = global_var_count;
+		var_count[0] ++;
+
+		ref -> ref = var_count[procStackCount ? 1: 0];
 		ref -> flags = type;
 
-		_new = &globalVars[global_var_count-1];
+		_new = &globalVars[var_count[0]-1];
 		_new -> varName = *tmp;	// tmp is alloced and used here.
 		_new -> var.type = type;
+		_new -> localIndex = var_count[procStackCount];
+
+		if (type != type_proc) if (procStackCount) var_count[1]++;
 
 		if (_new -> var.type == type_string) _new -> var.str = toAmosString("",0);
 
@@ -323,7 +328,7 @@ uint32_t getTrueVarType( char *varname, uint32_t type )
 	return type;
 }
 
-struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool is_procedure )
+struct globalVar * pass1var(char *ptr, bool first_token, bool is_proc_call, bool is_procedure )
 {
 	char *tmp;
 	int found = 0;
@@ -348,7 +353,6 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 			{
 #ifdef show_pass1_procedure_fixes_yes
 				printf("this looks alot like a procedure call\n");
-
 #endif
 				pass1CallProcedures.push_back(ref);
 				is_proc_call = true;
@@ -370,16 +374,29 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 
 		if (found)
 		{
-			ref -> ref = found;
-
 			if (is_procedure)
 			{
 				struct globalVar *_old = &globalVars[found-1];
 				_old -> var.type = type_proc;
 				_old -> var.tokenBufferPos = ptr + 2 + sizeof(struct reference) + ref -> length ;
 				_old -> proc =  procCount;
+				ref -> ref = found;
 
-				return &_old -> var;
+				return _old;
+			}
+			else if (procStackCount)
+			{
+				struct globalVar *_old = &globalVars[found-1];
+
+				if (_old -> proc)	// is local?
+				{
+					ref -> ref = (_old -> localIndex+1) | 0x8000;
+				}
+				else 	ref -> ref = found;
+			}
+			else	// not inside procedure.
+			{
+				ref -> ref = found;
 			}
 		}
 		else
@@ -390,7 +407,7 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 				{
 					_new -> var.tokenBufferPos = ptr + 2 +sizeof(struct reference) + ref -> length ;
 					_new -> proc = procCount;
-					return &_new -> var;
+					return _new;
 				}
 			}
 			else
@@ -398,8 +415,8 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 				if (struct globalVar *_new = add_var_from_ref( ref, &tmp, type ))
 				{
 					_new -> proc = (pass1_inside_proc ? procCount : 0);
-					ref -> ref = global_var_count ;
-					return &_new -> var;
+					ref -> ref = var_count[ procStackCount ? 1:0] | (procStackCount ? 0x8000 : 0x0000);
+					return _new;
 				}
 			}
 		}
@@ -411,7 +428,7 @@ struct kittyData * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 	return NULL;
 }
 
-static struct kittyData *current_proc;
+static struct globalVar *current_proc = NULL;
 
 char *pass1_procedure( char *ptr )
 {
@@ -452,7 +469,7 @@ void pass1label(char *ptr)
 
 		// only add new labels if last token is 0.
 
-		if (last_tokens[parenthesis_count]  == 0)
+		if (last_tokens[instance.parenthesis_count]  == 0)
 		{
 			found_ref = findLabelRef(tmpName, (pass1_inside_proc ? procCount : 0));
 
@@ -520,7 +537,7 @@ char *pass1_shared( char *ptr )
 
 	token = *((unsigned short *) ptr);
 
-	while ( (token != 0x0000) && (token != 0x0054) && ( kittyError.code == 0) )
+	while ( (token != 0x0000) && (token != 0x0054) && ( instance.kittyError.code == 0) )
 	{
 		switch (token)
 		{
@@ -584,7 +601,7 @@ char *pass1_global( char *ptr )
 
 	token = *((unsigned short *) ptr);
 
-	while ( (token != 0x0000) && (token != 0x0054) && ( kittyError.code == 0) )
+	while ( (token != 0x0000) && (token != 0x0054) && ( instance.kittyError.code == 0) )
 	{
 		switch (token)
 		{
@@ -610,7 +627,7 @@ char *pass1_global( char *ptr )
 							else
 							{
 								add_var_from_ref( ref, &tmp, type );
-								globalVars[global_var_count-1].isGlobal = TRUE;
+								globalVars[var_count[0]-1].isGlobal = TRUE;
 							}
 							
 							if (tmp) free(tmp);
@@ -753,12 +770,17 @@ void fix_token_short( int cmd, char *ptr )
 
 void pass1_proc_end( char *ptr )
 {
+	current_proc -> localIndexSize = var_count[1];
+	var_count[1] = 0;
+
 	procStackCount--;
 
 	((struct procedure *) (nested_command[ nested_count -1 ].ptr )) -> EndOfProc = ptr-2;
 
 	nested_count --;
 	pass1_inside_proc = false;
+
+	current_proc = NULL;
 }
 
 void pass1_bracket_end( char *ptr )
@@ -805,7 +827,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 		if (token == cmd->id )
 		{
 			pass1_printf("%08x %20s:%08d stack is %d cmd stack is %d flag %d token %04x - name %s\n",
-						ptr-_file_start_, __FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token, TokenName(token));
+						ptr-_file_start_, __FUNCTION__,__LINE__, instance_cmdStack, instance_cmdStack, kittyStack[__stack].state, token, TokenName(token));
 
 
 			// ptr points to data of the token. (+2)
@@ -829,6 +851,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 
 				case 0x0054:	pass1_token_count = 0;
 							break;
+
 				case 0x00b0:	procCount ++;
 							procStackCount++;
 							addNest( nested_defFn );
@@ -988,7 +1011,6 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							break;
 
 				case 0x0390: // End Proc
-							current_proc = NULL;
 
 							if IS_LAST_NEST_TOKEN(proc)
 							{
@@ -1052,7 +1074,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 	}
 
 	printf("ERROR    %20s:%08d stack is %d cmd stack is %d flag %d token %04x\n",
-					__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token);
+					__FUNCTION__,__LINE__, instance.stack, instance.cmdStack, kittyStack[instance.stack].state, token);
 
 	setError(35,ptr);
 
@@ -1087,7 +1109,7 @@ bool findRefAndFixProcCall( struct reference *toFind )
 	char *toFindName = dupRef( toFind );
 	if (toFindName == NULL) return false;
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		var = &globalVars[n];
 
@@ -1111,23 +1133,23 @@ void pass1_reader( char *start, char *file_end )
 {
 	char *ptr;
 	int token = 0;
-	last_tokens[parenthesis_count] = 0;
+	last_tokens[instance.parenthesis_count] = 0;
 	unsigned int n;
 
 	lastLineAddr = start;
 	token = *((short *) start);
 	ptr = start +2;
 
-	while (( ptr = token_reader_pass1(  start, ptr,  last_tokens[parenthesis_count], token, file_end ) ) && ( kittyError.code == 0))
+	while (( ptr = token_reader_pass1(  start, ptr,  last_tokens[instance.parenthesis_count], token, file_end ) ) && ( instance.kittyError.code == 0))
 	{
 		if (ptr == NULL) break;
 
-		last_tokens[parenthesis_count] = token;
+		last_tokens[instance.parenthesis_count] = token;
 		token = *((short *) ptr);
 		ptr += 2;	// next token.
 	}
 
-	if (kittyError.code == 0)	// did not exit on error.
+	if (instance.kittyError.code == 0)	// did not exit on error.
 	{
 		while (nested_count)
 		{
@@ -1182,7 +1204,7 @@ void pass1_reader( char *start, char *file_end )
 	}
 #endif
 
-	for (n = 0; n< global_var_count ; n++)
+	for (n = 0; n< var_count[0] ; n++)
 	{
 		if (globalVars[n].var.type == type_proc)
 		{

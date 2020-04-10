@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <string>
+#include <iostream>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
@@ -18,12 +20,9 @@
 #include <retromode_lib.h>
 #endif
 
+#include <amosKittens.h>
+#include <stack.h>
 #include "debug.h"
-#include <string>
-#include <iostream>
-
-#include "stack.h"
-#include "amosKittens.h"
 #include "commands.h"
 #include "commandsBanks.h"
 #include "commandsBlitterObject.h"
@@ -36,12 +35,7 @@ extern struct globalVar globalVars[];
 extern unsigned short last_token;
 extern int tokenMode;
 extern int tokenlength;
-extern struct retroScreen *screens[8] ;
-extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
-extern int current_screen;
-extern struct retroSprite *sprite ;
-extern struct retroSprite *icons ;
 
 extern void _my_print_text(struct retroScreen *screen, char *text, int maxchars);
 
@@ -202,11 +196,11 @@ unsigned int toAmosMode(int retromode)
 
 void __close_screen( int screen_num )
 {
-	if (screens[screen_num]) 
+	if (instance.screens[screen_num]) 
 	{
 		freeScreenBobs(screen_num);
-		freeAllTextWindows( screens[screen_num] );
-		retroCloseScreen(&screens[screen_num]);
+		freeAllTextWindows( instance.screens[screen_num] );
+		retroCloseScreen(&instance.screens[screen_num]);
 	}
 }
 
@@ -245,13 +239,13 @@ void openUnpackedScreen(int screen_num,
 
 	engine_lock();
 
-	screens[screen_num] = retroOpenScreen(context -> w * 8, context -> h * context -> ll, videomode );
+	instance.screens[screen_num] = retroOpenScreen(context -> w * 8, context -> h * context -> ll, videomode );
 
-	if (screen = screens[screen_num])
+	if (screen = instance.screens[screen_num])
 	{
-		current_screen = screen_num;
+		instance.current_screen = screen_num;
 
-		retroApplyScreen( screen, video, (context -> scanline_x-128)*2 , (context -> scanline_y -50)*2,	screen -> realWidth,screen->realHeight );
+		retroApplyScreen( screen, instance.video, (context -> scanline_x-128)*2 , (context -> scanline_y -50)*2,	screen -> realWidth,screen->realHeight );
 
 		if (textWindow = newTextWindow( screen, 0 ))
 		{
@@ -293,7 +287,7 @@ void openUnpackedScreen(int screen_num,
 
 	}
 
-	video -> refreshAllScanlines = TRUE;
+	instance.video -> refreshAllScanlines = TRUE;
 	engine_unlock();
 }
 
@@ -488,19 +482,19 @@ void unpack( struct glueCommands *data, int bank_num, int screen_num, int x0, in
 		{
 			if ( convertPacPic( (unsigned char *) bank -> start, &context ) )
 			{
-				if (screens[screen_num] == NULL)	// no screen, open new screen.
+				if (instance.screens[screen_num] == NULL)	// no screen, open new screen.
 				{
 					openUnpackedScreen( screen_num, &context );
 				}
 				else
 				{
-					plotUnpackedContext( &context, screens[screen_num], x0,y0 );
+					plotUnpackedContext( &context, instance.screens[screen_num], x0,y0 );
 				}
 
 				free( context.raw);
 			}
 
-			if (screens[screen_num] == NULL) setError(47,data->tokenBuffer );
+			if (instance.screens[screen_num] == NULL) setError(47,data->tokenBuffer );
 		}
 		else setError(36,data->tokenBuffer);	// Bank not reserved
 	}
@@ -514,19 +508,19 @@ void unpack( struct glueCommands *data, int bank_num, int screen_num, int x0, in
 
 		if ( convertPacPic( (unsigned char *) bank_num, &context ) )
 		{
-			if (screens[screen_num] == NULL)	// no screen, open new screen.
+			if (instance.screens[screen_num] == NULL)	// no screen, open new screen.
 			{
 				openUnpackedScreen( screen_num, &context );
 			}
 			else
 			{
-				plotUnpackedContext( &context, screens[screen_num], x0,y0 );
+				plotUnpackedContext( &context, instance.screens[screen_num], x0,y0 );
 			}
 
 			free( context.raw);
 		}
 
-		if (screens[screen_num] == NULL) setError(47,data->tokenBuffer );
+		if (instance.screens[screen_num] == NULL) setError(47,data->tokenBuffer );
 	}
 }
 
@@ -537,21 +531,21 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 	int x0 = 0, y0 = 0;
 
 	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data -> stack  +1;
+	int args =__stack - data -> stack  +1;
 
 	switch (args)
 	{
 		case 1:	// open to current screen 
-			bank_num = getStackNum(stack);
-			screen_num = current_screen;
+			bank_num = getStackNum(__stack);
+			screen_num = instance.current_screen;
 
 			x0 = get_pac_pic_option( bank_num, PicPac_image, 4 ) << 2;
 			y0 = get_pac_pic_option( bank_num, PicPac_image, 6 );
 			break;
 
 		case 2:	// open new screen
-			bank_num = getStackNum(stack-1);
-			screen_num = getStackNum(stack);
+			bank_num = getStackNum(__stack-1);
+			screen_num = getStackNum(__stack);
 
 			printf("unpack % to %d (%d,%d)\n",bank_num,screen_num,x0,y0);
 
@@ -561,32 +555,32 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 			}
 			else 
 			{
-				popStack( stack - data->stack );
+				popStack(__stack - data->stack );
 				setError(512,data->tokenBuffer);
 				return NULL;
 			}
 			break;
 
 		case 3:
-			bank_num = getStackNum(stack-2);
+			bank_num = getStackNum(__stack-2);
 
 			x0 = get_pac_pic_option( bank_num, PicPac_image, 4 ) << 2;
 			y0 = get_pac_pic_option( bank_num, PicPac_image, 6 );
 
-			stack_get_if_int(stack-1,&x0);
-			stack_get_if_int(stack,&y0);
-			screen_num = current_screen;
+			stack_get_if_int(__stack-1,&x0);
+			stack_get_if_int(__stack,&y0);
+			screen_num = instance.current_screen;
 			break;
 
 		case 4:
-			bank_num = getStackNum(stack-3);
-			screen_num = getStackNum(stack-2);
+			bank_num = getStackNum(__stack-3);
+			screen_num = getStackNum(__stack-2);
 
 			x0 = get_pac_pic_option( bank_num, PicPac_image, 4 ) << 2;
 			y0 = get_pac_pic_option( bank_num, PicPac_image, 6 );
 
-			stack_get_if_int(stack-1,&x0);
-			stack_get_if_int(stack,&y0);
+			stack_get_if_int(__stack-1,&x0);
+			stack_get_if_int(__stack,&y0);
 
 			if (get_pac_pic_option( bank_num, PicPac_screen, 0 ) == 0x1203 )
 			{
@@ -594,7 +588,7 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 			}
 			else 
 			{
-				popStack( stack - data->stack );
+				popStack(__stack - data->stack );
 				setError(512,data->tokenBuffer);
 				return NULL;
 			}
@@ -602,7 +596,7 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 
 		default:
 			setError(22, data->tokenBuffer);	// wrong number of args.
-			popStack( stack - data->stack );
+			popStack(__stack - data->stack );
 			return NULL;
 	}
 
@@ -610,7 +604,7 @@ char *_ext_cmd_unpack( struct glueCommands *data, int nextToken )
 
 	unpack( data, bank_num, screen_num, x0, y0 );
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -878,7 +872,7 @@ bool spack(struct retroScreen *screen, int bank_num, int x0, int y0, int x1, int
 
 			_size = 90 + 24 + context.data_used + context.rledata_used + context.points_used;
 
-			if (bank = __ReserveAs( 9, bank_num, _size , "Pac.Pic.", NULL ))
+			if (bank = reserveAs( 9, bank_num, _size , "Pac.Pic.", NULL ))
 			{
 
 				unsigned char *a = (unsigned char *) bank -> start;
@@ -965,17 +959,17 @@ char *_ext_cmd_spack( struct glueCommands *data, int nextToken )
 	int bank_num;
 	int screen_num;
 
-	int args = stack - data -> stack  +1;
+	int args =__stack - data -> stack  +1;
 
 	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 2:
-			screen_num = getStackNum(stack-1);
-			bank_num = getStackNum(stack);
+			screen_num = getStackNum(__stack-1);
+			bank_num = getStackNum(__stack);
 
-			if (struct retroScreen *screen = screens[screen_num])
+			if (struct retroScreen *screen = instance.screens[screen_num])
 			{
 				x1 = screen -> realWidth-1;
 				y1 = screen -> realHeight-1;
@@ -983,26 +977,26 @@ char *_ext_cmd_spack( struct glueCommands *data, int nextToken )
 			break;
 
 		case 6:
-			screen_num = getStackNum(stack-5);
-			bank_num = getStackNum(stack-4);
-			x0 = getStackNum(stack-3);
-			y0 = getStackNum(stack-2);
-			x1 = getStackNum(stack-1);
-			y1 = getStackNum(stack);
+			screen_num = getStackNum(__stack-5);
+			bank_num = getStackNum(__stack-4);
+			x0 = getStackNum(__stack-3);
+			y0 = getStackNum(__stack-2);
+			x1 = getStackNum(__stack-1);
+			y1 = getStackNum(__stack);
 			break;
 
 		default:
 			setError(22, data->tokenBuffer);	// wrong number of args.
-			popStack( stack - data->stack );
+			popStack(__stack - data->stack );
 			return NULL;
 			break;
 	}
 
 	printf("spack %d to %d,%d,%d,%d,%d\n",screen_num, bank_num,x0,y0,x1,y1);
 
-	spack( screens[screen_num] , bank_num, x0,y0,x1,y1, true );
+	spack( instance.screens[screen_num] , bank_num, x0,y0,x1,y1, true );
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -1019,17 +1013,17 @@ char *_ext_cmd_pack( struct glueCommands *data, int nextToken )
 	int bank_num;
 	int screen_num;
 
-	int args = stack - data -> stack  +1;
+	int args =__stack - data -> stack  +1;
 
 	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 2:
-			screen_num = getStackNum(stack-1);
-			bank_num = getStackNum(stack);
+			screen_num = getStackNum(__stack-1);
+			bank_num = getStackNum(__stack);
 
-			if (struct retroScreen *screen = screens[screen_num])
+			if (struct retroScreen *screen = instance.screens[screen_num])
 			{
 				x1 = screen -> realWidth-1;
 				y1 = screen -> realHeight-1;
@@ -1037,26 +1031,26 @@ char *_ext_cmd_pack( struct glueCommands *data, int nextToken )
 			break;
 
 		case 6:
-			screen_num = getStackNum(stack-5);
-			bank_num = getStackNum(stack-4);
-			x0 = getStackNum(stack-3);
-			y0 = getStackNum(stack-2);
-			x1 = getStackNum(stack-1);
-			y1 = getStackNum(stack);
+			screen_num = getStackNum(__stack-5);
+			bank_num = getStackNum(__stack-4);
+			x0 = getStackNum(__stack-3);
+			y0 = getStackNum(__stack-2);
+			x1 = getStackNum(__stack-1);
+			y1 = getStackNum(__stack);
 			break;
 
 		default:
 			setError(22, data->tokenBuffer);	// wrong number of args.
-			popStack( stack - data->stack );
+			popStack(__stack - data->stack );
 			return NULL;
 			break;
 	}
 
 	dprintf("pack %d to %d,%d,%d,%d,%d\n",screen_num, bank_num,x0,y0,x1,y1);
 
-	spack( screens[screen_num] , bank_num, x0,y0,x1,y1, false );
+	spack( instance.screens[screen_num] , bank_num, x0,y0,x1,y1, false );
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 

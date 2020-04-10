@@ -15,6 +15,7 @@
 #include <proto/dos.h>
 #include <libraries/retroMode.h>
 #include <proto/retroMode.h>
+#include <amosKittens.h>
 
 extern char *asl();
 #endif
@@ -35,8 +36,9 @@ extern char *asl();
 #include "os/littleendian/littleendian.h"
 #endif
 
+extern void setError( int _code, char * _pos ) ;
+
 #include "stack.h"
-#include "amosKittens.h"
 #include "commands.h"
 #include "commandsData.h"
 #include "commandsErrors.h"
@@ -55,9 +57,7 @@ extern char *asl();
 #include "label.h"
 #include "amosstring.h"
 
-#include "ext_compact.h"
-#include "ext_turbo.h"
-#include "ext_music.h"
+//include "ext_music.h"
 
 bool running = true;
 bool interpreter_running = false;
@@ -86,16 +86,8 @@ char *_file_pos_  = NULL;		// the problem of not knowing when stacked commands a
 char *_file_end_ = NULL;
 uint32_t _file_bank_size = 0;
 
-struct retroVideo *video = NULL;
-struct retroScreen *screens[8] ;
-
-int parenthesis_count = 0;
-int cmdStack = 0;
 int procStackCount = 0;
-int last_var = 0;
 uint32_t tokenFileLength;
-
-char *tokenBufferResume =NULL;
 
 bool startup = false;
 
@@ -104,10 +96,12 @@ unsigned int amiga_joystick_button[4];
 
 struct extension_lib	kitty_extensions[32];
 unsigned int regs[16];
+extern unsigned int var_count[2];
 
 unsigned short token_not_found = 0xFFFF;	// so we know its not a token, token 0 exists.
 
 struct stackFrame procStcakFrame[PROC_STACK_SIZE];
+struct stackFrame *currentFrame = NULL;
 
 char *_get_var_index( glueCommands *self, int nextToken);
 
@@ -121,16 +115,71 @@ extern char *_errTrap( struct glueCommands *data, int nextToken );
 
 int tokenMode = mode_standard;
 
-struct retroSprite *icons = NULL;
-struct retroSprite *sprite = NULL;
+struct KittyInstance instance;
+
+struct globalVar globalVars[VAR_BUFFERS];	// 0 is not used.
+struct kittyData stackFrameData[VAR_BUFFERS];	// 0 is not used.
+struct kittyFile kittyFiles[10];
+
+extern void freeScreenBobs (int);
+extern void *newTextWindow ( struct retroScreen *, int );
+extern void freeAllTextWindows ( struct retroScreen * );
+//	void engine_lock (void);
+//	void engine_unlock( void );
+//	void *findBank (int);
+//	void freeBank (int);
+extern struct kittyBank *reserveAs ( int, int ,int, const char *, char * );
+
+void setCmdTo( int option )
+{
+	switch (option)
+	{
+		case e_cmdTo_default:
+			do_to[instance.parenthesis_count] = do_to_default;
+			break;
+	}
+}
+
+void init_instent(struct KittyInstance *instance )
+{
+	instance -> video = NULL;
+	instance -> icons = NULL;
+	instance -> sprites = NULL;
+	instance -> globalVars = globalVars;
+	instance -> cmdTmp = cmdTmp;
+	instance -> tokenBufferResume = NULL;
+	instance -> token_is_fresh = true;
+	instance -> parenthesis_count = 0;
+	instance -> kittyStack = kittyStack;
+
+	instance -> kittyError.code = 0;
+	instance -> kittyError.trapCode = 0;
+	instance -> kittyError.newError = false;
+	instance -> kittyError.pos = NULL;
+	instance -> kittyError.posResume = NULL;
+
+	instance -> engine_mouse_key = 0;
+	instance -> engine_mouse_x = 0;
+	instance -> engine_mouse_y = 0;
+
+	instance -> api.freeScreenBobs =freeScreenBobs;
+	instance -> api.newTextWindow =newTextWindow;
+	instance -> api.freeAllTextWindows =freeAllTextWindows;
+	instance -> api.engine_lock =engine_lock;
+	instance -> api.engine_unlock =engine_unlock;
+	instance -> api.findBank =findBank;
+	instance -> api.freeBank =freeBank;
+	instance -> api.reserveAs =reserveAs;
+	instance -> api.setError =setError;
+	instance -> api.dumpStack = dump_stack;
+	instance -> api.setCmdTo = setCmdTo;
+
+	bzero( instance -> extensions_context, sizeof(instance -> extensions_context) );
+
+}
+
 struct retroSprite *patterns = NULL;
 
-
-
-//struct proc procStack[1000];	// 0 is not used.
-struct globalVar globalVars[VAR_BUFFERS];	// 0 is not used.
-
-struct kittyFile kittyFiles[10];
 struct zone *zones = NULL;
 int zones_allocated = 0;
 
@@ -148,8 +197,8 @@ std::vector<struct kittyDevice> deviceList;
 std::vector<struct kittyLib> libsList;
 std::vector<struct fileContext *> files;
 std::vector<struct retroSpriteObject *> bobs;
+std::vector<struct  globalVar *> procedures;
 
-int global_var_count = 0;
 int labels_count = 0;
 
 struct glueCommands cmdTmp[100];	
@@ -160,7 +209,6 @@ extern char *nextToken_pass1( char *ptr, unsigned short token );
 extern struct nativeCommand nativeCommands[];
 
 bool breakpoint = false;
-bool token_is_fresh = true;
 
 const char *str_dump_stack = "dump stack";
 const char *str_dump_prog_stack = "dump prog stack";
@@ -184,8 +232,6 @@ int findVar( char *name, bool  is_first_token, int type, int _proc );
 struct kittyVideoInfo KittyBaseVideoInfo;
 struct kittyInfo KittyBaseInfo;
 
-extern void make_wave_noice();
-extern void make_wave_bell();
 
 void free_file(struct fileContext *file);
 struct fileContext *newFile( char *name );
@@ -194,39 +240,39 @@ bool alloc_video()
 {
 
 #ifdef __amigaos4__
-	video = retroAllocVideo( 640,480 );
+	instance.video = retroAllocVideo( 640,480 );
 #endif
 
 #ifdef __linux__
 	video = retroAllocVideo();
 #endif
 
-	if (video)
+	if (instance.video)
 	{
-		KittyBaseVideoInfo.videoWidth = video -> width;
-		KittyBaseVideoInfo.videoHeight = video -> height;
+		KittyBaseVideoInfo.videoWidth = instance.video -> width;
+		KittyBaseVideoInfo.videoHeight = instance.video -> height;
 		KittyBaseVideoInfo.display_x = 128;
 		KittyBaseVideoInfo.display_y = 50;
 	}
 
 	KittyBaseInfo.video = &KittyBaseVideoInfo;
 	
-	retroAllocSpriteObjects(video,64);
+	retroAllocSpriteObjects(instance.video,64);
 	return true;
 }
 
 void free_video()
 {
-	if (video)
+	if (instance.video)
 	{
 		uint32_t n;
 
 		for (n=0; n<8;n++)
 		{
-			if (screens[n]) retroCloseScreen(&screens[n]);
+			if (instance.screens[n]) retroCloseScreen(&instance.screens[n]);
 		}
 
-		retroFreeVideo(video);
+		retroFreeVideo(instance.video);
 	}
 }
 
@@ -282,12 +328,12 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 			else if (strncmp(txt,str_hint,strlen(str_hint))==0)
 			{
 				getLineFromPointer( ptr );
-				printf("stack %d at line %d, hint: %s\n",stack, lineFromPtr.line, txt+strlen(str_hint));
+				printf("stack %d at line %d, hint: %s\n",__stack, lineFromPtr.line, txt+strlen(str_hint));
 			}
 			else if (strncmp(txt,str_dump_stack,strlen(str_dump_stack))==0)
 			{
 				getLineFromPointer( ptr );
-				printf("stack %d at line %d\n",stack, lineFromPtr.line);
+				printf("stack %d at line %d\n",__stack, lineFromPtr.line);
 			}
 			else if (strncmp(txt,str_dump_prog_stack,strlen(str_dump_stack))==0)
 			{
@@ -359,28 +405,28 @@ char *nextCmd(nativeCommand *cmd, char *ptr)
 	char *ret = NULL;
 	unsigned int flags;
 
-	tokenBufferResume = ptr;
+	instance.tokenBufferResume = ptr;
 
 	// we should empty stack, until first/normal command is not a parm command.
 
-	while (cmdStack)
+	while (instance.cmdStack)
 	{
-		flags = cmdTmp[cmdStack-1].flag;
+		flags = cmdTmp[instance.cmdStack-1].flag;
 
 		if  ( ! (flags & cmd_onNextCmd) ) break;		// needs to be include tags, (if commands be excuted on endOfLine or Next command)
-		ret = cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack], 0);
+		ret = cmdTmp[--instance.cmdStack].cmd(&cmdTmp[instance.cmdStack], 0);
 
-		if (cmdTmp[cmdStack].flag & cmd_normal)
+		if (cmdTmp[instance.cmdStack].flag & cmd_normal)
 		{
-			if (!cmdStack) break;
-			if (cmdTmp[cmdStack-1].cmd != _errTrap ) break;
+			if (!instance.cmdStack) break;
+			if (cmdTmp[instance.cmdStack-1].cmd != _errTrap ) break;
 		}
 		if (ret) break;
 	}
 
-	do_to[parenthesis_count] = do_to_default;
+	do_to[instance.parenthesis_count] = do_to_default;
 	tokenMode = mode_standard;
-	token_is_fresh = true;
+	instance.token_is_fresh = true;
 
 	if (ret) return ret -2;		// when exit +2 token 
 
@@ -391,26 +437,26 @@ char *cmdNewLine(nativeCommand *cmd, char *ptr)
 {
 	proc_names_printf("%s:%d\n",__FUNCTION__,__LINE__ );
 
-	tokenBufferResume = ptr;
+	instance.tokenBufferResume = ptr;
 
-	if (cmdStack)
+	if (instance.cmdStack)
 	{
 		char *ret = NULL;
 		unsigned int flag;
 		do 
 		{
-			flag = cmdTmp[cmdStack-1].flag;
+			flag = cmdTmp[instance.cmdStack-1].flag;
 			if  ( flag & ( cmd_proc | cmd_loop | cmd_never ) ) break;
 
-			ret = cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+			ret = cmdTmp[--instance.cmdStack].cmd(&cmdTmp[instance.cmdStack],0);
 			if (ret) return ret -4;		// when exit +2 token +2 data
 
-		} while (cmdStack);
+		} while (instance.cmdStack);
 	}
 
-	do_to[parenthesis_count] = do_to_default;
+	do_to[instance.parenthesis_count] = do_to_default;
 	tokenMode = mode_standard;
-	token_is_fresh = true;
+	instance.token_is_fresh = true;
 
 	if (breakpoint)
 	{
@@ -443,13 +489,13 @@ char *_get_var_index( glueCommands *self , int nextToken )
 	}
 
 	last_var = varNum;		// this is used when a array is set. array[var]=0, it restores last_var to array, not var
-	var = &globalVars[varNum-1].var;
+	var = getVar(varNum);
 
 	if (var)
 	{
 		if ( (var -> type & type_array)  == 0)
 		{
-			popStack(stack - self -> stack);
+			popStack(__stack - self -> stack);
 			setError(27, self -> tokenBuffer);		// var is not a array
 			return 0;
 		}
@@ -465,14 +511,14 @@ char *_get_var_index( glueCommands *self , int nextToken )
 
 		_last_var_index = 0; 
 		mul  = 1;
-		for (n = self -> stack;n<=stack; n++ )
+		for (n = self -> stack;n<=__stack; n++ )
 		{
 			_last_var_index += (mul * kittyStack[n].integer.value);
 			mul *= var -> sizeTab[n- self -> stack];
 		}
 
 		var -> index = _last_var_index;
-		popStack(stack - self -> stack);
+		popStack(__stack - self -> stack);
 
 		if ((_last_var_index >= 0)  && (_last_var_index<var->count))
 		{
@@ -522,7 +568,7 @@ char *_alloc_mode_off( glueCommands *self, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	do_input[parenthesis_count] = do_std_next_arg;
+	do_input[instance.parenthesis_count] = do_std_next_arg;
 	do_var_index = _get_var_index;
 
 	return NULL;
@@ -532,20 +578,19 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 {
 	int size = 0;
 	int n;
-	int varNum;
 	struct kittyData *var;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	varNum = cmd -> lastVar;	
-	if (varNum == 0) return NULL;
+	var = getVar(cmd -> lastVar);
 
-	var = &globalVars[varNum-1].var;
-	var -> cells = stack - cmd -> stack +1;
+	if (var == NULL) return NULL;
 
-	if (var -> sizeTab) free( var -> sizeTab);
+	var -> cells =__stack - cmd -> stack +1;
 
-	var -> sizeTab = (int *) malloc( sizeof(int) * var -> cells );
+	if (var -> sizeTab) freeStruct( var -> sizeTab);
+
+	var -> sizeTab = allocType(int,var -> cells);
 
 	if (var -> sizeTab)
 	{
@@ -562,7 +607,7 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 
 				size = var -> count * sizeof(valueData);
 
-				var -> int_array = (struct valueArrayData *) malloc( sizeof(struct valueArrayData) + size ) ;
+				var -> int_array = allocArrayData(value,size) ;
 				var -> int_array -> type = type_int | type_array;
 				var -> int_array -> size = var -> count;
 				memset( &var -> int_array -> ptr, 0, size );
@@ -572,7 +617,7 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 
 				size = var -> count * sizeof(desimalData);
 
-				var -> float_array = (struct desimalArrayData *) malloc( sizeof(struct desimalArrayData) + size ) ;
+				var -> float_array = allocArrayData(desimal,size) ; 
 				var -> float_array -> type = type_float | type_array;
 				var -> float_array -> size = var -> count;
 				memset( &var -> float_array -> ptr, 0, size );
@@ -582,7 +627,7 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 
 				size = var -> count * sizeof(struct stringData *);
 
-				var -> str_array = (struct stringArrayData *) malloc( sizeof(struct stringArrayData) + size ) ;
+				var -> str_array = allocArrayData(string,size) ; 
 				var -> str_array -> type = type_string | type_array;
 				var -> str_array -> size = var -> count;
 				memset( &var -> str_array -> ptr, 0, size );
@@ -592,33 +637,31 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 		}
 	}
 
- 
+	popStack(__stack - cmd -> stack);
 
-	popStack(stack - cmd -> stack);
-
-	printf("cmd stack loc %d, satck is %d\n",cmd -> stack, stack);
+	printf("cmd stack loc %d, satck is %d\n",cmd -> stack, __stack);
 
 	return NULL;
 }
 
 void do_std_next_arg(nativeCommand *cmd, char *ptr)
 {
-	stack++;
+	__stack++;
 	setStackNone();
 }
 
 
 void do_dim_next_arg(nativeCommand *cmd, char *ptr)
 {
-	if (parenthesis_count == 0)
+	if (instance.parenthesis_count == 0)
 	{
-		if (cmdStack) if (stack) if (cmdTmp[cmdStack-1].flag == cmd_index ) cmdTmp[--cmdStack].cmd(&cmdTmp[cmdStack],0);
+		if (instance.cmdStack) if (__stack) if (cmdTmp[instance.cmdStack-1].flag == cmd_index ) cmdTmp[--instance.cmdStack].cmd(&cmdTmp[instance.cmdStack],0);
 	}
 }
 
 char *cmdDim(nativeCommand *cmd, char *ptr)
 {
-	do_input[parenthesis_count] = do_dim_next_arg;
+	do_input[instance.parenthesis_count] = do_dim_next_arg;
 	do_var_index = do_var_index_alloc;
 
 	stackCmdNormal( _alloc_mode_off, ptr );
@@ -632,6 +675,15 @@ char *cmdLabelOnLine(nativeCommand *cmd, char *ptr)
 	return ptr + ref -> length ;
 }
 
+struct kittyData *getVar(uint16_t ref)
+{
+	if (ref & 0x8000)
+	{
+		return currentFrame -> localVarData + ((ref & 0x7FFF) -1);
+	}
+
+	return &globalVars[ref-1].var;
+}
 
 char *cmdVar(nativeCommand *cmd, char *ptr)
 {
@@ -640,7 +692,7 @@ char *cmdVar(nativeCommand *cmd, char *ptr)
 	
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	token_is_fresh = false;
+	instance.token_is_fresh = false;
 	last_var = ref -> ref;
 
 	if (next_token == 0x0074)	// ( symbol
@@ -649,15 +701,19 @@ char *cmdVar(nativeCommand *cmd, char *ptr)
 	}
 	else
 	{
+		struct kittyData *var;
+
 		if ( correct_order( getLastProgStackToken(),  next_token ) == false )
 		{
 			dprintf(" hidden ( condition.\n");
 			setStackHiddenCondition();
 		}
 
-		if (ref -> ref)
+		if (var = getVar( ref -> ref ))
 		{
-			struct kittyData *var = &globalVars[ref->ref-1].var;
+//			printf("ref %04x\n",ref -> ref);
+//			printf("got Var (%04x)\n",var);
+//			printf("type: %d\n",var -> type);
 
 			switch (var -> type & 7)
 			{
@@ -703,7 +759,7 @@ char *cmdQuote(nativeCommand *cmd, char *ptr)
 	}
 
 	setStackStr( toAmosString( ptr + 2, length ) );
-	kittyStack[stack].state = state_none;
+	kittyStack[__stack].state = state_none;
 	flushCmdParaStack( (int) next_token );
 
 	return ptr + length2;
@@ -723,8 +779,12 @@ char *cmdNumber(nativeCommand *cmd, char *ptr)
 		setStackHiddenCondition();
 	}
 
+#if defined(show_proc_names_yes) || defined(show_token_numbers_yes)
+	printf("number %d\n",  *((int *) ptr) );
+#endif
+
 	setStackNum( *((int *) ptr) );
-	kittyStack[stack].state = state_none;
+	kittyStack[__stack].state = state_none;
 	flushCmdParaStack( next_token );
 
 	return ptr;
@@ -826,7 +886,7 @@ char *cmdFloat(nativeCommand *cmd,char *ptr)
 
 	setStackDecimal( f );
 
-	kittyStack[stack].state = state_none;
+	kittyStack[__stack].state = state_none;
 	flushCmdParaStack( next_token );
 
 	return ptr;
@@ -890,7 +950,7 @@ char *executeToken( char *ptr, unsigned short token )
 			getLineFromPointer(ptr);
 
 			printf("%08d   %08X %20s:%08d stack is %d cmd stack is %d flag %d token %04x -- name %s\n",
-					lineFromPtr.line, (unsigned int) ptr,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token , TokenName(token));	
+					lineFromPtr.line, (unsigned int) ptr,__FUNCTION__,__LINE__, instance.stack, instance.cmdStack, kittyStack[__stack].state, token , TokenName(token));	
 #endif
 			ret = cmd -> fn( cmd, ptr ) ;
 			if (ret) ret += cmd -> size;
@@ -1008,10 +1068,10 @@ char *token_reader( char *start, char *ptr, unsigned short token, int tokenlengt
 {
 	ptr = executeToken( ptr, token );
 
-	if (stack<0)
+	if (__stack<0)
 	{
 		getLineFromPointer(ptr);
-		printf("dog fart, stinky fart at line %d, stack is %d\n", lineFromPtr.line ,stack);
+		printf("dog fart, stinky fart at line %d, stack is %d\n", lineFromPtr.line,__stack);
 		return NULL;
 	}
 
@@ -1049,7 +1109,7 @@ char *code_reader( char *start, int tokenlength )
 	{
 		// this basic for now, need to handel "on error " commands as well.
 
-		if (kittyError.newError)
+		if (instance.kittyError.newError)
 		{
 			ptr = onError( ptr );
 			if (ptr == NULL) break;
@@ -1098,7 +1158,7 @@ char *filename = NULL;
 
 #define DLINE printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-bool ext_crc()
+bool check_ext_crc()
 {
 	int n;
 
@@ -1106,7 +1166,8 @@ bool ext_crc()
 	{
 		if (kitty_extensions[n].lookup)
 		{
-			kitty_extensions[n].crc != mem_crc( kitty_extensions[12].lookup, 0xFFFF );
+			printf("create crc for extension %d\n",n);
+			kitty_extensions[n].crc != mem_crc( kitty_extensions[n].lookup, 0xFFFF );
 			return false;
 		}
 	}
@@ -1137,12 +1198,26 @@ ULONG exceptCode ( struct ExecBase *SysBase, ULONG signals, ULONG exceptData)
 
 extern struct retroRGB DefaultPalette[256];
 
+void get_procedures()
+{
+	unsigned int n;
+	for (n=0;n<var_count[0];n++)
+	{
+		if (globalVars[n].var.type == type_proc)	procedures.push_back( globalVars +n );
+	}
+}
+
 int main(int args, char **arg)
 {
 	BOOL runtime = FALSE;
 	struct fileContext *file;
 	char amosid[17];
 	int n;
+
+	init_instent( &instance );
+
+	procStcakFrame[0].localVarData = stackFrameData;	// this just temp... need to manage size, lett it grow..
+	procStcakFrame[0].localVarDataNext = stackFrameData;
 
 #ifdef __amigaos__
 	struct Task *me;
@@ -1170,7 +1245,6 @@ int main(int args, char **arg)
 	}
 
 #endif
-
 
 	if (init())
 	{
@@ -1202,8 +1276,6 @@ int main(int args, char **arg)
 
 #endif
 
-	stack = 0;
-	cmdStack = 0;
 	onError = onErrorBreak;
 
 	memset(globalVars,0,sizeof(struct globalVar) * VAR_BUFFERS);
@@ -1239,78 +1311,26 @@ int main(int args, char **arg)
 		__load_bank__( (char *) "AmosPro_System:APSystem/AMOSPro_Default_Resource.Abk",-2);
 		__load_bank__( (char *) "progdir:kittySystem/mouse.abk",-3);
 
-		// set up a fake extention lookup
-
 		// set default values.
 		memset( kitty_extensions , 0, sizeof(struct extension_lib) *32 );
 
-		// alloc tabels for 2 fake extentions
-		kitty_extensions[1].lookup = (char *) malloc( 0xFFFF );	// music.lib
-		kitty_extensions[2].lookup = (char *) malloc( 0xFFFF );	// compat.lib
-		kitty_extensions[12].lookup = (char *) malloc( 0xFFFF );	// turbo extention.
-
 		// init default values for fake extentions
-		for (n=0;n<32;n++) if (kitty_extensions[n].lookup) memset(kitty_extensions[n].lookup,0,0xFFFF);
-
-		// function table init.
-
-		if (kitty_extensions[1].lookup)
-		{	
-			*((void **) (kitty_extensions[1].lookup + 0x0074)) = (void *) ext_cmd_boom;
-			*((void **) (kitty_extensions[1].lookup + 0x008A)) = (void *) ext_cmd_sam_bank;
-			*((void **) (kitty_extensions[1].lookup + 0x007E)) = (void *) ext_cmd_shoot;	
-
-			*((void **) (kitty_extensions[1].lookup + 0x009A)) = (void *) ext_cmd_sam_loop_on;
-			*((void **) (kitty_extensions[1].lookup + 0x00B4)) = (void *) ext_cmd_sam_loop_off;
-
-			*((void **) (kitty_extensions[1].lookup + 0x00DE)) = (void *) ext_cmd_sam_play;
-			*((void **) (kitty_extensions[1].lookup + 0x00EE)) = (void *) ext_cmd_sam_play;
-			*((void **) (kitty_extensions[1].lookup + 0x00CE)) = (void *) ext_cmd_sample;
-			*((void **) (kitty_extensions[1].lookup + 0x0118)) = (void *) ext_cmd_bell;
-			*((void **) (kitty_extensions[1].lookup + 0x0170)) = (void *) ext_cmd_del_wave;
-			*((void **) (kitty_extensions[1].lookup + 0x0180)) = (void *) ext_cmd_set_envel;
-			*((void **) (kitty_extensions[1].lookup + 0x01A4)) = (void *) ext_cmd_volume;
-			*((void **) (kitty_extensions[1].lookup + 0x0104)) = (void *) ext_cmd_sam_raw;
-			*((void **) (kitty_extensions[1].lookup + 0x0144)) = (void *) ext_cmd_play;
-			*((void **) (kitty_extensions[1].lookup + 0x015E)) = (void *) ext_cmd_set_wave;
-			*((void **) (kitty_extensions[1].lookup + 0x01BC)) = (void *) ext_cmd_wave;
-
-			*((void **) (kitty_extensions[1].lookup + 0x01CA)) = (void *) ext_cmd_led_on;
-			*((void **) (kitty_extensions[1].lookup + 0x01D6)) = (void *) ext_cmd_led_off;
-
-			*((void **) (kitty_extensions[1].lookup + 0x0256)) = (void *) ext_cmd_sam_stop;
-			*((void **) (kitty_extensions[1].lookup + 0x0324)) = (void *) ext_cmd_ssave;
-		}
-
-		if (kitty_extensions[2].lookup)
-		{	
-			*((void **) (kitty_extensions[2].lookup + 0x0006)) = (void *) ext_cmd_pack;
-			*((void **) (kitty_extensions[2].lookup + 0x0014)) = (void *) ext_cmd_pack;
-			*((void **) (kitty_extensions[2].lookup + 0x0026)) = (void *) ext_cmd_spack;
-			*((void **) (kitty_extensions[2].lookup + 0x0036)) = (void *) ext_cmd_spack;
-			*((void **) (kitty_extensions[2].lookup + 0x0048)) = (void *) ext_cmd_unpack;
-			*((void **) (kitty_extensions[2].lookup + 0x0056)) = (void *) ext_cmd_unpack;
-			*((void **) (kitty_extensions[2].lookup + 0x0060)) = (void *) ext_cmd_unpack;
-		}
-
-		if (kitty_extensions[12].lookup)
-		{
-			*((void **) (kitty_extensions[12].lookup + 0x0A08)) = (void *) ext_cmd_range;
-		}
+//		open_extension( "AMOSPRO_music.lib", 1 );
+		open_extension( "AMOSPRO_compact.lib", 2 );
+		open_extension( "AMOSPRO_turbo.lib", 12 );
+		open_extension( "AMOSPRO_Craft.lib", 18 );
 
 		for(n=0;n<32;n++)
 		{
-			if (kitty_extensions[n].lookup) kitty_extensions[n].crc = mem_crc( kitty_extensions[12].lookup, 0xFFFF ) ;
+			if (kitty_extensions[n].lookup)
+			{
+				printf("make crc for extension %d - %08x\n",n,kitty_extensions[n].lookup );
+				 kitty_extensions[n].crc = mem_crc( kitty_extensions[n].lookup, 0xFFFF ) ;
+			}
 		}
 
-		make_wave_noice();
-		make_wave_bell();
-
-		apply_wave(1, 15);
-
-
-		do_input = (void (**)(nativeCommand*, char*)) malloc( sizeof(void *) * MAX_PARENTHESIS_COUNT );
-		do_to = (char *(**)(nativeCommand*, char*)) malloc( sizeof(void *) * MAX_PARENTHESIS_COUNT );
+		do_input = (void (**)(nativeCommand*, char*)) allocType(void *,MAX_PARENTHESIS_COUNT);
+		do_to = (char *(**)(nativeCommand*, char*)) allocType(void *,MAX_PARENTHESIS_COUNT);
 
 		for (n=0;n<MAX_PARENTHESIS_COUNT;n++) 
 		{
@@ -1318,11 +1338,11 @@ int main(int args, char **arg)
 			if (do_to) do_to[n] = do_to_default;
 		}
 
-		if (video) start_engine();
+		if (instance.video) start_engine();
 
 		file = newFile( filename );
 
-		if ((file)&&(video)&&(init_error == false))
+		if ((file)&&(instance.video)&&(init_error == false))
 		{
 			if (file -> start)
 			{
@@ -1333,22 +1353,20 @@ int main(int args, char **arg)
 
 				pass1_reader( (char *) file -> start , _file_end_ );
 
-				if (kittyError.code == 0)
+				if (instance.kittyError.code == 0)
 				{
 					runtime = TRUE;
-
 					if (file ->bank) init_banks( (char *) file -> bank, file -> bankSize );
 
 					gfxDefault(NULL, NULL);
-
 #ifdef run_program_yes
 					code_reader( (char *) file -> start , file -> tokenLength );
 #endif
 				}
 
-				if (kittyError.newError)
+				if (instance.kittyError.newError)
 				{
-					printError( &kittyError, runtime ? errorsRunTime : errorsTestTime );
+					printError( &instance.kittyError, runtime ? errorsRunTime : errorsTestTime );
 				}
 			}
 
@@ -1362,7 +1380,7 @@ int main(int args, char **arg)
 		else
 		{
 			if (!file) printf("AMOS file not open/can't find it\n");
-			if (!video) printf("technical problems\n");
+			if (!instance.video) printf("technical problems\n");
 		}
 
 		running = false;
@@ -1370,13 +1388,13 @@ int main(int args, char **arg)
 
 		if (do_input)
 		{
-			free( (void *) do_input );
+			freeStruct( do_input );
 			do_input = NULL;
 		}
 
 		if (do_to)
 		{
-			free( (void *) do_to );
+			freeStruct( (void *) do_to );
 			do_to = NULL;
 		}
 	}

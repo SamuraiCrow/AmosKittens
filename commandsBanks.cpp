@@ -10,6 +10,7 @@
 #ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/retroMode.h>
+#include <amosKittens.h>
 #endif
 
 #ifdef __linux__
@@ -32,17 +33,12 @@
 #include "amosString.h"
 #include "cleanup.h"
 
-extern int last_var;
 extern struct globalVar globalVars[];
 extern unsigned short last_token;
 extern int tokenMode;
 extern int tokenlength;
-extern struct retroScreen *screens[8] ;
 extern struct retroVideo *video;
 extern struct retroRGB DefaultPalette[256];
-extern int current_screen;
-extern struct retroSprite *sprite ;
-extern struct retroSprite *icons ;
 extern struct retroSprite *patterns;
 
 extern std::vector<struct kittyBank> kittyBankList;
@@ -89,8 +85,9 @@ extern void makeMaskForAll();
 void update_objects()
 {
 	patterns = (struct retroSprite *) getBankObject( - 3 );
-	sprite = (struct retroSprite *) getBankObject( 1 );
-	icons = (struct retroSprite *) getBankObject( 2 );
+
+	instance.sprites = (struct retroSprite *) getBankObject( 1 );
+	instance.icons = (struct retroSprite *) getBankObject( 2 );
 
 	makeMaskForAll();
 }
@@ -207,13 +204,13 @@ void freeBank( int banknr )
 			{
 				case bank_type_sprite:
 
-					if (bank_is_object(bank,sprite)) sprite = NULL;
+					if (bank_is_object(bank,instance.sprites)) instance.sprites = NULL;
 					retroFreeSprite( (struct retroSprite *) bank -> object_ptr );
 					break;
 
 				case bank_type_icons:
 
-					if (bank_is_object(bank,icons)) icons = NULL;
+					if (bank_is_object(bank,instance.icons)) instance.icons = NULL;
 					retroFreeSprite( (struct retroSprite *) bank -> object_ptr );
 					break;
 			}
@@ -232,7 +229,7 @@ void freeBank( int banknr )
 char *_bankErase( struct glueCommands *data, int nextToken )
 {
 	int bankNr;
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	if (args==1)
 	{
@@ -243,7 +240,7 @@ char *_bankErase( struct glueCommands *data, int nextToken )
 		engine_unlock();
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -255,7 +252,7 @@ char *bankErase(nativeCommand *cmd, char *tokenBuffer)
 
 char *_bankEraseAll( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	if (args==1)
 	{
@@ -263,7 +260,7 @@ char *_bankEraseAll( struct glueCommands *data, int nextToken )
 	}
 	else setError(22,data->tokenBuffer);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -307,7 +304,7 @@ char *bankEraseTemp(nativeCommand *cmd, char *tokenBuffer)
 char *_bankStart( struct glueCommands *data, int nextToken )
 {
 	int n;
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	int ret = 0;
 	struct kittyBank *bank = NULL;
 
@@ -315,13 +312,13 @@ char *_bankStart( struct glueCommands *data, int nextToken )
 
 	if (args==1)
 	{
-		n = getStackNum(stack);
+		n = getStackNum(__stack);
 		if ( bank = findBank(n))	ret = (int) bank -> start;
 	}
 
 	if (bank == NULL) ret = 0;
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum(ret);
 	return NULL;
 }
@@ -329,7 +326,7 @@ char *_bankStart( struct glueCommands *data, int nextToken )
 char *_bankLength( struct glueCommands *data, int nextToken )
 {
 	int n;
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	struct kittyBank *bank;
 	int ret = 0;
 
@@ -337,11 +334,11 @@ char *_bankLength( struct glueCommands *data, int nextToken )
 
 	if (args==1)
 	{
-		n = getStackNum(stack);
+		n = getStackNum(__stack);
 		if ( bank = findBank(n))	ret = (int) bank -> length;
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum(ret);
 	return NULL;
 }
@@ -349,13 +346,13 @@ char *_bankLength( struct glueCommands *data, int nextToken )
 char *_bankBload( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	FILE *fd;
 	int size;
 
 	if (args==2)
 	{
-		struct stringData *name = getStackString( stack - 1 );
+		struct stringData *name = getStackString(__stack - 1 );
 
 		fd = fopen( &name -> ptr , "r");
 		if (fd)
@@ -369,7 +366,7 @@ char *_bankBload( struct glueCommands *data, int nextToken )
 
 			if (size)
 			{
-				bankid_or_address = getStackNum(stack);
+				bankid_or_address = getStackNum(__stack);
 				bank = findBank( bankid_or_address );	// bank must be previously reserved 
 
 				if (bank)
@@ -387,25 +384,25 @@ char *_bankBload( struct glueCommands *data, int nextToken )
 		}
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
 char *_bankBsave( struct glueCommands *data, int nextToken )
 {
 	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	FILE *fd;
 	char *start, *to;
 
 	if (args==3)
 	{
-		struct stringData *name = getStackString( stack - 2 );	
+		struct stringData *name = getStackString(__stack - 2 );	
 
 		fd = fopen( &name -> ptr , "w");
 
-		start = (char *) getStackNum(stack -1 );
-		to = (char *) getStackNum( stack );
+		start = (char *) getStackNum(__stack -1 );
+		to = (char *) getStackNum(__stack );
 
 		if (fd)
 		{
@@ -417,11 +414,11 @@ char *_bankBsave( struct glueCommands *data, int nextToken )
 		}
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
-struct kittyBank *__ReserveAs( int type, int bankNr, int length, const char *name, char *mem )
+struct kittyBank *reserveAs( int type, int bankNr, int length, const char *name, char *mem )
 {
 	struct kittyBank *bank;
 
@@ -437,7 +434,7 @@ struct kittyBank *__ReserveAs( int type, int bankNr, int length, const char *nam
 		}
 		else
 		{
-			mem =  (char *) malloc( bank-> length + bank_header );
+			mem =  (char *) sys_priv_alloc( bank-> length + bank_header );
 			bank->start = mem ? mem+bank_header : NULL;
 			if (mem) memset( mem , 0, bank->length + bank_header );
 		}
@@ -477,83 +474,83 @@ struct kittyBank *__ReserveAs( int type, int bankNr, int length, const char *nam
 }
 
 
-char *_bankReserveAsWork( struct glueCommands *data, int nextToken )
+char *__bankReserveAsWork( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	if (args==2)
 	{
-		__ReserveAs( 1, getStackNum(stack-1) , getStackNum(stack), NULL, NULL );
+		reserveAs( 1, getStackNum(__stack-1) , getStackNum(__stack), NULL, NULL );
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
-char *_bankReserveAsChipWork( struct glueCommands *data, int nextToken )
+char *__bankReserveAsChipWork( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	if (args==2)
 	{
-		__ReserveAs( 0, getStackNum(stack-1) , getStackNum(stack), NULL, NULL );
+		reserveAs( 0, getStackNum(__stack-1) , getStackNum(__stack), NULL, NULL );
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
-char *_bankReserveAsData( struct glueCommands *data, int nextToken )
+char *__bankReserveAsData( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	if (args==2)
 	{
-		__ReserveAs( 8 | 1, getStackNum(stack-1) , getStackNum(stack), NULL, NULL );
+		reserveAs( 8 | 1, getStackNum(__stack-1) , getStackNum(__stack), NULL, NULL );
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
-char *_bankReserveAsChipData( struct glueCommands *data, int nextToken )
+char *__bankReserveAsChipData( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	if (args==2)
 	{
-		__ReserveAs( 8 | 0, getStackNum(stack-1) , getStackNum(stack), NULL, NULL );
+		reserveAs( 8 | 0, getStackNum(__stack-1) , getStackNum(__stack), NULL, NULL );
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
 char *bankReserveAsWork(nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdNormal( _bankReserveAsWork, tokenBuffer );
+	stackCmdNormal( __bankReserveAsWork, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *bankReserveAsChipWork(nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdNormal( _bankReserveAsChipWork, tokenBuffer );
+	stackCmdNormal( __bankReserveAsChipWork, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *bankReserveAsData(nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdNormal( _bankReserveAsData, tokenBuffer );
+	stackCmdNormal( __bankReserveAsData, tokenBuffer );
 	return tokenBuffer;
 }
 
 char *bankReserveAsChipData(nativeCommand *cmd, char *tokenBuffer)
 {
-	stackCmdNormal( _bankReserveAsChipData, tokenBuffer );
+	stackCmdNormal( __bankReserveAsChipData, tokenBuffer );
 	return tokenBuffer;
 }
 
@@ -565,7 +562,7 @@ char *bankListBank(nativeCommand *cmd, char *tokenBuffer)
 	char txt[1000];
 	struct retroScreen *screen;
 	struct kittyBank *bank = NULL;
-	screen = screens[current_screen];
+	screen = instance.screens[instance.current_screen];
 	bool has_banks = false;
 
 	if (screen)
@@ -688,7 +685,7 @@ void __load_work_data__(FILE *fd,int bank)
 
 		if (item.length >0 )
 		{
-			mem = (char *) malloc( item.length+bank_header);
+			mem = (char *) sys_priv_alloc( item.length+bank_header);
 
 			if (mem)
 			{
@@ -697,12 +694,12 @@ void __load_work_data__(FILE *fd,int bank)
 
 				if (bank != -1)
 				{
-					if (__ReserveAs( item.type, bank, item.length,item.name, mem ) == false) free(mem);
+					if (reserveAs( item.type, bank, item.length,item.name, mem ) == false) free(mem);
 				}
 				else
 				{
 					if ( strncasecmp( item.name , "Samples",7) == 0) item.bank=5;
-					if (__ReserveAs( item.type, item.bank, item.length,item.name, mem ) == false) free(mem);
+					if (reserveAs( item.type, item.bank, item.length,item.name, mem ) == false) free(mem);
 				}
 			}
 		}
@@ -728,14 +725,14 @@ void __load_work_data_mem__(struct retroMemFd &fd)
 
 		if (item.length >0 )
 		{
-			mem = (char *) malloc( item.length+bank_header);
+			mem = (char *) sys_priv_alloc( item.length+bank_header);
 
 			if (mem)
 			{
 				memset( mem, 0, item.length+bank_header );
 				mread( mem+bank_header , item.length, 1, fd );
 
-				if (__ReserveAs( item.type, item.bank, item.length,NULL, mem ) == false) free(mem);
+				if (reserveAs( item.type, item.bank, item.length,NULL, mem ) == false) free(mem);
 			}
 		}
 	}
@@ -786,13 +783,14 @@ void __write_ambs__( FILE *fd, uint16_t banks)
 void init_banks( char *data , int size)
 {
 	struct retroMemFd fd;
-	char id[5];
+	char id[6];
 	unsigned short banks = -1;
 	int n;
 	int type = -1;
 	struct kittyBank *bank = NULL;
-
 	id[4]=0;	// null terminate id string.
+
+	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (data)
 	{
@@ -864,7 +862,7 @@ void init_banks( char *data , int size)
 					{
 						engine_lock();
 						freeBank( 1 );
-						if (bank = __ReserveAs( bank_type_sprite, 1, 0,NULL, NULL))							
+						if (bank = reserveAs( bank_type_sprite, 1, 0,NULL, NULL))							
 						{
 							if (bank -> object_ptr = (char *) retroLoadSprite( &fd, (cust_fread_t) hook_mread ))
 							{
@@ -879,7 +877,7 @@ void init_banks( char *data , int size)
 				case bank_type_icons:
 					{
 						freeBank( 2 );
-						if (bank = __ReserveAs( bank_type_icons, 2, 0,NULL, NULL ))
+						if (bank = reserveAs( bank_type_icons, 2, 0,NULL, NULL ))
 						{
 							if (bank -> object_ptr = (char *) retroLoadSprite( &fd, (cust_fread_t) hook_mread ))
 							{
@@ -960,7 +958,7 @@ void __load_bank__(struct stringData *name, int bankNr )
 						engine_lock();
 						freeBank( _bank );
 
-						if (bank = __ReserveAs( bank_type_sprite, _bank, sizeof(void *),NULL, NULL  ))	
+						if (bank = reserveAs( bank_type_sprite, _bank, sizeof(void *),NULL, NULL  ))	
 						{
 							if (bank -> object_ptr = (char *) retroLoadSprite(fd, (cust_fread_t) cust_fread ))
 							{
@@ -976,17 +974,17 @@ void __load_bank__(struct stringData *name, int bankNr )
 					{
 						int _bank = bankNr != -1 ? bankNr : 2;
 						freeBank( _bank );
-						icons = retroLoadSprite(fd, (cust_fread_t) cust_fread );
+						instance.icons = retroLoadSprite(fd, (cust_fread_t) cust_fread );
 
 						// 99 Bottles of beer. 
-						if (bank = __ReserveAs( bank_type_icons, _bank, sizeof(void *),NULL, NULL ))
+						if (bank = reserveAs( bank_type_icons, _bank, sizeof(void *),NULL, NULL ))
 						{
-							bank -> object_ptr = (char *) icons;
+							bank -> object_ptr = (char *) instance.icons;
 						}
 						else
 						{
-							if (icons) retroFreeSprite(icons);
-							icons = NULL;
+							if (instance.icons) retroFreeSprite(instance.icons);
+							instance.icons = NULL;
 						}
 					}
 					break;
@@ -1014,7 +1012,7 @@ void __load_bank__(char *_name, int bankNr )
 	if (name)
 	{
 		__load_bank__(name, bankNr);
-		free(name);
+		freeString(name);
 	}
 }
 
@@ -1022,21 +1020,21 @@ void __load_bank__(char *_name, int bankNr )
 char *_bankLoad( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 
 	switch (args)
 	{
 		case 1:
-			__load_bank__( getStackString( stack  ) , -1 );
+			__load_bank__( getStackString(__stack  ) , -1 );
 			break;
 
 		case 2:
-			__load_bank__( getStackString(stack-1), getStackNum(stack) );
+			__load_bank__( getStackString(__stack-1), getStackNum(__stack) );
 			break;
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -1051,10 +1049,10 @@ char *bankLoad(nativeCommand *cmd, char *tokenBuffer)
 void __save_sprite_data__(FILE *fd, cust_fread_t cust_fwrite, struct kittyBank *bank)
 {
 	if (bank == NULL) return;
-	sprite = (struct retroSprite *) bank -> object_ptr;
-	if (sprite == NULL)  return;
+	instance.sprites = (struct retroSprite *) bank -> object_ptr;
+	if (instance.sprites == NULL)  return;
 
-	retroSaveSprite( fd, sprite, cust_fwrite );
+	retroSaveSprite( fd, instance.sprites, cust_fwrite );
 }
 
 
@@ -1119,7 +1117,7 @@ void __write_banks__( FILE *fd )
 char *_bankSave( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	FILE *fd;
 	struct stringData *filename = NULL;
 	int banknr = 0;
@@ -1128,7 +1126,7 @@ char *_bankSave( struct glueCommands *data, int nextToken )
 	{
 		case 1:
 
-			filename = getStackString( stack );
+			filename = getStackString(__stack );
 
 			fd = fopen( &filename -> ptr , "w");
 			if (fd)
@@ -1141,8 +1139,8 @@ char *_bankSave( struct glueCommands *data, int nextToken )
 
 		case 2:
 
-			filename = getStackString( stack - 1 );
-			banknr = getStackNum( stack );
+			filename = getStackString(__stack - 1 );
+			banknr = getStackNum(__stack );
 
 			fd = fopen( &filename -> ptr , "w");
 			if (fd)
@@ -1157,7 +1155,7 @@ char *_bankSave( struct glueCommands *data, int nextToken )
 			setError(22, data -> tokenBuffer );
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -1173,7 +1171,7 @@ char *_bankBGrab( struct glueCommands *data, int nextToken )
 
 	NYI(__FUNCTION__);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -1187,7 +1185,7 @@ char *bankBGrab(nativeCommand *cmd, char *tokenBuffer)
 char *_bankBankSwap( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	int b1,b2;
 
 	struct kittyBank *bank1;
@@ -1195,8 +1193,8 @@ char *_bankBankSwap( struct glueCommands *data, int nextToken )
 	
 	switch (args)
 	{
-		case 2:	b1 = getStackNum(stack-1);
-				b2 = getStackNum(stack);
+		case 2:	b1 = getStackNum(__stack-1);
+				b2 = getStackNum(__stack);
 
 				bank1 = findBank(b1);
 				bank2 = findBank(b2);
@@ -1212,14 +1210,14 @@ char *_bankBankSwap( struct glueCommands *data, int nextToken )
 
 				engine_lock();
 
-				icons = NULL;
-				sprite = NULL;
+				instance.icons = NULL;
+				instance.sprites = NULL;
 
 				bank1 = findBank(1);
-				if (bank1) if (bank1 -> type == type_Sprites ) sprite = (struct retroSprite *) bank1 -> object_ptr;
+				if (bank1) if (bank1 -> type == type_Sprites ) instance.sprites = (struct retroSprite *) bank1 -> object_ptr;
 
 				bank1 = findBank(2);
-				if (bank1) if (bank1 -> type == type_Icons ) sprite = (struct retroSprite *) bank1 -> object_ptr;
+				if (bank1) if (bank1 -> type == type_Icons ) instance.sprites = (struct retroSprite *) bank1 -> object_ptr;
 
 				engine_unlock();
 
@@ -1228,7 +1226,7 @@ char *_bankBankSwap( struct glueCommands *data, int nextToken )
 				setError(22,data->tokenBuffer);
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -1242,17 +1240,17 @@ char *bankBankSwap(nativeCommand *cmd, char *tokenBuffer)
 char *_bankResourceBank( struct glueCommands *data, int nextToken )
 {
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 
 	switch (args)
 	{
-		case 1:	current_resource_bank = getStackNum(stack);
+		case 1:	current_resource_bank = getStackNum(__stack);
 				break;
 		default:
 				setError(22,data->tokenBuffer);
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	return NULL;
 }
 
@@ -1353,7 +1351,7 @@ struct stringData *getResourceStr(int id)
 
 char *_bankResourceStr( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	int id;
 	struct stringData *ret = NULL;
 
@@ -1361,14 +1359,14 @@ char *_bankResourceStr( struct glueCommands *data, int nextToken )
 
 	switch (args)
 	{
-		case 1:	id = getStackNum(stack);
+		case 1:	id = getStackNum(__stack);
 				ret = getResourceStr( id );
 				break;
 		default:
 				setError(22,data->tokenBuffer);
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 
 	if (ret)
 	{
@@ -1393,7 +1391,7 @@ char *bankResourceStr(nativeCommand *cmd, char *tokenBuffer)
 
 char *_bankBankShrink( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data->stack +1 ;
+	int args = __stack - data->stack +1 ;
 	int banknr,size;
 	struct stringData *ret = NULL;
 	struct kittyBank *bank = NULL;
@@ -1402,13 +1400,13 @@ char *_bankBankShrink( struct glueCommands *data, int nextToken )
 
 	switch (args)
 	{
-		case 2:	banknr = getStackNum(stack-1);
-				size = getStackNum(stack);
+		case 2:	banknr = getStackNum(__stack-1);
+				size = getStackNum(__stack);
 
 				bank = findBank( banknr );
 				if (bank)
 				{
-					char *_new = (char *) malloc( bank_header+size );
+					char *_new = (char *) sys_priv_alloc( bank_header+size );
 
 					if (_new)
 					{
@@ -1426,7 +1424,7 @@ char *_bankBankShrink( struct glueCommands *data, int nextToken )
 				setError(22,data->tokenBuffer);
 	}
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 
 	if (ret)
 	{
@@ -1453,7 +1451,7 @@ char *_bankBlength( struct glueCommands *data, int nextToken )
 
 	NYI(__FUNCTION__);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum(ret);
 	return NULL;
 }
@@ -1473,7 +1471,7 @@ char *_bankBstart( struct glueCommands *data, int nextToken )
 
 	NYI(__FUNCTION__);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum(ret);
 	return NULL;
 }
@@ -1493,7 +1491,7 @@ char *_bankBsend( struct glueCommands *data, int nextToken )
 
 	NYI(__FUNCTION__);
 
-	popStack( stack - data->stack );
+	popStack(__stack - data->stack );
 	setStackNum(ret);
 	return NULL;
 }

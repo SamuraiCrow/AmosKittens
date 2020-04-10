@@ -10,6 +10,7 @@
 #if defined(__amigaos4__) || defined(__amigaos__)
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
 #endif
 
 #ifdef __linux__
@@ -17,11 +18,11 @@
 #define Printf printf
 #endif
 
+#include <amoskittens.h>
 #include "AmalCompiler.h"
 #include "channel.h"
 #include "AmalCommands.h"
 #include "amal_object.h"
-#include "amoskittens.h"
 #include "commandsScreens.h"
 #include "amosstring.h"
 #include "amalBank.h"
@@ -35,7 +36,6 @@
 extern void pushBackAmalCmd( amal::Flags flags, struct kittyChannel *channel, void *cmd ) ;
 extern int amreg[26];
 extern void dumpAmalRegs();
-extern struct retroScreen *screens[8] ;
 
 
 #if defined(show_debug_amal_yes) || defined(test_app)
@@ -51,13 +51,10 @@ extern int bobColRange( unsigned short bob, unsigned short start, unsigned short
 extern int spriteColRange( unsigned short bob, unsigned short start, unsigned short end );
 
 #ifdef test_app
-	#define amal_mouse_x 1000
-	#define amal_mouse_y 2000
-	#define engine_mouse_key 0
+	#define instance.amal_mouse_x 1000
+	#define instance.amal_mouse_y 2000
+	#define instance.engine_mouse_key 0
 #else
-	extern int engine_mouse_x;
-	extern int engine_mouse_y;
-	extern int engine_mouse_key;
 	#define amal_mouse_x engine_mouse_x
 	#define amal_mouse_y engine_mouse_y
 #endif
@@ -700,28 +697,28 @@ void *amal_call_end API_AMAL_CALL_ARGS
 void *amal_call_xm API_AMAL_CALL_ARGS
 {
 	AmalPrintf("%s:%s:%ld - channel %d\n",__FILE__,__FUNCTION__,__LINE__, self -> id);
-	self -> argStack [ self -> argStackCount  ] = amal_mouse_x;
+	self -> argStack [ self -> argStackCount  ] = instance.amal_mouse_x;
 	return NULL;
 }
 
 void *amal_call_ym API_AMAL_CALL_ARGS
 {
 	AmalPrintf("%s:%s:%ld - channel %d\n",__FILE__,__FUNCTION__,__LINE__, self -> id);
-	self -> argStack [ self -> argStackCount  ] = amal_mouse_y;	
+	self -> argStack [ self -> argStackCount  ] = instance.amal_mouse_y;	
 	return NULL;
 }
 
 void *amal_call_k1 API_AMAL_CALL_ARGS
 {
 	AmalPrintf("%s:%s:%ld - channel %d\n",__FILE__,__FUNCTION__,__LINE__, self -> id);
-	self -> argStack [ self -> argStackCount  ] = engine_mouse_key & 1 ? ~0 : 0;
+	self -> argStack [ self -> argStackCount  ] = instance.engine_mouse_key & 1 ? ~0 : 0;
 	return NULL;
 }
 
 void *amal_call_k2 API_AMAL_CALL_ARGS
 {
 	AmalPrintf("%s:%s:%ld - channel %d\n",__FILE__,__FUNCTION__,__LINE__, self -> id);
-	self -> argStack [ self -> argStackCount  ] = engine_mouse_key & 2 ? ~0 : 0;
+	self -> argStack [ self -> argStackCount  ] = instance.engine_mouse_key & 2 ? ~0 : 0;
 	return NULL;
 }
 
@@ -751,7 +748,7 @@ void *cb_xh  (struct kittyChannel *self, struct amalCallBack *cb)
 		case 2:
 			s = self -> argStack [ self -> argStackCount -1 ];			
 			x = self -> argStack [ self -> argStackCount  ];
-			if (screen = screens[s]) x = XHard_formula( screen, x );
+			if (screen = instance.screens[s]) x = XHard_formula( screen, x );
 			break;
 	}
 
@@ -780,7 +777,7 @@ void *cb_yh  (struct kittyChannel *self, struct amalCallBack *cb)
 		case 2:
 			s = self -> argStack [ self -> argStackCount -1 ];			
 			y = self -> argStack [ self -> argStackCount ];
-			if (screen = screens[s]) y = YHard_formula( screen, y );
+			if (screen = instance.screens[s]) y = YHard_formula( screen, y );
 			break;
 	}
 
@@ -809,7 +806,7 @@ void *cb_xscreen  (struct kittyChannel *self, struct amalCallBack *cb)
 		case 2:
 			s = self -> argStack [ self -> argStackCount -1 ];			
 			x = self -> argStack [ self -> argStackCount  ];
-			if (screen = screens[s]) x = XScreen_formula( screen, x );
+			if (screen = instance.screens[s]) x = XScreen_formula( screen, x );
 			break;
 	}
 
@@ -838,7 +835,7 @@ void *cb_yscreen  (struct kittyChannel *self, struct amalCallBack *cb)
 		case 2:
 			s = self -> argStack [ self -> argStackCount -1 ];			
 			y = self -> argStack [ self -> argStackCount  ];
-			if (screen = screens[s]) y = YScreen_formula( screen, y );
+			if (screen = instance.screens[s]) y = YScreen_formula( screen, y );
 			break;
 	}
 

@@ -42,7 +42,6 @@ enum
 };
 
 extern struct Menu *amiga_menu;
-extern struct retroSprite *sprite;
 
 struct Process *EngineTask = NULL;
 extern UWORD *EmptyPointer;
@@ -68,10 +67,6 @@ std::vector<struct keyboard_buffer> keyboardBuffer;
 std::vector<struct amos_selected> amosSelected;
 std::vector<int> engineCmdQue;
 
-
-int		engine_mouse_key = 0;
-int		engine_mouse_x = 0;
-int		engine_mouse_y = 0;
 uint32_t	engine_back_color = 0x000000;
 
 int autoView = 1;
@@ -250,7 +245,7 @@ bool init_engine()
 		 SetFont( &font_render_rp, gfx_font );
 	}
 
-	engine =  retroAllocEngine( My_Window, video );
+	engine =  retroAllocEngine( My_Window, instance.video );
 
 	if ( ! engine) return FALSE;
 
@@ -333,6 +328,15 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 
 	if (screen -> fade_speed)
 	{
+		for (int n=0;n<8;n++)
+		{
+			if (instance.screens[n] == screen)
+			{
+				Printf("fade screen %ld\n",n);
+				break;
+			}
+		}
+
 		if (screen -> fade_count < screen -> fade_speed)
 		{
 			screen -> fade_count++;
@@ -350,6 +354,8 @@ void retroFadeScreen_beta(struct retroScreen * screen)
 				dr = (int) fpal->r - (int) opal->r;
 				dg = (int) fpal->g - (int) opal->g;
 				db = (int) fpal->b - (int) opal->b;
+
+//				if (n<32) Printf("%-3ld: %04lx,%04lx,%0l4x\n",n,fpal->r,fpal->g,fpal->b);
 
 				limit_step(dr);
 				limit_step(dg);
@@ -396,7 +402,7 @@ void DrawSprite(
 	unsigned int color;
 	struct retroFrameHeader *frame;
 
-	if (image >= sprite -> number_of_frames) image = sprite -> number_of_frames-1;
+	if (image >= sprite -> number_of_frames) image = instance.sprites -> number_of_frames-1;
 	if (image < 0) image = 0;
 
 	frame = sprite -> frames + image;
@@ -408,7 +414,7 @@ void DrawSprite(
 
 	if (y>0)
 	{
-		if (y+height> (int) (video->height/2)) height = (video->height/2) - y;
+		if (y+height> (int) (instance.video->height/2)) height = (instance.video->height/2) - y;
 	}
 	else
 	{
@@ -417,23 +423,23 @@ void DrawSprite(
 
 	if (x>0)
 	{
-		if (x+width> (int) (video->width/2)) width =(video->width/2) - x;
+		if (x+width> (int) (instance.video->width/2)) width =(instance.video->width/2) - x;
 	}
 	else
 	{
 		source_x0 = -x; x = 0; width -= source_x0;
 	}
 
-	destination_row_start = video -> Memory + (video -> width * (y*2)) + (x*2);
+	destination_row_start = instance.video -> Memory + (instance.video -> width * (y*2)) + (x*2);
 	source_row_start = (unsigned char *) frame -> data + (source_y0 * frame -> bytesPerRow ) + source_x0;
 	source_row_end = source_row_start + width;
 
 	for ( ypos = 0; ypos < height; ypos++ )
 	{
 		destination_row_ptr = destination_row_start;
-		destination_row_ptr2 = destination_row_start + video -> width;
+		destination_row_ptr2 = destination_row_start + instance.video -> width;
 
-		rgb = video -> scanlines[0].scanline[0].orgPalette;
+		rgb = instance.video -> scanlines[0].scanline[0].orgPalette;
 
 		for ( source_row_ptr = source_row_start;  source_row_ptr < source_row_end ; source_row_ptr++ )
 		{
@@ -454,7 +460,7 @@ void DrawSprite(
 			destination_row_ptr+=2;
 		}
 
-		destination_row_start += (video -> width*2);
+		destination_row_start += (instance.video -> width*2);
 		source_row_start += frame -> bytesPerRow;
 		source_row_end += frame -> bytesPerRow;
 	}
@@ -578,18 +584,17 @@ void handel_window()
 
 							switch (Code)
 							{
-								case SELECTDOWN:	engine_mouse_key |= 1; break;
-								case SELECTUP:	engine_mouse_key &= ~1; break;
-								case MENUDOWN:	engine_mouse_key |= 2; break;
-								case MENUUP:		engine_mouse_key &= ~2; break;
+								case SELECTDOWN:	instance.engine_mouse_key |= 1; break;
+								case SELECTUP:	instance.engine_mouse_key &= ~1; break;
+								case MENUDOWN:	instance.engine_mouse_key |= 2; break;
+								case MENUUP:		instance.engine_mouse_key &= ~2; break;
 							}
 							break;
 
 					case IDCMP_MOUSEMOVE:
 
-							engine_mouse_x = mouse_x - engine -> window -> BorderLeft;
-							engine_mouse_y = mouse_y - engine -> window -> BorderTop;
-							
+							instance.engine_mouse_x = mouse_x - engine -> window -> BorderLeft;
+							instance.engine_mouse_y = mouse_y - engine -> window -> BorderTop;
 							break;
 
 					case IDCMP_MENUPICK:
@@ -710,13 +715,27 @@ void run_amal_scripts()
 	if (channels)
 	{
 		struct kittyChannel *item;
-		int i;
+		unsigned int i;
 
 		for (i=0;i<channels -> _size();i++)
 		{
 			if (item = channels -> item(i))
 			{
-				if (item->amal_script) channel_amal( item );
+				if (item->amal_script)
+				{
+
+#ifdef show_debug_amal_yes
+
+Printf("debug AMAL channel %ld object nr %ld\n",item -> id, item -> number);
+
+if (item -> amalStatus & channel_status::active)
+{
+	Printf("script start>>\n%s\n<<script end\n",&(item->amal_script->ptr));
+}
+#endif
+					 channel_amal( item );
+				}
+
 				if (item->anim_script) channel_anim( item );
 				if (item->movex_script) channel_movex( item );
 				if (item->movey_script) channel_movey( item );
@@ -743,7 +762,7 @@ void main_engine()
 		Signal( &main_task->pr_Task, SIGF_CHILD );
 
 		Printf("clear video\n");
-		retroClearVideo(video, engine_back_color);
+		retroClearVideo(instance.video, engine_back_color);
 
 		Printf("init joysticks..\n");
 		init_joysticks();
@@ -825,11 +844,11 @@ void main_engine()
 
 			if (autoView)
 			{
-				retroClearVideo( video, engine_back_color );
+				retroClearVideo( instance.video, engine_back_color );
 
 				for (n=0; n<8;n++)
 				{
-					screen = screens[n];
+					screen = instance.screens[n];
 
 					if (screen)
 					{
@@ -855,7 +874,7 @@ void main_engine()
 					}
 				}	// next
 
-				retroDrawVideo( video );
+				retroDrawVideo( instance.video );
 
 				if (synchro_on == true) 
 				{
@@ -864,18 +883,18 @@ void main_engine()
 				}
 
 #if 1
-				if ((sprite)&&(video -> sprites))
+				if ((instance.sprites)&&(instance.video -> sprites))
 				{
 					struct retroSpriteObject *item;
 
 					for (n=0;n<64;n++)
 					{
-						item = &video -> sprites[n];
-						item -> sprite = sprite;
+						item = &instance.video -> sprites[n];
+						item -> sprite = instance.sprites;
 
 						if (item -> image>0)
 						{
-							DrawSprite( sprite, item, item -> image -1, 0 );
+							DrawSprite( instance.sprites, item, item -> image -1, 0 );
 						}
 					}
 				}
@@ -886,9 +905,9 @@ void main_engine()
 
 			if (My_Window)
 			{
-				AfterEffectScanline( video );
+				AfterEffectScanline( instance.video );
 //				AfterEffectAdjustRGB( video , 8, 0 , 4);
-				retroDmaVideo( video, engine );
+				retroDmaVideo( instance.video, engine );
 
 				WaitTOF();
 				if (sig_main_vbl) Signal( &main_task->pr_Task, 1<<sig_main_vbl );
@@ -897,8 +916,8 @@ void main_engine()
 						BLITA_Source, engine->rp.BitMap,
 						BLITA_SrcX, 0,
 						BLITA_SrcY, 0,
-						BLITA_Width,  video -> width, 
-						BLITA_Height, video -> height,
+						BLITA_Width,  instance.video -> width, 
+						BLITA_Height, instance.video -> height,
 						BLITA_DestType,  BLITT_RASTPORT,
 						BLITA_Dest, My_Window->RPort,
 						BLITA_DestX, My_Window->BorderLeft,

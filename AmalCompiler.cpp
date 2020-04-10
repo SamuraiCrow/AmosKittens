@@ -1,6 +1,8 @@
 
-#include "stdafx.h"
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <vector>
 
 #ifdef _MSC_VER
 #include <string.h>
@@ -18,6 +20,7 @@
 #if defined(__amigaos4__) || defined(__amigaos)
 #include <proto/dos.h>
 #include <proto/exec.h>
+#include <proto/retroMode.h>
 #include <string.h>
 #endif
 
@@ -35,14 +38,12 @@ extern FILE *engine_fd;
 #endif
 #endif
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <vector>
+#include "AmosKittens.h"
 #include "AmalCompiler.h"
 #include "channel.h"
 #include "AmalCommands.h"
 #include "pass1.h"
-#include "AmosKittens.h"
+
 #include "amosString.h"
 
 enum
@@ -416,7 +417,7 @@ unsigned int stdAmalWriterJump (	struct kittyChannel *channel, struct amalTab *s
 	char *d;
 	bool is_autotest = false;
 
-	if (parenthesis_count) if ( parenthesis[parenthesis_count-1]  == id_autotest ) is_autotest = true;
+	if (instance.parenthesis_count) if ( parenthesis[instance.parenthesis_count-1]  == id_autotest ) is_autotest = true;
 
 	if (is_autotest)
 	{
@@ -627,7 +628,7 @@ unsigned int AmalAutotest ( struct kittyChannel *channel, struct amalTab *self,
 				struct amalWriterData *data,
 				unsigned int num)
 {
-	parenthesis[parenthesis_count]  = id_autotest ;
+	parenthesis[instance.parenthesis_count]  = id_autotest ;
 	return 0;
 }
 
@@ -641,12 +642,12 @@ unsigned int  stdAmalWriterParenthsesStart( struct kittyChannel *channel, struct
 			(unsigned int) &call_array[0] - (unsigned int) channel -> amalProg.call_array, 
 			self->name );
 
-	printf("parenthesis[%d] is %d\n", parenthesis_count, parenthesis[parenthesis_count]);
+	printf("parenthesis[%d] is %d\n", instance.parenthesis_count, parenthesis[instance.parenthesis_count]);
 
-	if (parenthesis[parenthesis_count] == id_autotest)
+	if (parenthesis[instance.parenthesis_count] == id_autotest)
 	{
-		parenthesis_count++;
-		parenthesis[parenthesis_count] = id_void;
+		instance.parenthesis_count++;
+		parenthesis[instance.parenthesis_count] = id_void;
 
 
 		call_array[0] = autotest_start;
@@ -657,8 +658,8 @@ unsigned int  stdAmalWriterParenthsesStart( struct kittyChannel *channel, struct
 		return 2;
 	}
 
-	parenthesis_count++;
-	parenthesis[parenthesis_count] = id_void;
+	instance.parenthesis_count++;
+	parenthesis[instance.parenthesis_count] = id_void;
 
 	call_array[0] = self -> call;
 	channel -> next_arg = true;
@@ -677,11 +678,11 @@ unsigned int stdAmalWriterParenthsesEnd ( struct kittyChannel *channel, struct a
 			(unsigned int) &call_array[0] - (unsigned int) channel -> amalProg.call_array, 
 			self->name );
 
-	if (parenthesis_count) parenthesis_count--;
+	if (instance.parenthesis_count) instance.parenthesis_count--;
 
-	printf("parenthesis[%d] is %d\n", parenthesis_count, parenthesis[parenthesis_count]);
+//	printf("parenthesis[%d] is %d\n", instance.parenthesis_count, parenthesis[instance.parenthesis_count]);
 
-	switch ( parenthesis[parenthesis_count] )
+	switch ( parenthesis[instance.parenthesis_count] )
 	{
 		case id_autotest:
 
@@ -697,7 +698,7 @@ unsigned int stdAmalWriterParenthsesEnd ( struct kittyChannel *channel, struct a
 
 					call_array[0] = 0;	// end of autotest ;-)
 
-					parenthesis[parenthesis_count] = id_void;
+					parenthesis[instance.parenthesis_count] = id_void;
 
 				return 1;
 			}
@@ -710,7 +711,7 @@ unsigned int stdAmalWriterParenthsesEnd ( struct kittyChannel *channel, struct a
 
 				call_array[0] = self -> call;
 				channel -> next_arg = false;
-				parenthesis[parenthesis_count] = id_void;
+				parenthesis[instance.parenthesis_count] = id_void;
 				return 1;
 			}
 
@@ -724,7 +725,7 @@ unsigned int stdAmalWriterParenthsesEnd ( struct kittyChannel *channel, struct a
 
 				call_array[0] = self -> call;
 				channel -> next_arg = false;
-				parenthesis[parenthesis_count] = id_void;
+				parenthesis[instance.parenthesis_count] = id_void;
 				return 1;
 			}
 
@@ -1347,12 +1348,12 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 
 	// setup default stack of 500.
 
-	channel -> argStack = (int *) malloc( sizeof(int) * 500 );
+	channel -> argStack = allocType(int,500);
 	channel -> argStackCount = 0;
 
 	// setup callback buffer.
 
-	channel -> progStack = (struct amalCallBack *) malloc(sizeof(struct amalCallBack *)*500);
+	channel -> progStack = allocStruct(amalCallBack,500);
 	channel -> progStackCount = 0;
 
 	channel -> amalProg.amalProgCounter = channel -> amalProg.call_array;

@@ -2,11 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <vector>
+
 #include <proto/exec.h>
 #include <proto/dos.h>
-#include "stack.h"
-#include "amosKittens.h"
-#include <vector>
+#include <proto/retroMode.h>
+
+#include <amosKittens.h>
+#include <stack.h>
+
 #include <proto/retroMode.h>
 #include "amoskittens.h"
 #include "commandsbanks.h"
@@ -24,7 +28,7 @@ extern std::vector<struct label> labels;
 
 extern struct retroScreen *screens[8] ;
 extern struct globalVar globalVars[1000];
-extern int global_var_count;
+extern int var_count[2];
 extern char *dir_first_pattern ;
 extern struct retroSprite *sprite ;
 extern struct retroSprite *icons ;
@@ -35,7 +39,6 @@ extern std::vector<struct amosMenuItem *> menuitems;
 extern std::vector<struct amos_selected> amosSelected;
 extern std::vector<struct defFn> defFns;
 extern std::vector<struct kittyBank> kittyBankList;
-extern std::vector<struct wave *> waves;
 extern std::vector<struct kittyDevice> deviceList;
 extern std::vector<struct kittyLib> libsList;
 
@@ -69,7 +72,7 @@ void clean_up_menus()
 			item -> str = NULL;
 			if (item -> key) free (item -> key);
 			item -> key = NULL;
-			free(item);
+			freeStruct(item);
 		}
 		
 		menuitems.erase( menuitems.begin() );
@@ -77,56 +80,79 @@ void clean_up_menus()
 }
 
 
-void clear_local_vars( int proc )
+
+void free_local_var(struct kittyData *var)
 {
-	int n;
-	struct kittyData *var;
-
-	for (n=0;n<global_var_count;n++)
+	switch (var->type)
 	{
-		if (globalVars[n].proc == proc)
-		{
-			var = &globalVars[n].var;
+		case type_int:
+			var -> integer.value = 0;
+			break;
 
-			switch (var->type)
-			{
-				case type_int:
-					var -> integer.value = 0;
-					break;
+		case type_float:
+			var -> decimal.value = 0;
+			break;
 
-				case type_float:
-					var -> decimal.value = 0;
-					break;
+		case type_string:
+			if (var->str) freeString(var->str);
+			var->str = NULL;
+			break;
 
-				case type_string:
-					if (var->str) free(var->str);
-					var->str = NULL;
-					break;
+		case type_int | type_array:
+		case type_float | type_array:
+		case type_string | type_array:
 
-				case type_int | type_array:
-				case type_float | type_array:
-				case type_string | type_array:
-
-					if (var -> sizeTab) free( var -> sizeTab);
-	 				if (var->str) free (var->str);
-					var -> sizeTab = NULL;
-					var->str = NULL;
-					break;
-
-			}
-		}
+			if (var -> sizeTab) freeStruct( var -> sizeTab);
+	 		if (var->str) freeString (var->str);
+			var -> sizeTab = NULL;
+			var->str = NULL;
+			break;
 	}
 }
+
+void setup_local_var(struct kittyData *var)
+{
+	switch (var->type)
+	{
+		case type_int:
+			var -> integer.value = 0;
+			break;
+
+		case type_float:
+			var -> decimal.value = 0;
+			break;
+
+		case type_string:
+			if (var->str) freeString(var->str);
+			var->str = NULL;
+			break;
+
+		case type_int | type_array:
+		case type_float | type_array:
+		case type_string | type_array:
+
+			if (var -> sizeTab) freeStruct( var -> sizeTab);
+	 		if (var->str) freeString (var->str);
+			var -> sizeTab = NULL;
+			var->str = NULL;
+			break;
+	}
+}
+
+
+#warning wont clean up local vars
 
 void clean_up_vars()
 {
 	struct kittyData *var;
 	int n;
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		if (globalVars[n].varName) 
 		{
+			//printf("globalVars[%d].varName='%s'\n",n,globalVars[n].varName);
+
 			free(globalVars[n].varName);
 			globalVars[n].varName = NULL;
 		}
@@ -136,7 +162,8 @@ void clean_up_vars()
 		switch (var -> type)
 		{
 			case type_string:
- 				if (var->str) free (var->str);
+
+ 				if (var->str) freeString (var->str);
 				break;
 
 			case type_int | type_array:
@@ -144,8 +171,8 @@ void clean_up_vars()
 			case type_string | type_array:
 
 				// free
-				if (var -> sizeTab) free( var -> sizeTab);
- 				if (var->str) free (var->str);
+				if (var -> sizeTab) freeStruct( var -> sizeTab);
+ 				if (var->str) sys_free(var->str);
 				break;
 		}
 
@@ -154,25 +181,14 @@ void clean_up_vars()
 		var->str = NULL;
 	}
 
-	global_var_count = 0;
+	var_count[0] = 0;
 }
 
 void clean_up_stack()
 {
-	int n;
-
-	for (n=0; n<=stack;n++)
-	{
-		switch( kittyStack[n].type )
-		{		
-			case type_string:
-				if (kittyStack[n].str) free (kittyStack[n].str);
-				kittyStack[n].str = NULL;
-				kittyStack[n].type = 0;			
-				break;
-		}
-	}
-	stack = 0;
+	popStack( instance_stack );
+	printf("after clean up stack is: %d\n", instance_stack);
+	setStackNone();
 }
 
 void clean_up_files()
@@ -213,16 +229,6 @@ void clean_up_libs()
 		kFreeLib( libsList[0].id );
 	}
 }
-
-void clean_up_waves()
-{
-	while (waves.size())
-	{
-		if( waves[0]) free( waves[0] );
-		waves.erase(waves.begin() );
-	}
-}
-
 
 struct kittyBank *get_first_user_bank()
 {
@@ -322,12 +328,8 @@ void clean_up_special()
 
 	if (zones)
 	{
-		free(zones);
+		freeStruct(zones);
 		zones = NULL;
 	}
-
-	dprintf("clean up waves\n");
-
-	clean_up_waves();
 }
 

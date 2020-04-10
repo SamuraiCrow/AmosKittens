@@ -32,16 +32,12 @@ extern struct globalVar globalVars[1000];
 extern std::vector<struct lineAddr> linesAddress;
 extern std::vector<struct label> labels;
 extern std::vector<struct kittyBank> kittyBankList;
-extern std::vector<struct wave *> waves;
 extern std::vector<int> collided;
 
 extern ChannelTableClass *channels;
-extern int global_var_count;
+extern int var_count[2];
 
-extern struct retroScreen *screens[8] ;
 extern  std::vector<struct retroSpriteObject *> bobs;
-extern struct retroSprite *sprite;
-extern int current_screen ;
 
 struct lineFromPtr lineFromPtr;
 
@@ -79,11 +75,11 @@ char *_machinePeek(struct glueCommands *data, int nextToken);
 char *_machineDeek( struct glueCommands *data, int nextToken);
 char *_machineLeek( struct glueCommands *data, int nextToken);
 char *_bankStart(struct glueCommands *data, int nextToken);
-char *_chr(struct glueCommands *data, int nextToken);
+char *_cmdChrStr(struct glueCommands *data, int nextToken);
+char *_cmdMidStr(struct glueCommands *data, int nextToken);
+char *_cmdLeftStr(struct glueCommands *data, int nextToken);
+char *_cmdRightStr(struct glueCommands *data, int nextToken);
 char *_gfxPoint(struct glueCommands *data, int nextToken);
-char *_mid(struct glueCommands *data, int nextToken);
-char *_left(struct glueCommands *data, int nextToken);
-char *_right(struct glueCommands *data, int nextToken);
 char *_cmdStr(struct glueCommands *data, int nextToken);
 char *_while(struct glueCommands *data, int nextToken);
 char *_repeat(struct glueCommands *data, int nextToken);
@@ -109,6 +105,8 @@ char *_setVar( struct glueCommands *data, int nextToken );
 char *_set_amreg_fn( struct glueCommands *data, int nextToken );
 char *_set_amreg_channel_fn( struct glueCommands *data, int nextToken );
 char *_gfxColour( struct glueCommands *data, int nextToken );
+char *_textPrint( struct glueCommands *data, int nextToken );
+char *_textUsing( struct glueCommands *data, int nextToken );
 
 
 struct stackDebugSymbol
@@ -126,7 +124,8 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_mulData,"_mulData"},
 	{_orData,"_orData"},
 	{_andData,"_andData"},
-	{_print,"_print"},
+	{_textPrint,"_textPrint"},
+	{_textUsing,"_textUsing"},
 	{_setVar, "_setVar"},
 	{_for,"_for" },
 	{_do,"_do" },
@@ -138,11 +137,11 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_machineDeek,"Deek" },
 	{_machineLeek,"Leek" },
 	{_bankStart,"Start" },
-	{_chr,"Chr$" },
+	{_cmdChrStr,"Chr$" },
 	{_gfxPoint,"Point" },
-	{_mid,"Mid" },
-	{_left,"Left" },
-	{_right,"Right" },
+	{_cmdMidStr,"Mid" },
+	{_cmdLeftStr,"Left" },
+	{_cmdRightStr,"Right" },
 	{_cmdStr,"Str$" },
 	{_ifSuccess,"if Success" },
 	{_ifNotSuccess,"if Not Success"},
@@ -171,10 +170,10 @@ struct stackDebugSymbol stackDebugSymbols[] =
 	{_machineDREG,"_machineDREG"},
 	{_gfxLogic,"_gfxLogic"},
 	{_gfxScreenCopy,"_gfxScreenCopy"},
+	{_gfxColour, "Colour" },
 	{_setVar,"set var"},
 	{_set_amreg_fn,"_set_amreg_fn" },
 	{_set_amreg_channel_fn,"_set_amreg_channel_fn" },
-	{_gfxColour, "Colour" },
 	{NULL, NULL}
 };
 
@@ -208,11 +207,11 @@ void dump_sprite()
 	int image;
 	struct retroFrameHeader *frame;
 
-	if (sprite)
+	if (instance.sprites)
 	{
-		for (image=0;image<sprite -> number_of_frames;image++)
+		for (image=0;image<instance.sprites -> number_of_frames;image++)
 		{
-			frame = &sprite -> frames[image];
+			frame = &instance.sprites -> frames[image];
 
 			printf("sprite %-3d, w %-3d, h %-3d, bpr %-3d, hotspot x %-3d, hotspot y %-3d, data %08x, mask %08x - alpha %d\n", 
 				image+1,
@@ -248,7 +247,7 @@ unsigned int vars_crc()
 	int n;
 	unsigned int crc = 0;
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		if (globalVars[n].varName == NULL) return 0;
 		crc ^= str_crc( globalVars[n].varName );
@@ -260,7 +259,10 @@ unsigned int mem_crc( char *mem, uint32_t size )
 {
 	uint32_t n;
 	unsigned int crc = 0;
-	for (n=0;n<size;n++) crc ^= mem[n] << (n % 24);
+	for (n=0;n<size;n++) 
+	{
+		crc ^= mem[n] << (n % 24);
+	}
 	return crc;
 }
 
@@ -273,31 +275,36 @@ void dump_var( int n )
 		switch (globalVars[n].var.type)
 		{
 			case type_int:
-				printf("%d -- %d::%s%s=%d\n",n,
+				printf("%d -- %d:%d:%s%s=%d\n",n,
 					globalVars[n].proc, 
+					globalVars[n].localIndex,
 					globalVars[n].isGlobal ? "Global " : "",
 					globalVars[n].varName, globalVars[n].var.integer.value );
 				break;
 			case type_float:
-				printf("%d -- %d::%s%s=%0.2lf\n",n,
+				printf("%d -- %d:%d:%s%s=%0.2lf\n",n,
 					globalVars[n].proc, 
+					globalVars[n].localIndex,
 					globalVars[n].isGlobal ? "Global " : "",
 					globalVars[n].varName, globalVars[n].var.decimal.value );
 				break;
 			case type_string:
-				printf("%d -- %d::%s%s=%c%s%c\n",n,
+				printf("%d -- %d:%d:%s%s=%c%s%c\n",n,
 					globalVars[n].proc, 
+					globalVars[n].localIndex,
 					globalVars[n].isGlobal ? "Global " : "",
 					globalVars[n].varName, 34, globalVars[n].var.str ? &(globalVars[n].var.str -> ptr) : "NULL", 34 );
 				break;
 			case type_proc:
 
-				if (globalVars[n].var.procDataPointer == 0)
+				if (globalVars[n].procDataPointer == 0)
 				{
 					getLineFromPointer( globalVars[n].var.tokenBufferPos );
 
-					printf("%d -- %d::%s%s[]=%04X (line %d)\n",n,
-						globalVars[n].proc, "Proc ",
+					printf("%d -- %d:%d:%s%s[]=%04X (line %d)\n",n,
+						globalVars[n].proc, 
+						globalVars[n].localIndexSize, 
+						"Proc ",					
 						globalVars[n].varName, 
 						globalVars[n].var.tokenBufferPos, lineFromPtr.line );
 				}
@@ -306,20 +313,21 @@ void dump_var( int n )
 					int tokenBufferLine;
 					getLineFromPointer( globalVars[n].var.tokenBufferPos );
 					tokenBufferLine = lineFromPtr.line;
-					getLineFromPointer( globalVars[n].var.procDataPointer );
+					getLineFromPointer( globalVars[n].procDataPointer );
 
 					printf("%d -- %d::%s%s[]=%04X (line %d)  --- data read pointer %08x (line %d)\n",n,
 						globalVars[n].proc, "Proc ",
 						globalVars[n].varName, 
 						globalVars[n].var.tokenBufferPos, tokenBufferLine,
-						globalVars[n].var.procDataPointer, lineFromPtr.line );
+						globalVars[n].procDataPointer, lineFromPtr.line );
 				}
 
 				break;
 			case type_int | type_array:
 
-				printf("%d -- %d::%s%s(%d)=",n,
+				printf("%d -- %d:%d:%s%s(%d)=",n,
 					globalVars[n].proc, 
+					globalVars[n].localIndex,
 					globalVars[n].isGlobal ? "Global " : "",
 					globalVars[n].varName,
 					globalVars[n].var.count);
@@ -336,8 +344,9 @@ void dump_var( int n )
 				break;
 			case type_float | type_array:
 
-				printf("%d -- %d::%s%s(%d)=",n,
+				printf("%d -- %d:%d:%s%s(%d)=",n,
 					globalVars[n].proc, 
+					globalVars[n].localIndex,
 					globalVars[n].isGlobal ? "Global " : "",
 					globalVars[n].varName,
 					globalVars[n].var.count);
@@ -354,8 +363,9 @@ void dump_var( int n )
 				break;
 			case type_string | type_array:
 
-				printf("%d -- %d::%s%s(%d)=",n,
+				printf("%d -- %d:%d:%s%s(%d)=",n,
 					globalVars[n].proc, 
+					globalVars[n].localIndex,
 					globalVars[n].isGlobal ? "Global " : "",
 					globalVars[n].varName,
 					globalVars[n].var.count);
@@ -384,7 +394,7 @@ void dump_local( int proc )
 {
 	int n;
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		if (globalVars[n].varName == NULL) return;
 
@@ -400,7 +410,7 @@ void dump_global()
 {
 	int n;
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		if (globalVars[n].varName == NULL) return;
 		dump_var( n );
@@ -414,9 +424,8 @@ void dump_prog_stack()
 
 	printf("\nDump prog stack:\n\n");
 
-	for (n=0; n<cmdStack;n++)
+	for (n=0; n<instance.cmdStack;n++)
 	{
-
 		name = findDebugSymbolName( cmdTmp[n].cmd );
 
 		getLineFromPointer(cmdTmp[n].tokenBuffer);
@@ -426,6 +435,7 @@ void dump_prog_stack()
 		printf("cmdTmp[%d].flag = %08x\n", n, cmdTmp[n].flag);
 		printf("cmdTmp[%d].lastVar = %d\n", n, cmdTmp[n].lastVar);
 		printf("cmdTmp[%d].token = %04x\n", n, cmdTmp[n].token);
+		printf("cmdTmp[%d].parenthesis_count = %d\n", n, cmdTmp[n].parenthesis_count);
 		printf("cmdTmp[%d].stack = %d\n\n", n, cmdTmp[n].stack);
 	}
 }
@@ -436,7 +446,7 @@ void dump_stack()
 
 	printf("\nDump stack:\n\n");
 
-	for (n=0; n<=stack;n++)
+	for (n=0; n<=instance.stack;n++)
 	{
 		printf("stack[%d]=",n);
 
@@ -491,7 +501,7 @@ bool var_has_name( struct kittyData *var, const char *name )
 {
 	int n;
 
-	for (n=0;n<global_var_count;n++)
+	for (n=0;n<var_count[0];n++)
 	{
 		if (var == &globalVars[n].var)
 		{
@@ -682,7 +692,7 @@ void dump_zones()
 	{
 		if ((zones[z].screen>-1) && (zones[z].screen<8))
 		{
-			if (s = screens[zones[z].screen])
+			if (s = instance.screens[zones[z].screen])
 			{
 				zz = &zones[z];
 				printf ("zone %d at %d,%d to %d,%d - on screen %d\n",z, zz->x0,zz->y0,zz->x1,zz->y1,zz -> screen );
@@ -742,22 +752,23 @@ void dump_channels()
 void dump_screens()
 {
 	int n;
+	struct retroScreen *screen;
 
 	Printf("Screens:\n");
 	for (n=0;n<8;n++)
 	{
-		if (screens[n])
+		if (screen = instance.screens[n])
 		{
 			Printf_iso("screen %3d, dw %3d, dh %3d, rw %3d, rh %3d, display %4d,%4d, offset %4d,%4d, db %s, frame %d, autoback %d, fade_speed %d\n", 
 				n,
-				screens[n]->displayWidth, screens[n]->displayHeight,
-				screens[n]->realWidth,screens[n]->realHeight,
-				screens[n]->scanline_x/2+128,screens[n]->scanline_y/2+50,
-				screens[n]->offset_x,screens[n]->offset_y,
-				screens[n]->Memory[1] ? "Yes" : "No ",
-				screens[n]->double_buffer_draw_frame,
-				screens[n]->autoback,
-				screens[n]->fade_speed);
+				screen->displayWidth, screen->displayHeight,
+				screen->realWidth,screen->realHeight,
+				screen->scanline_x/2+128,screen->scanline_y/2+50,
+				screen->offset_x,screen->offset_y,
+				screen->Memory[1] ? "Yes" : "No ",
+				screen->double_buffer_draw_frame,
+				screen->autoback,
+				screen->fade_speed);
 
 //				dump_pal( screens[n] , 8 );						
 				dump_bobs_on_screen( n );
@@ -765,23 +776,7 @@ void dump_screens()
 	}
 };
 
-void dumpWaves( )
-{
-	unsigned int n,nn;
-	printf("-- waves --\n");
-	for (n=0;n<waves.size();n++)
-	{
-		printf("waves[%d] -> id %d\n",n, waves[n] -> id);
 
-		for (nn=0;nn<7;nn++)
-		{
-			printf("waves[%d] -> envels[%d] = {%d,%d,%d}\n",n, nn,
-				waves[n] -> envels[nn].volume, 
-				waves[n] -> envels[nn].startDuration,
-				waves[n] -> envels[nn].duration );
-		}
-	}
-}
 
 #ifdef __amigaos__
 #define IDCMP_COMMON IDCMP_MOUSEBUTTONS | IDCMP_INACTIVEWINDOW | IDCMP_ACTIVEWINDOW  | \

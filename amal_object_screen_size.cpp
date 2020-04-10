@@ -9,6 +9,7 @@
 #include <proto/dos.h>
 #include <libraries/retroMode.h>
 #include <proto/retroMode.h>
+#include <amoskittens.h>
 #endif
 
 #ifdef __linux__
@@ -22,9 +23,6 @@
 #include "AmalCompiler.h"
 #include "channel.h"
 
-extern struct retroVideo *video;
-extern struct retroScreen *screens[8] ;
-
 static int getMax ( void )
 {
 	return 8;
@@ -37,12 +35,12 @@ static int getImage (unsigned int object)
 
 static int getX (unsigned int object)
 {
-	return screens[object]->displayWidth;
+	return instance.screens[object]->displayWidth;
 }
 
 static int getY (unsigned int object)
 {
-	return screens[object]->displayHeight;
+	return instance.screens[object]->displayHeight;
 }
 
 static void setImage (unsigned int object,int image)
@@ -51,28 +49,28 @@ static void setImage (unsigned int object,int image)
 
 static void setX (unsigned int object,int x)
 {
-	screens[object]->displayWidth = x;
+	instance.screens[object]->displayWidth = x;
 
-	retroApplyScreen( screens[object], video, 
-			screens[object] -> scanline_x,
-			screens[object] -> scanline_y,
-			screens[object] -> displayWidth,
-			screens[object] -> displayHeight );
+	retroApplyScreen( instance.screens[object], instance.video, 
+			instance.screens[object] -> scanline_x,
+			instance.screens[object] -> scanline_y,
+			instance.screens[object] -> displayWidth,
+			instance.screens[object] -> displayHeight );
 
-	video -> refreshAllScanlines = TRUE;
+	instance.video -> refreshAllScanlines = TRUE;
 }
 
 static void setY (unsigned int object,int y)
 {
-	screens[object]->displayHeight = y;
+	instance.screens[object]->displayHeight = y;
 
-	retroApplyScreen( screens[object], video, 
-			screens[object] -> scanline_x,
-			screens[object] -> scanline_y,
-			screens[object] -> displayWidth,
-			screens[object] -> displayHeight );
+	retroApplyScreen( instance.screens[object], instance.video, 
+			instance.screens[object] -> scanline_x,
+			instance.screens[object] -> scanline_y,
+			instance.screens[object] -> displayWidth,
+			instance.screens[object] -> displayHeight );
 
-	video -> refreshAllScanlines = TRUE;
+	instance.video -> refreshAllScanlines = TRUE;
 }
 
 static struct retroScreen *getScreen(unsigned int object)

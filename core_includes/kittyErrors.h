@@ -1,12 +1,4 @@
 
-struct errorAt
-{
-	int code;
-	int trapCode;
-	char *posResume;
-	char *pos;
-	bool newError;
-};
 
 struct error
 {
@@ -17,15 +9,10 @@ struct error
 extern struct error errorsTestTime[];
 extern struct error errorsRunTime[];
 
-extern char *tokenBufferResume;
-
-#ifdef show_error_at_file_yes
-#define setError( _code, _pos ) { printf("ERROR set at %s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__); kittyError.code = _code; kittyError.pos = _pos; kittyError.posResume=tokenBufferResume; kittyError.newError = true; getchar(); }
-#else
-#define setError( _code, _pos ) {  kittyError.code = _code; kittyError.pos = _pos; kittyError.posResume=tokenBufferResume;  kittyError.newError = true; }
+#ifdef __amoskittens__
+extern void setError( int _code, char * _pos ) ;
 #endif
 
-extern struct errorAt kittyError;
 extern char *cmdERRN(struct nativeCommand *cmd, char *tokenBuffer);
 extern void printError( struct errorAt *thisError, struct error *tab );
 

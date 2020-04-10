@@ -142,7 +142,7 @@ public:
 	{
 		used = 0;
 		allocated = 10;
-		tab = (struct kittyChannel **) malloc(sizeof(struct kittyChannel *) * allocated );
+		tab = allocStruct(kittyChannel *,allocated);
 	}
 
 	~ChannelTableClass();
@@ -151,7 +151,7 @@ public:
 	struct kittyChannel *getChannel( int channel );
 	struct kittyChannel *item( int index );
 	struct kittyChannel *findChannelByItem(int token, int number);
-	int _size();
+	unsigned int _size();
 };
 
 extern void setChannelAmal( struct kittyChannel *item, struct stringData *str);

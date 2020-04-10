@@ -5,12 +5,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <vector>
+#include <string>
+#include <iostream>
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/asl.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
 #endif
 
 #ifdef __linux__
@@ -18,19 +22,14 @@
 #include "os/linux/stuff.h"
 #endif
 
-#include <vector>
-#include <string>
-#include <iostream>
+#include <amosKittens.h>
+#include <stack.h>
 
-#include "stack.h"
-#include "amosKittens.h"
 #include "commandsDevice.h"
 #include "commands.h"
 #include "debug.h"
 #include "kittyErrors.h"
 #include "amosString.h"
-
-extern int last_var;
 
 extern std::vector<struct kittyDevice> deviceList;
 
@@ -106,18 +105,18 @@ void kFreeDevice( int id )
 
 char *_deviceDevOpen( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 5:
 				{
-					int id = getStackNum( stack-4 );
-					struct stringData *name = getStackString( stack-3  );
-					int ioLength = getStackNum( stack-2 );
-					int unitNumber = getStackNum( stack-1 );
-					int flags = getStackNum( stack );
+					int id = getStackNum(__stack-4 );
+					struct stringData *name = getStackString(__stack-3  );
+					int ioLength = getStackNum(__stack-2 );
+					int unitNumber = getStackNum(__stack-1 );
+					int flags = getStackNum(__stack );
 					struct kittyDevice dev;
 
 					kFreeDevice( id );
@@ -146,7 +145,7 @@ char *_deviceDevOpen( struct glueCommands *data, int nextToken )
 						}
 					}
 
-					popStack( stack - data -> stack );
+					popStack(__stack - data -> stack );
 
 					if (dev.error != 0) 
 					{
@@ -159,7 +158,7 @@ char *_deviceDevOpen( struct glueCommands *data, int nextToken )
 				}
 				break;
 		default:
-				popStack( stack - data -> stack );
+				popStack(__stack - data -> stack );
 				setError(22,data-> tokenBuffer);
 				break;
 	}
@@ -177,17 +176,17 @@ char *deviceDevOpen(struct nativeCommand *device, char *tokenBuffer)
 
 char *_deviceDevClose( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 1:
-			kFreeDevice( getStackNum( stack) );
+			kFreeDevice( getStackNum(__stack) );
 			break;
 		default:
-			popStack( stack - data -> stack );
+			popStack(__stack - data -> stack );
 			setError(23,data-> tokenBuffer);
 			break;
 	}
@@ -204,7 +203,7 @@ char *deviceDevClose(struct nativeCommand *device, char *tokenBuffer)
 
 char *_deviceDevBase( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -212,7 +211,7 @@ char *_deviceDevBase( struct glueCommands *data, int nextToken )
 	{
 		case 1:
 			{
-				int id = getStackNum( stack );
+				int id = getStackNum(__stack );
 				struct kittyDevice *dev;
 
 				dev = kFindDevice( id );
@@ -228,7 +227,7 @@ char *_deviceDevBase( struct glueCommands *data, int nextToken )
 				}
 			}
 		default:
-			popStack( stack - data -> stack );
+			popStack(__stack - data -> stack );
 			setError(23,data-> tokenBuffer);
 			break;
 	}
@@ -245,7 +244,7 @@ char *deviceDevBase(struct nativeCommand *device, char *tokenBuffer)
 
 char *_deviceDevCheck( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -253,7 +252,7 @@ char *_deviceDevCheck( struct glueCommands *data, int nextToken )
 	{
 		case 1:
 			{
-				int id = getStackNum( stack );
+				int id = getStackNum(__stack );
 				struct kittyDevice *dev;
 
 				dev = kFindDevice( id );
@@ -270,7 +269,7 @@ char *_deviceDevCheck( struct glueCommands *data, int nextToken )
 				}
 			}
 		default:
-			popStack( stack - data -> stack );
+			popStack(__stack - data -> stack );
 			setError(23,data-> tokenBuffer);
 			break;
 	}
@@ -288,7 +287,7 @@ char *deviceDevCheck(struct nativeCommand *device, char *tokenBuffer)
 
 char *_deviceDevDo( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -296,8 +295,8 @@ char *_deviceDevDo( struct glueCommands *data, int nextToken )
 	{
 		case 1:
 			{
-				int id = getStackNum( stack-1 );
-				int ioCmd = getStackNum( stack );
+				int id = getStackNum(__stack-1 );
+				int ioCmd = getStackNum(__stack );
 				struct kittyDevice *dev;
 
 				dev = kFindDevice( id );
@@ -313,7 +312,7 @@ char *_deviceDevDo( struct glueCommands *data, int nextToken )
 
 			break;
 		default:
-			popStack( stack - data -> stack );
+			popStack(__stack - data -> stack );
 			setError(23,data-> tokenBuffer);
 			break;
 	}
@@ -329,7 +328,7 @@ char *deviceDevDo(struct nativeCommand *device, char *tokenBuffer)
 
 char *_deviceDevSend( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -337,8 +336,8 @@ char *_deviceDevSend( struct glueCommands *data, int nextToken )
 	{
 		case 2:
 			{
-				int id = getStackNum( stack-1 );
-				int ioCmd = getStackNum( stack );
+				int id = getStackNum(__stack-1 );
+				int ioCmd = getStackNum(__stack );
 				struct kittyDevice *dev;
 
 				dev = kFindDevice( id );
@@ -359,7 +358,7 @@ char *_deviceDevSend( struct glueCommands *data, int nextToken )
 			break;
 	}
 
-	popStack( stack - data -> stack );
+	popStack(__stack - data -> stack );
 	return NULL;
 }
 
@@ -372,7 +371,7 @@ char *deviceDevSend(struct nativeCommand *device, char *tokenBuffer)
 
 char *_deviceDevAbort( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
@@ -380,7 +379,7 @@ char *_deviceDevAbort( struct glueCommands *data, int nextToken )
 	{
 		case 1:
 			{
-				int id = getStackNum( stack );
+				int id = getStackNum(__stack );
 				struct kittyDevice *dev;
 
 				dev = kFindDevice( id );
@@ -403,7 +402,7 @@ char *_deviceDevAbort( struct glueCommands *data, int nextToken )
 			}
 
 		default:
-			popStack( stack - data -> stack );
+			popStack(__stack - data -> stack );
 			setError(23,data-> tokenBuffer);
 			break;
 	}

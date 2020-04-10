@@ -598,16 +598,13 @@ struct esc_cmd
 	void (*fn) (struct retroScreen *screen,struct esc_data *, int, int, char );
 };
 
-extern int current_screen;
-extern struct retroScreen *screens[8] ;
-
 void esc_zone (struct retroScreen *screen,struct esc_data *data, int x1, int y1, char c )
 {
 	int z = c - '0';
 
 	if ((z>-1)&&(z<zones_allocated))
 	{
-		zones[z].screen = current_screen ;
+		zones[z].screen = instance.current_screen ;
 		zones[z].x0 = data -> x * 8;
 		zones[z].y0 = data -> y * 8;
 		zones[z].x1 = x1*8;
@@ -711,7 +708,7 @@ int what_esc_code(const char *txt)
 }
 
 
-void limit_location(struct retroScreen *screen )
+void limit_textwindow_location(struct retroScreen *screen )
 {
  	int x;
 	int y;
@@ -801,7 +798,7 @@ void draw_tab(struct retroScreen *screen)
 			textWindow -> locateY , 20, screen -> pen, screen -> paper, false, 0, 0);
 
 		textWindow -> locateX ++;
-		limit_location(screen);
+		limit_textwindow_location(screen);
 		n++;
 	}
 }
@@ -915,7 +912,7 @@ void _my_print_text(struct retroScreen *screen, char *text, int maxchars, bool u
 					textWindow -> locateX ++;
 		}
 
-		limit_location( screen );
+		limit_textwindow_location( screen );
 	}
 }
 

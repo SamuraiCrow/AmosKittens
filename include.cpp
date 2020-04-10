@@ -13,6 +13,7 @@
 #if defined(__amigaos__) || defined(__aros__) || defined(__morphos__) 
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
 #endif
 
 #ifdef __linux__
@@ -344,7 +345,7 @@ void free_file(struct fileContext *file)
 	file -> path = NULL;
 	file -> start = NULL;
 	file -> bank = NULL;
-	free(file);
+	freeStruct(file);
 }
 
 void clean_up_inc_files()
@@ -372,7 +373,7 @@ void init_fileContext( struct fileContext *file )
 
 struct fileContext *new_fileContext( int id, unsigned int newFileSize )
 {
-	struct fileContext *file = (struct fileContext *) malloc(sizeof(struct fileContext));
+	struct fileContext *file = allocStruct(fileContext,1);
 	
 	if (file)
 	{

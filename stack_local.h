@@ -1,34 +1,9 @@
 
-extern int stack;
-
-extern void	remove_parenthesis(int black_at_stack );
-extern void	unLockPara();
-
-extern void	setStackParenthesis();
-#define 		setStackPtr(adr) setStackNum((int) adr) 
-extern void	setStackNum( int num );
-extern void	setStackDecimal( double decimal );
-extern void	setStackStr( struct stringData *str );
-extern void	setStackStrDup(struct stringData *str);
-extern void	setStackNone( void );
-extern unsigned short getLastProgStackToken();
-
-#define getLastProgStackFn()	((cmdStack) ? cmdTmp[cmdStack-1].cmd : NULL)
-#define getLastProgStackToken() ((cmdStack) ? cmdTmp[cmdStack-1].token : 0 )
-
-#define setStackHiddenCondition()			\
-			kittyStack[stack].str = NULL;		\
-			kittyStack[stack].state = state_hidden_subData;	\
-			stack++;
-
-extern int		getStackNum( int n );
-extern double	getStackDecimal( int n );
-extern struct stringData *getStackString( int n );
-
+extern void remove_parenthesis(int black_at_stack );
+extern void unLockPara();
 extern bool stackStrAddValue(struct kittyData *item0, struct kittyData *item1);
 extern bool stackStrAddDecimal(struct kittyData *item0, struct kittyData *item1);
 extern bool stackStrAddStr(struct kittyData *item0,	struct kittyData *item1);
-
 extern bool stackMoreStr(struct kittyData *item0,	struct kittyData *item1);
 extern bool stackLessStr(struct kittyData *item0,	struct kittyData *item1);
 extern bool stackMoreOrEqualStr(struct kittyData *item0,struct kittyData *item1);
@@ -37,17 +12,19 @@ extern bool stackEqualStr(struct kittyData *item0, struct kittyData *item1);
 extern bool stackNotEqualStr(struct kittyData *item0, struct kittyData *item1);
 extern bool stackMoreOrEqualStr(struct kittyData *item0, struct kittyData *item1);
 extern bool stackLessOrEqualStr(struct kittyData *item0, struct kittyData *item1);
-
-extern void popStack(int n);
 extern void correct_for_hidden_sub_data();
+extern unsigned short getLastProgStackToken();
+
+#define getLastProgStackFn()	((cmdStack) ? cmdTmp[cmdStack-1].cmd : NULL)
+#define getLastProgStackToken() ((cmdStack) ? cmdTmp[cmdStack-1].token : 0 )
+
+#define setStackHiddenCondition()			\
+			kittyStack[__stack].str = NULL;		\
+			kittyStack[__stack].state = state_hidden_subData;	\
+			stack++;
 
 extern char *flushCmdParaStack( int nextToken );
 extern bool dropProgStackToProc( char *(*fn) (struct glueCommands *data, int nextToken ) );
 extern bool dropProgStackToFlag( int flag );
 extern bool dropProgStackAllFlag( int flag );
-
-extern void stack_get_if_int( int n, int *ret );
-extern bool stack_is_number( int n );
-
-#define incStack 	stack++; kittyStack[stack].state = state_none;	kittyStack[stack].type = type_none; 
-
+extern void	setStackParenthesis();

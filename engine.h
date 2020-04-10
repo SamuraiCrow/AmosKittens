@@ -14,9 +14,6 @@ extern void atomic_add_key( ULONG eventCode, ULONG Code, ULONG Qualifier, char C
 extern void run_amal_scripts();
 
 extern bool engine_wait_key;
-extern int engine_mouse_key;
-extern int engine_mouse_x;
-extern int engine_mouse_y;
 extern uint32_t engine_back_color;
 extern bool engine_stopped;
 extern bool engine_mouse_hidden;
@@ -24,9 +21,6 @@ extern bool engine_mouse_hidden;
 extern uint32_t engine_update_flags ;
 
 extern bool synchro_on;
-
-extern struct retroVideo *video;
-extern struct retroScreen *screens[8] ;
 
 #define hardware_upper_left 128
 #define hardware_upper_top 50

@@ -36,6 +36,7 @@ extern char *asl();
 #include "commandsgui.h"
 #include "commandsDevice.h"
 #include "commandsLibs.h"
+#include "commandsEditor.h"
 
 char *cmdNewLine(nativeCommand *cmd, char *ptr);
 char *cmdVar(nativeCommand *cmd, char *ptr);
@@ -148,7 +149,7 @@ struct nativeCommand nativeCommands[]=
 	{0x0482, "LPrint",0,textPrint },
 	{0x048E,"Input$(n)",0,cmdInputStrN },
 	{0x049C,"Input$(f,n)", 0, discInputStrFile },
-	{0x04A6,"Using",0,textPrintUsing },
+	{0x04A6,"Using",0,textUsing },
 	{0x04B2, "Input #",0, discInputIn },
 	{0x04BE, "Line Input #",0,discLineInputFile },
 	{0x04D0, "Input",0,cmdInput },
@@ -156,22 +157,22 @@ struct nativeCommand nativeCommands[]=
 	{0x04EC,"Run", 0, discRun },
 	{0x04F6, "Run", 0, discRun },
 	{0x04FE, "Set Buffers", 0, cmdSetBuffers },
-	{0x050E, "Mid$",0,cmdMid },
-	{0x051E, "Mid$(a$,start)",0, cmdMid },
-	{0x0528, "Left$",0,cmdLeft },
-	{0x0536, "Right$",0,cmdRight },
-	{0x0546, "Flip$",0, cmdFlip },
-	{0x0552, "Chr$",0, cmdChr },
-	{0x055E, "Space$",0, cmdSpace },
-	{0x056C, "String$", 0, cmdString },
-	{0x057C, "Upper$",0, cmdUpper },
-	{0x058A, "Lower$",0, cmdLower },
+	{0x050E, "Mid$",0,cmdMidStr },
+	{0x051E, "Mid$(a$,start)",0, cmdMidStr },
+	{0x0528, "Left$",0,cmdLeftStr },
+	{0x0536, "Right$",0,cmdRightStr },
+	{0x0546, "Flip$",0, cmdFlipStr },
+	{0x0552, "Chr$",0, cmdChrStr },
+	{0x055E, "Space$",0, cmdSpaceStr },
+	{0x056C, "String$", 0, cmdStringStr },
+	{0x057C, "Upper$",0, cmdUpperStr },
+	{0x058A, "Lower$",0, cmdLowerStr },
 	{0x0598, "Str$",0, cmdStr },
 	{0x05A4, "Val",0, cmdVal },
-	{0x05AE, "Bin$",0,cmdBin },
-	{0x05BA, "Bin$(num,chars)", 0, cmdBin },
-	{0x05C4, "Hex$",0,cmdHex },
-	{0x05D0, "Hex$(num,chars)",0,cmdHex },
+	{0x05AE, "Bin$",0,cmdBinStr },
+	{0x05BA, "Bin$(num,chars)", 0, cmdBinStr },
+	{0x05C4, "Hex$",0,cmdHexStr },
+	{0x05D0, "Hex$(num,chars)",0,cmdHexStr },
 	{0x05DA, "Len",0, cmdLen },
 	{0x05E4, "Instr",0, cmdInstr },
 	{0x05F4, "Instr",0, cmdInstr },	// POS=Instr(ITEM$,"@",CHARNUM)
@@ -655,12 +656,12 @@ struct nativeCommand nativeCommands[]=
 //	{0x262A,"Frame Length",0,gfxFrameLength},	//	Frame Length(n)
 //	{0x263E,"Frame Length",0,gfxFrameLength},	//	Frame Length(n,n)
 //	{0x2664,"Wait Frame",0,gfxWaitFrame},		//	Wait Frame n
-//	{0x2676,"Call Editor", 0, cmdCallEditor },
-//	{0x268A,"Call Editor", 0, cmdCallEditor },
-//	{0x2694,"Call Editor", 0, cmdCallEditor },
-//	{0x26A0,"Ask Editor", 0, cmdAskEditor  },
-//	{0x26B2,"Ask Editor", 0, cmdAskEditor  },
-//	{0x26BC,"Ask Editor", 0, cmdAskEditor  },
+	{0x2676,"Call Editor", 0, cmdCallEditor },
+	{0x268A,"Call Editor", 0, cmdCallEditor },
+	{0x2694,"Call Editor", 0, cmdCallEditor },
+	{0x26A0,"Ask Editor", 0, cmdAskEditor  },
+	{0x26B2,"Ask Editor", 0, cmdAskEditor  },
+	{0x26BC,"Ask Editor", 0, cmdAskEditor  },
 	{0x26C8,"Erase Temp",0,bankEraseTemp },
 	{0x26D8,"Erase All", 0, bankEraseAll },
 	{0x26E8,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$)

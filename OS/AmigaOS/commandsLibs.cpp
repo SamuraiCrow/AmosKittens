@@ -4,24 +4,22 @@
 #include <string.h>
 #include <stdint.h>
 #include <vector>
-#include "commandsLibs.h"
-#include "kittyErrors.h"
-#include "debug.h"
-#include "stack.h"
 
 #ifdef __amigaos4__
 #include <proto/exec.h>
+#include <proto/retroMode.h>
 #include <exec/emulation.h>
 #include <proto/dos.h>
 extern unsigned int regs[16];
 #endif
 
-
-
+#include "commandsLibs.h"
+#include "kittyErrors.h"
+#include "debug.h"
+#include "stack.h"
 #include "amosKittens.h"
 
 extern std::vector<struct kittyLib> libsList;
-
 
 struct kittyLib *kFindLib( int id )
 {
@@ -58,21 +56,18 @@ void kFreeLib( int id )
 	}
 }
 
-
-extern int last_var;
-
 char *_libLibOpen( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 3:
 				{
-					int id = getStackNum( stack-2 );
-					struct stringData *name = getStackString( stack-1  );
-					int ver = getStackNum( stack );
+					int id = getStackNum(__stack-2 );
+					struct stringData *name = getStackString(__stack-1  );
+					int ver = getStackNum(__stack );
 					struct kittyLib lib;
 
 					kFreeLib( id );
@@ -86,24 +81,24 @@ char *_libLibOpen( struct glueCommands *data, int nextToken )
 						if (lib.base)
 						{
 							libsList.push_back(lib);
-							popStack( stack - data -> stack );
+							popStack(__stack - data -> stack );
 							setStackNone();
 							return NULL;
 						}
 					}
 
-					popStack( stack - data -> stack );
+					popStack(__stack - data -> stack );
 					setError(170,data->tokenBuffer);
 					return NULL;
 				}
 				break;
 		default:
-				popStack( stack - data -> stack );
+				popStack(__stack - data -> stack );
 				setError(22,data-> tokenBuffer);
 				return NULL;
 	}
 
-	popStack( stack - data -> stack );
+	popStack(__stack - data -> stack );
 	setStackNum( 0 );	
 	return NULL;
 }
@@ -115,17 +110,17 @@ char *libLibOpen(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_libLibClose( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack +1;
+	int args =__stack - data -> stack +1;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 1:
-			kFreeLib( getStackNum( stack) );
+			kFreeLib( getStackNum(__stack) );
 			break;
 		default:
-			popStack( stack - data -> stack );
+			popStack(__stack - data -> stack );
 			setError(23,data-> tokenBuffer);
 			break;
 	}
@@ -142,7 +137,7 @@ char *libLibClose(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_libLibCall( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack + 1;
+	int args =__stack - data -> stack + 1;
 	int id, libVec,ret;
 	struct kittyLib *lib;
 
@@ -151,8 +146,8 @@ char *_libLibCall( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 2:
-				id = getStackNum( stack-1);
-				libVec = getStackNum( stack);
+				id = getStackNum(__stack-1);
+				libVec = getStackNum(__stack);
 
 				lib = kFindLib( id );
 				if (lib)
@@ -174,7 +169,7 @@ char *_libLibCall( struct glueCommands *data, int nextToken )
 						ET_RegisterA6,regs[8+6],
 						TAG_END	 );
 
-					popStack( stack - data -> stack );
+					popStack(__stack - data -> stack );
 					setStackNum(ret);
 					return NULL;
 				}
@@ -184,7 +179,7 @@ char *_libLibCall( struct glueCommands *data, int nextToken )
 	}
 
 	setError(169,data->tokenBuffer);
-	popStack( stack - data -> stack );
+	popStack(__stack - data -> stack );
 	return NULL;
 }
 
@@ -197,14 +192,14 @@ char *libLibCall(struct nativeCommand *cmd, char *tokenBuffer)
 
 char *_libLibBase( struct glueCommands *data, int nextToken )
 {
-	int args = stack - data -> stack + 1;
+	int args =__stack - data -> stack + 1;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	switch (args)
 	{
 		case 1:
 			{
-				int id = getStackNum( stack );
+				int id = getStackNum(__stack );
 				struct kittyLib *lib;
 
 				lib = kFindLib( id );

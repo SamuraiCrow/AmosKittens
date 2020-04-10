@@ -89,7 +89,6 @@ char *cmdPrgUnder(struct nativeCommand *cmd, char *tokenBuffer);
 // not used outside of commands.cpp, normally but just for testing.
 //char *_addStr( struct glueCommands *data, int nextToken );
 
-char *_print( struct glueCommands *data, int nextToken );
 char *_gosub( struct glueCommands *data, int nextToken );
 char *_procedure( struct glueCommands *data, int nextToken );
 
@@ -133,5 +132,5 @@ extern char *on_every_gosub_location;
 extern char *on_every_proc_location;
 extern struct timeval every_before, every_after;
 extern void stack_frame_up(int varIndex);
-
+extern struct kittyData *getVar(uint16_t ref);
 

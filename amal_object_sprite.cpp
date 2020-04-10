@@ -9,6 +9,7 @@
 #include <proto/dos.h>
 #include <libraries/retroMode.h>
 #include <proto/retroMode.h>
+#include <AmosKittens.h>
 #endif
 
 #ifdef __linux__
@@ -23,8 +24,6 @@
 #include "channel.h"
 #include "engine.h"
 
-extern struct retroVideo *video;
-
 int XSprite_formula(int x);
 int YSprite_formula(int y);
 int from_XSprite_formula(int x);
@@ -37,32 +36,32 @@ static int getMax ( void )
 
 static int getImage (unsigned  int object)
 {
-	return video -> sprites[object].image;
+	return instance.video -> sprites[object].image;
 }
 
 static int getX (unsigned int object)
 {
-	return from_XSprite_formula(video -> sprites[object].x);
+	return from_XSprite_formula(instance.video -> sprites[object].x);
 }
 
 static int getY (unsigned int object)
 {
-	return from_YSprite_formula(video -> sprites[object].y);
+	return from_YSprite_formula(instance.video -> sprites[object].y);
 }
 
 static void setImage (unsigned int object,int image)
 {
-	video -> sprites[object].image = image;
+	instance.video -> sprites[object].image = image;
 }
 
 static void setX (unsigned int object,int x)
 {
-	video -> sprites[object].x = XSprite_formula(x);
+	instance.video -> sprites[object].x = XSprite_formula(x);
 }
 
 static void setY (unsigned int object,int y)
 {
-	video -> sprites[object].y = YSprite_formula(y);
+	instance.video -> sprites[object].y = YSprite_formula(y);
 }
 
 //-----

@@ -6,6 +6,7 @@
 #ifdef __amigaos4__
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/retroMode.h>
 #endif
 
 #ifdef __linux__
@@ -13,14 +14,14 @@
 #include "os/linux/stuff.h"
 #endif
 
-#include "stack.h"
-#include "amosKittens.h"
+#include <amosKittens.h>
+#include <stack.h>
+
 #include "commands.h"
 #include "engine.h"
 #include "debug.h"
 #include "kittyErrors.h"
 
-extern int last_var;
 extern struct globalVar globalVars[];
 extern int _last_var_index;		// we need to know what index was to keep it.
 extern int _set_var_index;		// we need to resore index 
@@ -65,9 +66,9 @@ char *executeDataToken(char *ptr, unsigned short token)
 						procStcakFrame[proc_stack_frame].dataPointer = ptr;	// set data_read_poiner
 						
 						// end of line => comma, exit we have read something I hope.
-						if (do_input[parenthesis_count] == _exit_read_data) 
+						if (do_input[instance.parenthesis_count] == _exit_read_data) 
 						{
-							do_input[parenthesis_count] = _read_arg;
+							do_input[instance.parenthesis_count] = _read_arg;
 							return NULL;
 						}
 					}
@@ -82,9 +83,9 @@ char *executeDataToken(char *ptr, unsigned short token)
 					// printf("** EXIT ON COMMA **\n");
 
 					// comma, exit we have read something I hope.
-					if (do_input[parenthesis_count] == _exit_read_data) 
+					if (do_input[instance.parenthesis_count] == _exit_read_data) 
 					{
-						do_input[parenthesis_count] = _read_arg;
+						do_input[instance.parenthesis_count] = _read_arg;
 						return NULL;
 					}
 					break;
@@ -105,7 +106,7 @@ char *executeDataToken(char *ptr, unsigned short token)
 
 			getLineFromPointer(ptr);
 			printf("DATA READ %08d   %08X %20s:%08d stack is %d cmd stack is %d flag %d token %04x -- name %s\n",
-					lineFromPtr.line , ptr +2,__FUNCTION__,__LINE__, stack, cmdStack, kittyStack[stack].state, token , TokenName(token));	
+					lineFromPtr.line , ptr +2,__FUNCTION__,__LINE__, instance.stack, instance.cmdStack, kittyStack[__stack].state, token , TokenName(token));	
 #endif
 			ret = cmd -> fn( cmd, ptr ) ;
 			if (ret) ret += cmd -> size;
@@ -152,22 +153,22 @@ void _read_arg( struct nativeCommand *cmd, char *tokenBuffer )
 
 	if (cmd == NULL)
 	{
-		args = stack - cmdTmp[cmdStack].stack + 1;
+		args =__stack - cmdTmp[instance.cmdStack].stack + 1;
 	}
 	else
 	{
-		if (cmdStack) if (cmdTmp[cmdStack-1].cmd == _cmdRead)
+		if (instance.cmdStack) if (cmdTmp[instance.cmdStack-1].cmd == _cmdRead)
 		{
-			args = stack - cmdTmp[cmdStack-1].stack + 1;
+			args =__stack - cmdTmp[instance.cmdStack-1].stack + 1;
 		}
 	}
 	
 	if (last_var)
 	{
-		int local_var_index = globalVars[last_var -1].var.index;
+		int local_var_index = getVar(last_var) -> index;
 		int local_last_var = last_var;
 
-		do_input[parenthesis_count] = _exit_read_data;
+		do_input[instance.parenthesis_count] = _exit_read_data;
 		collect_data();	
 
 		_set_var_index = local_var_index;
@@ -183,8 +184,8 @@ char *_cmdRead( struct glueCommands *data, int nextToken )
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	_read_arg( NULL, NULL );
-	popStack( stack - data -> stack  );
-	do_input[parenthesis_count] = do_std_next_arg;
+	popStack(__stack - data -> stack  );
+	do_input[instance.parenthesis_count] = do_std_next_arg;
 	do_breakdata = NULL;
 
 	return NULL;
@@ -202,7 +203,7 @@ char *cmdRead(struct nativeCommand *cmd, char *tokenBuffer )
 	}
 	else
 	{
-		do_input[parenthesis_count] = _read_arg;
+		do_input[instance.parenthesis_count] = _read_arg;
 		do_breakdata = NULL;
 		stackCmdNormal( _cmdRead, tokenBuffer );
 	}
