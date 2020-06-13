@@ -21,7 +21,8 @@ typedef uint32_t LONG;
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
-#include "ahi_dev.h"
+
+#include "kittyaudio.h"
 
 #ifdef __amoskittens__
 #include "spawn.h"
@@ -30,16 +31,9 @@ typedef uint32_t LONG;
 
 #include <AmosKittens.h>
 
-
 int current_audio_channel = 0;
 
 extern bool running;
-
-
-bool audio_3k3_lowpass = true;
-
-
-bool sample_loop = false;
 
 struct audioIO
 {
@@ -57,8 +51,9 @@ enum
 };
 
 struct contextChannel {
-	int device ;
-	int channel ;
+	int device;
+	int channel;
+	bool sampleLoop;
 	bool audio_abort;
 	bool audio_status;
  	struct MsgPort *AHIMsgPort;     // The msg port we will use for the ahi.device
@@ -71,6 +66,16 @@ struct contextChannel {
 
 
 struct contextChannel contexts[4];
+
+void audioSetSampleLoop( ULONG voices, bool value )
+{
+	ULONG c;
+	for (c=0;c<4;c++)
+	{
+		if (voices & (1L<<c)) contexts[c].sampleLoop = value;
+		printf("channel %d, loop is %s\n",c, contexts[c].sampleLoop ? "on" : "off");
+	}
+}
 
 struct audioIO *new_audio( struct AHIRequest *io)
 {
@@ -86,8 +91,8 @@ struct audioIO *new_audio( struct AHIRequest *io)
 
 std::vector<struct audioChunk *> audioBuffer[4];
 
-
-LONG volume=0x10000;
+#define AHI_CHUNKSIZE 1024
+#define AHI_DEFAULTUNIT 0
 
 static struct Process *main_task = NULL;
 static struct Process *audioTask[4] = { NULL, NULL, NULL, NULL };
@@ -205,7 +210,7 @@ void audio_engine (void)
 {
 	static struct AHIRequest *io;
 	static struct audioIO *tempRequest;
-	struct AHIIFace	*IAHI ;		// instence.
+	struct AHIIFace	*IAHI = NULL;		// instence.
 	struct contextChannel *context;
 	struct Process *thisProcess;
 	int this_channel = -1;
@@ -341,31 +346,32 @@ void audio_engine (void)
 		}    
 		else if ( audioBuffer[context -> channel].front() )
 		{
-			if (sample_loop == false)
+			if (context -> AHIio-> chunk)		// if we are done playing some sound...
 			{
-				if (context -> AHIio-> chunk)
+				if (context -> sampleLoop == false)
 				{
 					Printf("Free data..\n");
 					free( context -> AHIio-> chunk );	// free old data.
 					context -> AHIio-> chunk = NULL;
 				}
+				else
+				{
+					Printf("sample loop push data back..\n");
+					audioBuffer[context -> channel].push_back( context -> AHIio-> chunk);
+				}
 			}
-			else
-			{
-				Printf("sample loop push data back..\n");
-				audioBuffer[context -> channel].push_back( context -> AHIio-> chunk);
-			}			
 
 			if (io = context -> AHIio -> io)
 			{
 				context -> AHIio-> chunk = audioBuffer[context -> channel].front();
+
 				audioBuffer[context -> channel].erase( audioBuffer[context -> channel].begin());
+
 				channel_unlock(context -> channel);
 
 				if (context -> AHIio-> chunk)
 				{
 					struct audioChunk *chunk = context -> AHIio-> chunk;
-
 
 					io->ahir_Std.io_Message.mn_Node.ln_Pri = 0;
 					io->ahir_Std.io_Command	= CMD_WRITE;
@@ -373,12 +379,12 @@ void audio_engine (void)
 					io->ahir_Std.io_Data		=  &(chunk -> ptr); 
 					io->ahir_Std.io_Length	= (ULONG) chunk -> size; 
 					io->ahir_Frequency		= (ULONG) chunk -> bytesPerSecond;
-					io->ahir_Volume		= volume; 
+					io->ahir_Volume		=  instance.volume; 
 					io->ahir_Position		= (ULONG) chunk -> position;
 					io->ahir_Type			= AHIST_M8S;		// mono 8 bit signed
 					io->ahir_Link			= context -> link ? context -> link -> io : NULL;
 
-					if (audio_3k3_lowpass)
+					if (instance.audio_3k3_lowpass)
 					{
 						char *ptr = (char *)  io->ahir_Std.io_Data;
 						char *e_ptr = ptr + io->ahir_Std.io_Length;
@@ -460,10 +466,10 @@ end_audioTask:
 				break;
 	}
 
-	audio_lock();
+	audioLock();
 	cleanup_task( context, IAHI );
 	Signal( (struct Task *) main_task, SIGF_CHILD );
-	audio_unlock();
+	audioUnlock();
 }
 
 bool init_channel(int channel)
@@ -493,7 +499,7 @@ bool init_channel(int channel)
 }
 
 
-bool audio_start()
+bool audioStart()
 {
 	init_channel(0);
 	init_channel(1);
@@ -509,10 +515,6 @@ void makeChunk(uint8_t * data,int offset, int size, int totsize, int channel, in
 
 	if (chunk)
 	{
-		int8_t *s8bit;
-		uint8_t *u8bit;
-		uint8_t *u8bit_e;
-
 		chunk[0] -> size = size;
 		chunk[0] -> bytesPerSecond = bytesPerSecond;
 
@@ -527,58 +529,11 @@ void makeChunk(uint8_t * data,int offset, int size, int totsize, int channel, in
 			case 3: 		(*chunk) -> position = 0x00000;	break;
 		}
 
-		// AHI uses mono 8bit signed, amos uses mono 8bit unsigned, we need to convert,
-
-		s8bit = (int8_t *) &(chunk[0] -> ptr);
-		u8bit = (data + offset);
-		u8bit_e = u8bit + chunk[0] -> size;
-
-		for ( ; u8bit < u8bit_e ; u8bit++ )
-		{
-			*s8bit  = (int8_t) ((int) *u8bit -128);
-			s8bit++;
-		}
-
-//		memcpy( &(chunk[0] -> ptr), (void *) (data + offset),  chunk[0] -> size );
+		memcpy( &(chunk[0] -> ptr), (void *) (data + offset),  chunk[0] -> size );
 	}
 }
 
 uint32_t color =0;
-
-void debug_draw_line(int x0,int y0, int x1, int y1)
-{
-	int x,y;
-	int dx = x1-x0;
-	int dy = y1-y0;
-	struct RastPort *rp = debug_Window -> RPort;
-
-	if (abs(dx)>abs(dy))
-	{
-		int d = dx<0 ? -1 : 1;
-
-		for (x=0;x!=dx;x+=d)
-		{
-			y = dy * x / dx;
-			WritePixelColor( rp, x0+x, y0+y , color); 
-		}
-	}
-	else
-	{
-		int d = dy<0 ? -1 : 1;
-
-		if (d==0)
-		{
-			WritePixelColor( rp, x0, y0 , color); 
-			return;
-		}
-
-		for (y=0;y!=dy;y+=d)
-		{
-			x = dx * y / dy;
-			WritePixelColor( rp, x0+x, y0+y , color); 
-		}
-	}
-}
 
 struct phase 
 {
@@ -657,7 +612,7 @@ void makeChunk_wave(struct wave *wave, struct phase *phaseContext, int offset, i
 	}
 }
 
-bool play_wave(struct wave *wave, int len, int channels)
+bool audioPlayWave(struct wave *wave, int len, int channels)
 {
 	int blocks = len / AHI_CHUNKSIZE;
 	int lastLen = len % AHI_CHUNKSIZE;
@@ -687,9 +642,9 @@ bool play_wave(struct wave *wave, int len, int channels)
 		}
 
 #ifdef __amoskittens__
-		audio_lock();
+		audioLock();
 		for ( c=0;c<4; c++)	if (phaseContexts[c].chunk) audioBuffer[c].push_back( phaseContexts[c].chunk );
-		audio_unlock();
+		audioUnlock();
 #endif
 		offset += AHI_CHUNKSIZE;
 	}
@@ -712,9 +667,9 @@ bool play_wave(struct wave *wave, int len, int channels)
 		}
 
 #ifdef __amoskittens__
-		audio_lock();
+		audioLock();
 		for ( c=0;c<4; c++)	if (phaseContexts[c].chunk) audioBuffer[c].push_back( phaseContexts[c].chunk );
-		audio_unlock();
+		audioUnlock();
 #endif
 	}
 
@@ -759,18 +714,18 @@ void abort_channel( int c )
 	}
 }
 
-void audio_device_flush(int voices)
+void audioDeviceFlush(int voices)
 {
 	int c;
 
-	audio_lock();
+	audioLock();
 	for ( c=0;c<4; c++)	if (voices & (1<<c) ) audio_channel_flush( c );
-	audio_unlock();
+	audioUnlock();
 
 	for ( c=0;c<4; c++)	if (voices & (1<<c) ) abort_channel( c );
 }
 
-bool play(uint8_t * data,int len, int channel, int frequency)
+bool audioPlay(uint8_t * data,int len, int channel, int frequency)
 {
 	int blocks = len / AHI_CHUNKSIZE;
 	int lastLen = len % AHI_CHUNKSIZE;
@@ -840,7 +795,7 @@ void channel_unlock(int n)
 	MutexRelease(channel_mx[n]);
 }
 
-void audio_lock()
+void audioLock()
 {
 	channel_lock(0);
 	channel_lock(1);
@@ -848,7 +803,7 @@ void audio_lock()
 	channel_lock(3);
 }
 
-void audio_unlock()
+void audioUnlock()
 {
 	channel_unlock(0);
 	channel_unlock(1);

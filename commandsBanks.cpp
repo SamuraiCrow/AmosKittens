@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <string>
 
 #include "config.h"
 
@@ -32,6 +33,7 @@
 #include "bitmap_font.h"
 #include "amosString.h"
 #include "cleanup.h"
+#include "load_config.h"
 
 extern struct globalVar globalVars[];
 extern unsigned short last_token;
@@ -125,6 +127,8 @@ struct kittyBank *findBank( int banknr )
 {
 	unsigned int n;
 
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 	for (n=0;n<kittyBankList.size();n++)
 	{
 		if (kittyBankList[n].id == banknr)	return &kittyBankList[n];
@@ -136,6 +140,9 @@ struct kittyBank *findBank( int banknr )
 int findBankIndex( int banknr )
 {
 	unsigned int n;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 	for (n=0;n<kittyBankList.size();n++)
 	{
 		if (kittyBankList[n].id == banknr) return n;
@@ -192,6 +199,8 @@ void freeBank( int banknr )
 {
 	int index;
 	struct kittyBank *bank = NULL;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	index = findBankIndex( banknr );
 
@@ -390,7 +399,7 @@ char *_bankBload( struct glueCommands *data, int nextToken )
 
 char *_bankBsave( struct glueCommands *data, int nextToken )
 {
-	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 	int args = __stack - data->stack +1 ;
 	FILE *fd;
 	char *start, *to;
@@ -424,6 +433,7 @@ struct kittyBank *reserveAs( int type, int bankNr, int length, const char *name,
 
 	freeBank( bankNr );
 	bank = allocBank( bankNr );
+
 	if (bank)
 	{
 		bank -> length = length;
@@ -466,6 +476,7 @@ struct kittyBank *reserveAs( int type, int bankNr, int length, const char *name,
 		}
 
 		bank->type = type;
+		bank->object_ptr=NULL;
 
 		return bank;
 	}
@@ -790,8 +801,6 @@ void init_banks( char *data , int size)
 	struct kittyBank *bank = NULL;
 	id[4]=0;	// null terminate id string.
 
-	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
 	if (data)
 	{
 		fd.mem = data;
@@ -800,11 +809,9 @@ void init_banks( char *data , int size)
 
 		if (mread( &id, 4, 1, fd )==1)
 		{	
-			printf("ID: %c%c%c%c\n",id[0],id[1],id[2],id[3]);
+//			printf("ID: %c%c%c%c\n",id[0],id[1],id[2],id[3]);
 			if (strncmp(id,"AmBs",4)==0)
 			{
-				printf("file offset = %d\n", fd.off);
-
 				mread( &banks, 2, 1, fd);
 #ifdef __LITTLE_ENDIAN__
 				banks = __bswap_16(banks);
@@ -824,12 +831,9 @@ void init_banks( char *data , int size)
 						return;
 		}
 
-		printf ("ready to read %d banks\n",banks);
-
 		for (n=0;n<banks;n++)
 		{
 			type = -1;
-			printf("bank %d of %d\n",n+1,banks);
 
 			if (mread( &id, 4, 1, fd )==1)
 			{	
@@ -920,7 +924,6 @@ void __load_bank__(struct stringData *name, int bankNr )
 			if (strncmp(id,"AmBs",4)==0)
 			{
 				fread( &banks, 2, 1, fd);
-				clean_up_banks();		
 			}
 		}
 
@@ -990,6 +993,7 @@ void __load_bank__(struct stringData *name, int bankNr )
 					break;
 
 				case bank_type_work_or_data:
+
 					__load_work_data__(fd,bankNr);
 					break;
 
@@ -1244,7 +1248,7 @@ char *_bankResourceBank( struct glueCommands *data, int nextToken )
 
 	switch (args)
 	{
-		case 1:	current_resource_bank = getStackNum(__stack);
+		case 1:	instance.current_resource_bank = getStackNum(__stack);
 				break;
 		default:
 				setError(22,data->tokenBuffer);
@@ -1261,33 +1265,34 @@ char *bankResourceBank(nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-const char *AmosKittensSystem = "AmosKittens:System/";
-
-const char *DefaultFileNames[] =
+struct stringData *get_default_resource_str( const char *group, int id )
 {
-	"DefaultFileNames0",	// 0		(-1 to -9)
-	"DefaultFileNames1",	// 1
-	"DefaultFileNames2",	// 2
-	"DefaultFileNames3",	// 3
-	"DefaultFileNames4",	// 4
-	"DefaultFileNames5",	// 5
-	"DefaultFileNames6",	// 6
-	"DefaultFileNames7",	// 7
-	"DefaultFileNames8",	// 8
-	NULL
-};
+	char tmp[30];
+	std::string *value;
+	
+	sprintf( tmp, "%s_%d", group, id );
+	value = getConfigValue( tmp );
 
+	if (value)
+	{
+		const char *cs = value -> c_str();
+		return toAmosString(cs, strlen(cs));
+	}
+
+	return NULL;
+}
 
 struct stringData *getResourceStr(int id)
 {
-	struct stringData *ret = NULL;
+
 	int retry = 0;
-	int cbank = current_resource_bank;
+	int cbank = instance.current_resource_bank;
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (id>0)
 	{
+		struct stringData *ret = NULL;
 		struct kittyBank *bank1;
 
 		do
@@ -1330,23 +1335,26 @@ struct stringData *getResourceStr(int id)
 			retry++;
 
 		} while ( retry < 2 );
-	}
-	else if (id == 0)
-	{
-		ret = toAmosString(AmosKittensSystem, strlen(AmosKittensSystem));
-	}
-	if ((id >=-1 )&&(id <=-9))	// Default file names
-	{
-		ret = toAmosString( DefaultFileNames[ (-id)-1], strlen(DefaultFileNames[ (-id)-1]) );
-	}
-	else if ((id >=-10 )&&(id <=-36))	// name of extentions
-	{
 
+		return ret;
 	}
 
-	if (ret==NULL)  ret = toAmosString( "",0 );
+	// --------------------------------------------------------------------------------------------------
+	//   Doc's in AmosPro is are wrong: says -10 to -36 is extensions names, 
+	//   But extention names is from -14 to -40
+	//   Using the same command for different things kind of stupid :-(
+	// -------------------------------------------------------------------------------------------------
 
-	return ret;
+	if ((id >=-13)&&(id <=0 ))	// Default file names
+	{
+		return get_default_resource_str( "resource", -id );
+	}
+	else if ((id >=-36 )&&(id <=-14))	// name of extentions
+	{
+		return get_default_resource_str( "extension", (-id) -13 );
+	}
+
+	return NULL;
 }
 
 char *_bankResourceStr( struct glueCommands *data, int nextToken )
@@ -1361,21 +1369,22 @@ char *_bankResourceStr( struct glueCommands *data, int nextToken )
 	{
 		case 1:	id = getStackNum(__stack);
 				ret = getResourceStr( id );
+
+				if (ret)
+				{
+					setStackStr( ret );
+				}
+				else 
+				{
+					struct stringData tmp;
+					tmp.ptr = 0;
+					tmp.size =0;
+					setStackStrDup( &tmp );
+				}
 				break;
 		default:
+				popStack(__stack - data->stack );
 				setError(22,data->tokenBuffer);
-	}
-
-	popStack(__stack - data->stack );
-
-	if (ret)
-	{
-		setStackStr( ret );
-	}
-	else 
-	{
-		struct stringData tmp;
-		setStackStrDup( &tmp );
 	}
 
 	return NULL;

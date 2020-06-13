@@ -31,6 +31,13 @@ extern Process *EngineTask;
 
 enum
 {
+	GID_ICONIFY = 1,
+	GID_FULLSCREEN,
+	GID_PREFS
+};
+
+enum
+{
 	kitty_to_back = 1,
 	kitty_to_front,
 	kitty_limit_mouse
@@ -67,4 +74,7 @@ struct amosMenuItem
 	unsigned short qualifier;
 	bool active;
 };
+
+#define hw_mouse_x instance.engine_mouse_x/2+hardware_upper_left
+#define hw_mouse_y instance.engine_mouse_y/2+hardware_upper_top
 

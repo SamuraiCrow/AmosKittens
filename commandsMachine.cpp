@@ -276,7 +276,9 @@ char *_machineVarPtr( struct glueCommands *data, int nextToken )
 	{
 		if (last_var)
 		{
-			struct kittyData *var = &globalVars[last_var-1].var;
+			printf("last_var %08x\n",last_var);
+
+			struct kittyData *var = getVar(last_var);
 
 			switch (var->type)
 			{
@@ -303,10 +305,9 @@ char *_machineVarPtr( struct glueCommands *data, int nextToken )
 
 					printf( "var -> type: %d\n ", var -> type);
 			}
+			setStackNum(amosptr);
+			return NULL;
 		}
-
-		setStackNum(amosptr);
-		return NULL;
 	}
 
 	setError(25,data->tokenBuffer);
@@ -440,7 +441,7 @@ char *_machineRolB( struct glueCommands *data, int nextToken )
 		if (last_var)
 		{
 			int tmp;
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			tmp = var -> integer.value;
 			while (shift--) tmp = ((tmp & 0x80 ? 1: 0) | (tmp << 1)) & 0xFF  ;
 			var -> integer.value = tmp;
@@ -465,7 +466,7 @@ char *_machineRolW( struct glueCommands *data, int nextToken )
 		if (last_var)
 		{
 			int tmp;
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			tmp = var -> integer.value;
 			while (shift--) tmp = ((tmp & 0x8000 ? 1: 0) | (tmp << 1)) & 0xFFFF  ;
 			var -> integer.value = tmp;
@@ -490,7 +491,7 @@ char *_machineRolL( struct glueCommands *data, int nextToken )
 		if (last_var)
 		{
 			int tmp;
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			tmp = var -> integer.value;
 			while (shift--) tmp = ((tmp & 0x80000000 ? 1: 0) | (tmp << 1)) & 0xFFFFFFFF  ;
 			var -> integer.value = tmp;
@@ -515,7 +516,7 @@ char *_machineRorB( struct glueCommands *data, int nextToken )
 		if (last_var)
 		{
 			int tmp;
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			tmp = var -> integer.value;
 			while (shift--) tmp = ((tmp & 1 ? 0x80: 0) | (tmp >> 1)) & 0xFF  ;
 			var -> integer.value = tmp;
@@ -540,7 +541,7 @@ char *_machineRorW( struct glueCommands *data, int nextToken )
 		if (last_var)
 		{
 			int tmp;
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			tmp = var -> integer.value;
 			while (shift--) tmp = ((tmp & 1 ? 0x8000: 0) | (tmp >> 1)) & 0xFFFF  ;
 			var -> integer.value = tmp;
@@ -565,7 +566,7 @@ char *_machineRorL( struct glueCommands *data, int nextToken )
 		if (last_var)
 		{
 			int tmp;
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			tmp = var -> integer.value;
 			while (shift--) tmp = ((tmp & 1 ? 0x80000000: 0) | (tmp >> 1)) & 0xFFFFFFFF  ;
 			var -> integer.value = tmp;
@@ -630,7 +631,7 @@ char *_machineBtst( struct glueCommands *data, int nextToken )
 
 		if (last_var)
 		{
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			ret = var -> integer.value & (1<<bit) ? ~0 : 0;
 		}
 	}
@@ -654,7 +655,7 @@ char *_machineBset( struct glueCommands *data, int nextToken )
 
 		if (last_var)
 		{
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			var -> integer.value |= (1<<bit) ;
 		}
 	}
@@ -677,7 +678,7 @@ char *_machineBchg( struct glueCommands *data, int nextToken )
 
 		if (last_var)
 		{
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			var -> integer.value ^= (1<<bit) ;
 		}
 	}
@@ -700,7 +701,7 @@ char *_machineBclr( struct glueCommands *data, int nextToken )
 
 		if (last_var)
 		{
-			struct kittyData *var = &globalVars[last_var -1].var;
+			struct kittyData *var = getVar(last_var);
 			var -> integer.value &= ~(1<<bit) ;
 		}
 	}
@@ -1001,10 +1002,14 @@ proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (args==1)
 	{
-		int bankNr = getStackNum(__stack);
+		int bankNr_or_address = getStackNum(__stack);
 
-		bank = findBank(bankNr);
-		if (bank) if ((bank -> type >= 8)&&(bank -> type <= 10)) code = bank -> start;
+		bank = findBank(bankNr_or_address);
+		if (bank)
+		{
+			if ((bank -> type >= 8)&&(bank -> type <= 10)) code = bank -> start;
+		}
+		else code = (void *) bankNr_or_address;
 	}
 
 	popStack(__stack - data->stack );
@@ -1324,7 +1329,7 @@ char *_machineArray( struct glueCommands *data, int nextToken )
 	{
 		if (last_var)
 		{
-			struct kittyData *var = &globalVars[last_var-1].var;
+			struct kittyData *var = getVar(last_var);
 
 			switch (var->type)
 			{

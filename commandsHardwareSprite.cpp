@@ -111,8 +111,9 @@ char *_hsSprite( struct glueCommands *data, int nextToken )
 
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	engine_lock();
 	num = getStackNum(__stack - 3 );
+
+	engine_lock();
 	sprite = &instance.video -> sprites[num];
 
 	sprite -> id = num;
@@ -385,5 +386,15 @@ char *hsISprite(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+char *hwSpriteUpdateOff(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	return tokenBuffer;
+}
 
+char *hwSpriteUpdate(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	return tokenBuffer;
+}
 

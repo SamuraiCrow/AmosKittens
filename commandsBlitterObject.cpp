@@ -357,7 +357,9 @@ void drawBobsOnScreenExceptBob( struct retroScreen *screen, struct retroSpriteOb
 
 struct retroSpriteObject *__new_bob__(int id)
 {
-	struct retroSpriteObject *bob = new retroSpriteObject;
+	struct retroSpriteObject *bob = new retroSpriteObject();
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	if (bob)
 	{
@@ -366,25 +368,37 @@ struct retroSpriteObject *__new_bob__(int id)
 		bob -> y = 0;
 		bob -> image = 0;
 		bob -> screen_id = instance.current_screen;
+
+		bob -> clear[0].image = 0;
+		bob -> clear[0].w = 0;
+		bob -> clear[0].h = 0;
+		bob -> clear[0].mem = NULL;
+		bob -> clear[0].size = 0;
+
+		bob -> clear[1].image = 0;
+		bob -> clear[1].w = 0;
+		bob -> clear[1].h = 0;
+		bob -> clear[1].mem = NULL;
+		bob -> clear[1].size = 0;
+
 		bob -> sprite = NULL;
 		bob -> frame = NULL;
-		bob -> clear[0].mem = NULL;
-		bob -> clear[1].mem = NULL;
+
+		bob -> background = 0;	// if background color is set, background is not copied.
+		bob -> plains = 0;
 		bob -> mask = 0;
 		bob -> limitXmin = 0;
 		bob -> limitYmin = 0;
 		bob -> limitXmax = 0;
 		bob -> limitYmax = 0;
-		bob -> background = 0;	// if background color is set, background is not copied.
 
-		engine_lock();				
+		engine_lock();
 		bobs.push_back( bob );
 		engine_unlock();
 	}
 
 	return bob;
 }
-
 
 void freeBobClear( struct retroSpriteObject *bob )
 {
@@ -455,8 +469,7 @@ char *_boBob( struct glueCommands *data, int nextToken )
 
 				stack_get_if_int(__stack - 2 , &(bob->x) );
 				stack_get_if_int(__stack - 1 , &(bob->y) );
-
-				bob->image = getStackNum(__stack );
+				stack_get_if_int(__stack , &(bob->image) );
 
 				if (struct retroScreen *screen = instance.screens[bob->screen_id])
 				{
@@ -496,11 +509,14 @@ char *_boSetBob( struct glueCommands *data, int nextToken )
 		case 4:	n = getStackNum(__stack-3);
 
 				bob = getBob( n );
+
+				if (!bob) bob = __new_bob__(n);
+
 				if (bob)
 				{
-					bob -> background = getStackNum(__stack-2);
-					bob -> plains = getStackNum(__stack-1);
-					bob -> mask = getStackNum(__stack);
+					stack_get_if_int(__stack-2, &bob -> background );
+					stack_get_if_int(__stack-1, &bob -> plains );
+					stack_get_if_int(__stack, &bob -> mask );
 				}
 				break;
 		default:
@@ -647,11 +663,11 @@ char *_boPasteBob( struct glueCommands *data, int nextToken )
 
 					switch (screen -> autoback)
 					{
-						case 0:	retroPasteSprite(screen,screen -> double_buffer_draw_frame,instance.sprites,x-hx,y-hy,image-1,flags, 0 );
+						case 0:	retroPasteSprite(screen,screen -> double_buffer_draw_frame,instance.sprites,x-hx,y-hy,image-1,flags, 0, 0 );
 								break;
 
-						default:	retroPasteSprite(screen,0,instance.sprites,x-hx,y-hy,image-1,flags, 0 );
-								if (screen -> Memory[1]) retroPasteSprite(screen,1,instance.sprites,x,y,image-1,flags, 0 );
+						default:	retroPasteSprite(screen,0,instance.sprites,x-hx,y-hy,image-1,flags, 0, 0 );
+								if (screen -> Memory[1]) retroPasteSprite(screen,1,instance.sprites,x,y,image-1,flags, 0,0 );
 								break;
 					}
 
@@ -792,11 +808,11 @@ char *_boPutBob( struct glueCommands *data, int nextToken )
 					switch (screen -> autoback)
 					{
 						case 0:	retroPasteSprite(screen,screen -> double_buffer_draw_frame,instance.sprites,
-									bob -> x,bob -> y,image -1, flags, bob -> plains);
+									bob -> x,bob -> y,image -1, flags, bob -> plains , bob -> plains );
 								break;
 
-						default:	retroPasteSprite(screen,0,instance.sprites,bob->x,bob->y,image -1, flags, bob->plains);
-								if (screen -> Memory[1]) retroPasteSprite(screen,1,instance.sprites,bob->x,bob->y,image -1, flags, bob->plains);
+						default:	retroPasteSprite(screen,0,instance.sprites,bob->x,bob->y,image -1, flags, bob->plains , bob -> plains );
+								if (screen -> Memory[1]) retroPasteSprite(screen,1,instance.sprites,bob->x,bob->y,image -1, flags, bob->plains, bob -> plains );
 								break;
 					}
 				}

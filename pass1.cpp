@@ -204,7 +204,15 @@ struct globalVar *add_var_from_ref( struct reference *ref, char **tmp, int type 
 		var_count[0] ++;
 
 		ref -> ref = var_count[procStackCount ? 1: 0];
-		ref -> flags = type;
+
+		if (type == type_proc)
+		{
+			ref -> flags = (ref->flags&3) | type;
+		}
+		else
+		{
+			ref -> flags = type;
+		}
 
 		_new = &globalVars[var_count[0]-1];
 		_new -> varName = *tmp;	// tmp is alloced and used here.
@@ -826,9 +834,16 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 	{
 		if (token == cmd->id )
 		{
-			pass1_printf("%08x %20s:%08d stack is %d cmd stack is %d flag %d token %04x - name %s\n",
-						ptr-_file_start_, __FUNCTION__,__LINE__, instance_cmdStack, instance_cmdStack, kittyStack[__stack].state, token, TokenName(token));
+#ifdef show_pass1_tokens_yes
 
+			getLineFromPointer(ptr);
+			printf("Line %08d offset %08x token %04x - name %s\n",
+						lineFromPtr.line,
+						ptr-_file_start_,
+						token, 
+						TokenName(token));
+
+#endif
 
 			// ptr points to data of the token. (+2)
 
@@ -1105,17 +1120,17 @@ char *token_reader_pass1( char *start, char *ptr, unsigned short lastToken, unsi
 bool findRefAndFixProcCall( struct reference *toFind )
 {
 	unsigned int n;
-	struct globalVar *var;
+	struct globalVar *varInfo;
 	char *toFindName = dupRef( toFind );
 	if (toFindName == NULL) return false;
 
 	for (n=0;n<var_count[0];n++)
 	{
-		var = &globalVars[n];
+		varInfo = &globalVars[n];
 
-		if ( (var->varName != NULL) && (var->var.type == type_proc) )
+		if ( (varInfo->varName != NULL) && (varInfo->var.type == type_proc) )
 		{
-			if ( strcasecmp( var->varName, toFindName ) == 0 )
+			if ( strcasecmp( varInfo->varName, toFindName ) == 0 )
 			{
 				*((unsigned short*) ((char *) toFind-2)) = 0x0012;
 				toFind -> ref = n + 1;
@@ -1191,7 +1206,8 @@ void pass1_reader( char *start, char *file_end )
 		}
 		else
 		{
-			setError( 25, (char *) pass1CallProcedures[n] );
+			printf("ref -> ref %04x\n",pass1CallProcedures[n] -> ref);
+			setError( 20, (char *) pass1CallProcedures[n] );
 			break;
 		}
 	}

@@ -28,7 +28,6 @@
 #include "engine.h"
 
 extern int sig_main_vbl;
-
 extern struct globalVar globalVars[];
 extern unsigned short last_token;
 extern int tokenMode;
@@ -43,11 +42,8 @@ extern retroSprite *patterns;
 extern int bobDoUpdate ;
 extern int bobUpdateNextWait ;
 
-int xgr = 0,  ygr = 0;
-
-int GrWritingMode = 0;
-int paintMode = 0;
-int currentPattern = 0;
+#define xgr instance.xgr
+#define ygr instance.ygr
 
 int sliderBPen,	sliderBPaper, sliderBOutline, sliderBStyle, sliderSPen, sliderSPaper, sliderSOutline, sliderSStyle;
 
@@ -190,7 +186,6 @@ extern bool onMenuEnabled;
 
 void __wait_vbl()
 {
-
 	engine_lock();
 	if (bobUpdateNextWait)
 	{
@@ -237,51 +232,18 @@ char *gfxWaitVbl(struct nativeCommand *cmd, char *tokenBuffer)
 }
 
 
-
 void __bar( struct retroScreen *screen, int buffer, int x0,int y0, int x1, int y1 )
 {
-	if ((currentPattern)&&(patterns))
+	if ((instance.current_pattern)&&(patterns))
 	{
-		retroBarPattern( screen, buffer, x0,y0,x1,y1,patterns, currentPattern>0 ? currentPattern+3 : -currentPattern, screen -> ink0, screen -> ink1 );
+		retroBarPattern( screen, buffer, x0,y0,x1,y1,patterns, instance.current_pattern>0 ? instance.current_pattern+3 : -instance.current_pattern, screen -> ink0, screen -> ink1 );
 	}
 	else retroBAR( screen, buffer, x0,y0,x1,y1,screen -> ink0 );
 
-	if (paintMode) retroBox( screen, buffer, x0,y0,x1,y1,screen -> ink2);
+	if (instance.paintMode) retroBox( screen, buffer, x0,y0,x1,y1,screen -> ink2);
 }
 
-char *_gfxBar( struct glueCommands *data, int nextToken )
-{
-	int args =__stack - data->stack +1 ;
-	int x0 = xgr ,y0 = ygr,x1,y1;
 
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-	if (args==4)
-	{
-		struct retroScreen *screen = instance.screens[instance.current_screen];
-
-		stack_get_if_int(__stack-3, &x0 );
-		stack_get_if_int(__stack-2, &y0 );
-		xgr = x1 = getStackNum(__stack-1 );
-		ygr = y1 = getStackNum(__stack );
-
-		if (screen)
-		{
-			switch (screen -> autoback)
-			{
-				case 0:	__bar( screen, screen -> double_buffer_draw_frame, x0, y0, x1, y1 );
-						break;
-				default:	__bar( screen, 0,  x0, y0,  x1,  y1 );
-						if (screen -> Memory[1]) __bar( screen, 1,  x0, y0,  x1,  y1 );
-						break;
-			}
-		}
-	}
-	else setError(22,data->tokenBuffer);
-
-	popStack(__stack - data->stack );
-	return NULL;
-}
 
 char *_gfxCls( struct glueCommands *data, int nextToken )
 {
@@ -397,8 +359,6 @@ char *_gfxDraw( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
-
-
 char *_gfxCircle( struct glueCommands *data, int nextToken )
 {
 	int args =__stack - data->stack +1 ;
@@ -430,6 +390,13 @@ char *_gfxCircle( struct glueCommands *data, int nextToken )
 
 	popStack(__stack - data->stack );
 	return NULL;
+}
+
+char *gfxCircle(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	kittyStack[__stack].type = type_none;
+	stackCmdNormal( _gfxCircle, tokenBuffer );
+	return tokenBuffer;
 }
 
 char *_gfxEllipse( struct glueCommands *data, int nextToken )
@@ -514,6 +481,40 @@ char *gfxBox(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+char *_gfxBar( struct glueCommands *data, int nextToken )
+{
+	int args =__stack - data->stack +1 ;
+	int x0 = xgr ,y0 = ygr,x1,y1;
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	if (args==4)
+	{
+		struct retroScreen *screen = instance.screens[instance.current_screen];
+
+		stack_get_if_int(__stack-3, &x0 );
+		stack_get_if_int(__stack-2, &y0 );
+		xgr = x1 = getStackNum(__stack-1 );
+		ygr = y1 = getStackNum(__stack );
+
+		if (screen)
+		{
+			switch (screen -> autoback)
+			{
+				case 0:	__bar( screen, screen -> double_buffer_draw_frame, x0, y0, x1, y1 );
+						break;
+				default:	__bar( screen, 0,  x0, y0,  x1,  y1 );
+						if (screen -> Memory[1]) __bar( screen, 1,  x0, y0,  x1,  y1 );
+						break;
+			}
+		}
+	}
+	else setError(22,data->tokenBuffer);
+
+	popStack(__stack - data->stack );
+	return NULL;
+}
+
 char *gfxBar(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	kittyStack[__stack].type = type_none;
@@ -525,13 +526,6 @@ char *gfxDraw(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	kittyStack[__stack].type = type_none;
 	stackCmdNormal( _gfxDraw, tokenBuffer );
-	return tokenBuffer;
-}
-
-char *gfxCircle(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	kittyStack[__stack].type = type_none;
-	stackCmdNormal( _gfxCircle, tokenBuffer );
 	return tokenBuffer;
 }
 
@@ -613,32 +607,7 @@ char *gfxFlashOff(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *_gfxPlot( struct glueCommands *data, int nextToken )
-{
-	int args =__stack - data->stack +1 ;
-	struct retroScreen *screen = instance.screens[instance.current_screen];
 
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-	switch (args)
-	{
-		case 2:
-			stack_get_if_int(__stack-1, &xgr );
-			stack_get_if_int(__stack, &ygr );
-			if (screen) retroPixel( screen, screen -> Memory[ screen -> double_buffer_draw_frame ], xgr,ygr,screen -> ink0 );
-			break;
-		case 3:
-			stack_get_if_int(__stack-2, &xgr );
-			stack_get_if_int(__stack-1, &ygr );
-			if (screen) retroPixel( screen, screen -> Memory[ screen -> double_buffer_draw_frame ], xgr,ygr,getStackNum(__stack ) );
-			break;
-		default:
-			setError(22,data->tokenBuffer);
-	}
-
-	popStack(__stack - data->stack );
-	return NULL;
-}
 
 char *_gfxPaint( struct glueCommands *data, int nextToken )
 {
@@ -696,6 +665,13 @@ char *_gfxPoint( struct glueCommands *data, int nextToken )
 	setStackNum(ret);
 
 	return NULL;
+}
+
+char *gfxPoint(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	stackCmdParm( _gfxPoint, tokenBuffer );
+	setStackNone();
+	return tokenBuffer;
 }
 
 char *_gfxGrLocate( struct glueCommands *data, int nextToken )
@@ -1003,11 +979,37 @@ char *_gfxScroll( struct glueCommands *data, int nextToken )
 	return NULL;
 }
 
+char *_gfxPlot( struct glueCommands *data, int nextToken )
+{
+	int args =__stack - data->stack +1 ;
+	struct retroScreen *screen = instance.screens[instance.current_screen];
+
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
+	switch (args)
+	{
+		case 2:
+			stack_get_if_int(__stack-1, &xgr );
+			stack_get_if_int(__stack, &ygr );
+			if (screen) retroPixel( screen, screen -> Memory[ screen -> double_buffer_draw_frame ], xgr,ygr,screen -> ink0 );
+			break;
+		case 3:
+			stack_get_if_int(__stack-2, &xgr );
+			stack_get_if_int(__stack-1, &ygr );
+			if (screen) retroPixel( screen, screen -> Memory[ screen -> double_buffer_draw_frame ], xgr,ygr,getStackNum(__stack ) );
+			break;
+		default:
+			setError(22,data->tokenBuffer);
+	}
+
+	popStack(__stack - data->stack );
+	return NULL;
+}
 
 char *gfxPlot(struct nativeCommand *cmd, char *tokenBuffer)
 {
-	kittyStack[__stack].type = type_none;
 	stackCmdNormal( _gfxPlot, tokenBuffer );
+	setStackNone();
 	return tokenBuffer;
 }
 
@@ -1018,12 +1020,6 @@ char *gfxPaint(struct nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
-char *gfxPoint(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	stackCmdParm( _gfxPoint, tokenBuffer );
-	setStackNone();
-	return tokenBuffer;
-}
 
 char *gfxGrLocate(struct nativeCommand *cmd, char *tokenBuffer)
 {
@@ -1187,7 +1183,7 @@ char *_gfxPolygon( struct glueCommands *data, int nextToken )
 
 		retroPolyGonArray( screen, screen -> double_buffer_draw_frame,screen -> ink0, (args+2) * sizeof(int), array );
 
-		if (paintMode)
+		if (instance.paintMode)
 		{
 			lx = array[ 0 ];
 			ly = array[ 1 ];
@@ -1914,7 +1910,7 @@ char *_gfxSetPaint( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 1:
-			paintMode = getStackNum(__stack );
+			instance.paintMode = getStackNum(__stack );
 			break;
 		default:
 			setError(22,data->tokenBuffer);
@@ -2003,7 +1999,7 @@ char *_gfxSetPattern( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 1:
-			currentPattern = getStackNum(__stack);
+			instance.current_pattern = getStackNum(__stack);
 			break;
 		default:
 			setError(22,data->tokenBuffer);

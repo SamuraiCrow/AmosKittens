@@ -30,33 +30,59 @@ struct zone_base
 		int pos;
 		int value;
 	};
+	int event;	// is reset on dialog command, used read by rdialog command.
 
 	char *script_action;
-	void (*render) (struct zone_base *zl);
+
+	void (*update) (struct zone_base *base, struct cmdcontext *context, int args, int arg1,int arg2,int arg3);
+	void (*mouse_event) (struct zone_base *base, struct cmdcontext *context, int mx, int my, int zid);	// default
+	void (*render) (struct zone_base *);
+
+	zone_base();
 };
 
 #define I_FUNC_RENDER (void (*) (struct zone_base *))
 
 struct zone_button : zone_base
 {
-	void (*mouse_event) (struct cmdcontext *context, int mx, int my, int zid, struct zone_button *zb);
+	zone_button();
 
 	char *script_render;
-
 };
 
-struct zone_slider : zone_base
+struct zone_hslider : zone_base
 {
-	void (*mouse_event) (struct cmdcontext *context, int mx, int my, int zid, struct zone_slider *zb);
+	zone_hslider();
 
 	int trigger;
 	int total;
 	int step;
 };
 
+struct zone_vslider : zone_base
+{
+	zone_vslider();
+
+	int trigger;
+	int total;
+	int step;
+};
+
+struct zone_edit : zone_base
+{
+	zone_edit();
+
+	struct stringData *string;
+	int max;
+	int pen;
+	int paper;
+	int x1;
+	int y1;
+};
+
 struct zone_hypertext : zone_base
 {
-	void (*mouse_event) (struct cmdcontext *context, int mx, int my, int zid, struct zone_hypertext *zb);
+	zone_hypertext();
 
 	void *address;
 	int buffer;
@@ -68,7 +94,8 @@ enum
 {
 	iz_none,
 	iz_button,
-	iz_slider,
+	iz_hslider,
+	iz_vslider,
 	iz_hypertext
 };
 
@@ -79,50 +106,77 @@ struct izone
 	struct zone_base *custom;
 };
 
-struct cmdcontext
+struct userDefined
 {
-	int id;
-	char *tokenBuffer;
-	struct retroBlock *saved_block;
-	bool tested;
-	int stackp;
-	int lstackp;
-	struct ivar stack[20];
-	struct ivar *vars;
-	char *labels[512];
-	int programStackCount;
-	char *programStack[10];
-	int selected_dialog;
-	struct dialog dialog[2];
-	struct izone *zones;
-	void (*cmd_done)( struct cmdcontext *context, struct cmdinterface *self );
+	userDefined();	
+	char name[4];		// is always 2 chars, +1 zero, +1 pad
+	int len;
 	int args;
-	int error;
-	struct stringData *script;
-	char *at;
-	int l;
-	int ink0;
-	int ink1;
-	int ink3;
-	int image_offset;
-	int block_level;
-	void (**block_fn)( struct cmdcontext *context, struct cmdinterface *self );
-	int max_vars;
-	int last_zone;
-	int xgcl;
-	int ygcl;
-	int xgc;
-	int ygc;
-	bool has_return_value;
-	int return_value;
-	bool mouse_key;
-	bool exit_run;
+	const char *action;
+};
+
+class cmdcontext
+{
+	public:
+		// metods
+		struct izone *findZone(int id);
+		struct izone *setZone(int id,struct zone_base *obj);
+		struct userDefined *findUserDefined( const char *name );
+		void dumpUserDefined();
+		void resetZoneEvents();
+
+		cmdcontext();
+		~cmdcontext();
+
+		std::vector<struct izone> zones;
+
+		// data
+		int id;
+		char *tokenBuffer;
+		struct retroBlock *saved_block;
+		bool tested;
+		int stackp;
+		int lstackp;
+		struct ivar stack[20];
+		struct ivar *vars;
+		int param[9];		// index 0 to 8 == P1 to P9
+		char *labels[512];
+		int programStackCount;
+		char *programStack[10];
+		int selected_dialog;
+		struct dialog dialog[2];
+		struct stringData *script;
+		void (*cmd_done)( struct cmdcontext *context, struct cmdinterface *self );
+		int args;
+		int expected;
+		int error;
+		char *at;
+		int l;
+		int ink0;
+		int ink1;
+		int ink3;
+		int image_offset;
+		int block_level;
+		void (**block_fn)( struct cmdcontext *context, struct cmdinterface *self );
+		int max_vars;
+		int last_zone;
+		int xgcl;
+		int ygcl;
+		int xgc;
+		int ygc;
+		bool has_return_value;
+		int return_value;
+		bool mouse_key;
+		bool exit_run;
+		std::vector<struct userDefined> userDefineds;
+		struct userDefined *ui_current;
 };
 
 struct cmdinterface
 {
 	const char *name;
-	int type;
+	short len;
+	short type;
 	void (*pass)( struct cmdcontext *context, struct cmdinterface *self );
 	void (*cmd)( struct cmdcontext *context, struct cmdinterface *self );
 };
@@ -140,6 +194,6 @@ extern stringData *igetvarstr( struct cmdcontext *context, int index);
 extern int igetvarnum( struct cmdcontext *context, int index);
 
 extern void init_interface_context( struct cmdcontext *context, int id, struct stringData *script, int x, int y, int varSize, int bufferSize  );
-extern void cleanup_inerface_context( struct cmdcontext *context );
 extern void execute_interface_script( struct cmdcontext *context, int32_t label);
+extern void do_events_interface_script(  struct cmdcontext *context, int event, int delay );
 

@@ -15,8 +15,11 @@
 #include "stack.h"
 #include "kittyErrors.h"
 #include "debug.h"
+#include "spawn.h"
 
 extern struct error errorsTestTime[];
+
+extern void __real_stack_trace();
 
 void setError( int _code, char * _pos ) 
 {
@@ -24,6 +27,18 @@ void setError( int _code, char * _pos )
 	instance.kittyError.pos = _pos; 
 	instance.kittyError.posResume=instance.tokenBufferResume;  
 	instance.kittyError.newError = true;
+
+#ifdef show_stacktrace_for_errors_yes
+
+	BPTR debug_output = Open("CON:0/0/600/480/error stack trace",MODE_NEWFILE);
+	if (debug_output)
+	{
+		spawn( __real_stack_trace, "getStack", debug_output );
+		Wait(SIGF_CHILD);
+	}
+
+#endif
+
 }
 
 char *cmdERRN(struct nativeCommand *cmd, char *tokenBuffer)
@@ -127,8 +142,6 @@ struct error errorsRunTime[]= {
 	{ 17,"Illegal direct mode"},		
 	{ 18,""},						
 	{ 19,""},						
-// 20- Messages normaux
-// ~~~~~~~~~~~~~~~~~~~~
 	{ 20,"Division by zero"},		
 	{ 21,"String too long"},		
 	{ 22,"Syntax error"},
@@ -154,8 +167,6 @@ struct error errorsRunTime[]= {
 	{ 42,""},			
 	{ 43,""},	
 	{ 44,"Font not available"},			
-// Messages d'erreur ecrans/fenetres
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	{ 45,""},
 	{ 46,"Block not defined"},			
 	{ 47,"Screen not opened"},			
@@ -190,23 +201,21 @@ struct error errorsRunTime[]= {
 	{ 76,"Copper not disabled"},			
 	{ 77,"Copper list too long"},			
 	{ 78,"Illegal copper parameter"},		
-// Messages d'erreur disque
-// ~~~~~~~~~~~~~~~~~~~~~~~~
 	{ 79,"File already exists"},			
-	{ 80,"Directory not found"},		//	204		
-	{ 81,"File not found"},				//	205	
-	{ 82,"Illegal file name"},			//	210
-	{ 83,"Disc is not validated"},		//	213		
-	{ 84,"Disc is write protected"},	//	214	
-	{ 85,"Directory not empty"},		//	216		
-	{ 86,"Device not available"},		//	218		
-	{ 87,""},							//	220
-	{ 88,"Disc full"},					//	221
-	{ 89,"File is protected against deletion"},		//	222
-	{ 90,"File is write protected"},				//	223
-	{ 91,"File is protected against reading"},		//	224
-	{ 92,"Not an AmigaDOS disc"},					//	225
-	{ 93,"No disc in drive"},						// 226
+	{ 80,"Directory not found"},
+	{ 81,"File not found"},	
+	{ 82,"Illegal file name"},
+	{ 83,"Disc is not validated"},
+	{ 84,"Disc is write protected"},
+	{ 85,"Directory not empty"},
+	{ 86,"Device not available"},
+	{ 87,""},
+	{ 88,"Disc full"},
+	{ 89,"File is protected against deletion"},
+	{ 90,"File is write protected"},
+	{ 91,"File is protected against reading"},
+	{ 92,"Not an AmigaDOS disc"},
+	{ 93,"No disc in drive"},
 	{ 94,"I/O error"},				
 	{ 95,"File format not recognised"},		
 	{ 96,"File already opened"},			
@@ -217,8 +226,6 @@ struct error errorsRunTime[]= {
 	{ 101,"Disc error"},
 	{ 102,"Instruction not allowed here"},
 	{ 103,""},	
-// Message d'erreur sprites/souris
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	{ 104,""},
 	{ 105,"Sprite error"},						
 	{ 106,""},								
@@ -235,8 +242,6 @@ struct error errorsRunTime[]= {
 	{ 117,""},
 	{ 118,""},
 	{ 119,""},
-// Messages d'erreur dialogues
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	{ 120,"Interface error: bad syntax"},
 	{ 121,"Interface error: out of memory"},
 	{ 122,"Interface error: label defined twice"},
@@ -257,14 +262,11 @@ struct error errorsRunTime[]= {
 	{ 137,""},
 	{ 138,""},
 	{ 139,""},
-// Messages d'erreur DEVICE / PRINTER / SERIAL
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	{ 140,"Device already opened"},
 	{ 141,"Device not opened"},
 	{ 142,"Device cannot be opened"},
 	{ 143,"Command not supported by device"},
 	{ 144,"Device error"},
-// Messages Serie
 	{ 145,"Serial device already in use"},
 	{ 146,""},
 	{ 147,"Invalid baud rate"},
@@ -281,7 +283,6 @@ struct error errorsRunTime[]= {
 	{ 158,""},
 	{ 159,"Break detected"},
 	{ 160,"Selected unit already in use"},
-// Message Printer
 	{ 161,"User canceled request"},
 	{ 162,"Printer cannot output graphics"},
 	{ 163,""},
@@ -289,11 +290,9 @@ struct error errorsRunTime[]= {
 	{ 165,""},
 	{ 166,"Out of memory (printer device)"},
 	{ 167,"Out of internal memory (printer device)"},
-// Messages libraries
 	{ 168,"Library already opened"},
 	{ 169,"Library not opened"},
 	{ 170,"Cannot open library"},
-// Messages parallel
 	{ 171,"Parallel device already used"},
 	{ 172,"Out of memory (parallel device)"},
 	{ 173,"Invalid parallel parameter"},
@@ -301,24 +300,21 @@ struct error errorsRunTime[]= {
 	{ 175,""},
 	{ 176,"Parallel port reset"},
 	{ 177,"Parallel initialisation error"},
-// Music errors
-	{ 178,"Wave not defined"},				//	0
-	{ 179,"Sample not defined"},			//	1
-	{ 180,"Sample bank not found"},			//	2
-	{ 181,"256 characters for a wave"},		//	3
-	{ 182,"Wave 0 and 1 are reserved"},		//	4
-	{ 183,"Music bank not found"},			//	5
-	{ 184,"Music not defined"},				//	6
-	{ 185,"Can't open narrator"},			//	7
-	{ 186,"Not a tracker module"},			//	8
-	{ 187,"Cannot load med.library"},		//	9
-	{ 188,"Cannot start med.library"},		//	10
-	{ 189,"Not a med module"},				//	11
+	{ 178,"Wave not defined"},
+	{ 179,"Sample not defined"},
+	{ 180,"Sample bank not found"},
+	{ 181,"256 characters for a wave"},
+	{ 182,"Wave 0 and 1 are reserved"},
+	{ 183,"Music bank not found"},
+	{ 184,"Music not defined"},
+	{ 185,"Can't open narrator"},
+	{ 186,"Not a tracker module"},
+	{ 187,"Cannot load med.library"},
+	{ 188,"Cannot start med.library"},
+	{ 189,"Not a med module"},
 	{ 190,""},
 	{ 191,""},
 	{ 192,""},
-// AREXX
-// ~~~~~
 	{ 193,"Arexx port already opened"},
 	{ 194,"Arexx library not found"},
 	{ 195,"Cannot open Arexx port"},
@@ -326,8 +322,6 @@ struct error errorsRunTime[]= {
 	{ 197,"No Arexx message waiting"},
 	{ 198,"Arexx message not answered to"},
 	{ 199,"Arexx Device not interactive"},
-// Misc
-// ~~~~
 	{ 200,"Cannot open powerpacker.library (v35)"},
 // Kitty errors 
 	{ 1000,"Amos Kittens don't support this command" },

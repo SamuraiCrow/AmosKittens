@@ -266,75 +266,109 @@ unsigned int mem_crc( char *mem, uint32_t size )
 	return crc;
 }
 
+extern struct stackFrame *find_stackframe(int proc);
+void dump_var_ptr(int n, struct globalVar *varInfo, struct kittyData *var );
+void dump_var_ptr_undefined(int n, struct globalVar *varInfo );
 
-void dump_var( int n )
+void dump_var( int n)
+{
+	struct kittyData *var = NULL;
+
+	if (globalVars[n].var.type == type_proc)
+	{
+		var = &globalVars[n].var;
+	}
+	else if (globalVars[n].proc == 0)
+	{
+		var = &globalVars[n].var;
+	}
+	else
+	{
+		struct stackFrame *stackFrame = find_stackframe(globalVars[n].proc);
+		if (stackFrame)	var = stackFrame -> localVarData + globalVars[n].localIndex;
+	}
+
+	if (var)
+	{
+		dump_var_ptr( n, globalVars + n , var );
+	}
+#ifdef show_dump_vars_undefined_yes
+	else
+	{
+		dump_var_ptr_undefined( n, globalVars + n );
+	}
+#endif
+}
+
+
+void dump_var_ptr( int n, struct globalVar *varInfo, struct kittyData *var )
 {
 #ifdef show_array_yes
 	int i;
 #endif
-		switch (globalVars[n].var.type)
+		switch (var -> type)
 		{
 			case type_int:
 				printf("%d -- %d:%d:%s%s=%d\n",n,
-					globalVars[n].proc, 
-					globalVars[n].localIndex,
-					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName, globalVars[n].var.integer.value );
+					varInfo ->  proc, 
+					varInfo ->  localIndex,
+					varInfo ->  isGlobal ? "Global " : "",
+					varInfo ->  varName, var -> integer.value );
 				break;
 			case type_float:
 				printf("%d -- %d:%d:%s%s=%0.2lf\n",n,
-					globalVars[n].proc, 
-					globalVars[n].localIndex,
-					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName, globalVars[n].var.decimal.value );
+					varInfo ->  proc, 
+					varInfo ->  localIndex,
+					varInfo ->  isGlobal ? "Global " : "",
+					varInfo ->  varName, var -> decimal.value );
 				break;
 			case type_string:
 				printf("%d -- %d:%d:%s%s=%c%s%c\n",n,
-					globalVars[n].proc, 
-					globalVars[n].localIndex,
-					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName, 34, globalVars[n].var.str ? &(globalVars[n].var.str -> ptr) : "NULL", 34 );
+					varInfo ->  proc, 
+					varInfo ->  localIndex,
+					varInfo ->  isGlobal ? "Global " : "",
+					varInfo ->  varName, 34, var -> str ? &(var -> str -> ptr) : "NULL", 34 );
 				break;
 			case type_proc:
 
-				if (globalVars[n].procDataPointer == 0)
+				if (varInfo ->  procDataPointer == 0)
 				{
-					getLineFromPointer( globalVars[n].var.tokenBufferPos );
+					getLineFromPointer( var -> tokenBufferPos );
 
 					printf("%d -- %d:%d:%s%s[]=%04X (line %d)\n",n,
-						globalVars[n].proc, 
-						globalVars[n].localIndexSize, 
+						varInfo ->  proc, 
+						varInfo ->  localIndexSize, 
 						"Proc ",					
-						globalVars[n].varName, 
-						globalVars[n].var.tokenBufferPos, lineFromPtr.line );
+						varInfo ->  varName, 
+						var -> tokenBufferPos, lineFromPtr.line );
 				}
 				else
 				{
 					int tokenBufferLine;
-					getLineFromPointer( globalVars[n].var.tokenBufferPos );
+					getLineFromPointer( var -> tokenBufferPos );
 					tokenBufferLine = lineFromPtr.line;
-					getLineFromPointer( globalVars[n].procDataPointer );
+					getLineFromPointer( varInfo ->  procDataPointer );
 
 					printf("%d -- %d::%s%s[]=%04X (line %d)  --- data read pointer %08x (line %d)\n",n,
-						globalVars[n].proc, "Proc ",
-						globalVars[n].varName, 
-						globalVars[n].var.tokenBufferPos, tokenBufferLine,
-						globalVars[n].procDataPointer, lineFromPtr.line );
+						varInfo ->  proc, "Proc ",
+						varInfo ->  varName, 
+						var -> tokenBufferPos, tokenBufferLine,
+						varInfo ->  procDataPointer, lineFromPtr.line );
 				}
 
 				break;
 			case type_int | type_array:
 
 				printf("%d -- %d:%d:%s%s(%d)=",n,
-					globalVars[n].proc, 
-					globalVars[n].localIndex,
-					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName,
-					globalVars[n].var.count);
+					varInfo ->  proc, 
+					varInfo ->  localIndex,
+					varInfo ->  isGlobal ? "Global " : "",
+					varInfo ->  varName,
+					var -> count);
 #ifdef show_array_yes
-				for (i=0; i<globalVars[n].var.count; i++)
+				for (i=0; i<var -> count; i++)
 				{
-					printf("[%d]=%d ,",i, (&(globalVars[n].var.int_array -> ptr) +i) -> value );
+					printf("[%d]=%d ,",i, (&(var -> int_array -> ptr) +i) -> value );
 				}
 #else
 				printf("...");
@@ -345,15 +379,15 @@ void dump_var( int n )
 			case type_float | type_array:
 
 				printf("%d -- %d:%d:%s%s(%d)=",n,
-					globalVars[n].proc, 
-					globalVars[n].localIndex,
-					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName,
-					globalVars[n].var.count);
+					varInfo ->  proc, 
+					varInfo ->  localIndex,
+					varInfo ->  isGlobal ? "Global " : "",
+					varInfo ->  varName,
+					var -> count);
 #ifdef show_array_yes
-				for (i=0; i<globalVars[n].var.count; i++)
+				for (i=0; i<var -> count; i++)
 				{
-					printf("[%d]=%0.2f ,",i, (&(globalVars[n].var.float_array -> ptr)+i) -> value );
+					printf("[%d]=%0.2f ,",i, (&(var -> float_array -> ptr)+i) -> value );
 				}
 #else
 				printf("...");
@@ -364,18 +398,18 @@ void dump_var( int n )
 			case type_string | type_array:
 
 				printf("%d -- %d:%d:%s%s(%d)=",n,
-					globalVars[n].proc, 
-					globalVars[n].localIndex,
-					globalVars[n].isGlobal ? "Global " : "",
-					globalVars[n].varName,
-					globalVars[n].var.count);
+					varInfo ->  proc, 
+					varInfo ->  localIndex,
+					varInfo ->  isGlobal ? "Global " : "",
+					varInfo ->  varName,
+					var -> count);
 #ifdef show_array_yes
 
 				{
 					struct stringData *strptr;
-					for (i=0; i<globalVars[n].var.count; i++)
+					for (i=0; i<var -> count; i++)
 					{
-						strptr =(&(globalVars[n].var.str_array -> ptr))[i];
+						strptr =(&(var -> str_array -> ptr))[i];
 
 						printf("[%d]=%s ,",i, strptr ? &(strptr -> ptr) : "<NULL>");
 					}
@@ -390,6 +424,17 @@ void dump_var( int n )
 		}
 }
 
+void dump_var_ptr_undefined(int n,struct globalVar *varInfo )
+{
+	printf("%d -- %d:%d:%s%s=<undefined>\n",n,
+			varInfo ->  proc, 
+			varInfo ->  localIndex,
+			varInfo ->  isGlobal ? "Global " : "",
+			varInfo ->  varName );
+}
+
+
+
 void dump_local( int proc )
 {
 	int n;
@@ -398,9 +443,12 @@ void dump_local( int proc )
 	{
 		if (globalVars[n].varName == NULL) return;
 
-		if (globalVars[n].proc == proc)
+		if (globalVars[n].var.type != type_proc )
 		{
-			dump_var( n );
+			if (globalVars[n].proc == proc)
+			{
+				dump_var( n );
+			}
 		}
 	}
 }
@@ -410,11 +458,31 @@ void dump_global()
 {
 	int n;
 
+	// dump global vars
+
 	for (n=0;n<var_count[0];n++)
 	{
 		if (globalVars[n].varName == NULL) return;
-		dump_var( n );
+
+		if (globalVars[n].proc == 0)  
+		{
+			dump_var( n );
+		}
 	}
+
+	// proc
+
+	for (n=0;n<var_count[0];n++)
+	{
+		if (globalVars[n].varName == NULL) return;
+
+		if (globalVars[n].var.type == type_proc)  
+		{
+			dump_var( n );
+			dump_local( globalVars[n].proc );
+		}
+	}
+
 }
 
 void dump_prog_stack()
@@ -527,11 +595,12 @@ void dump_banks()
 		bank = &kittyBankList[n];
 		if (bank -> start)
 		{
-			printf("%03d - %.8s S:$%08X L:%d\n", 
+			printf("%03d - %.8s S:$%08X L:%d -> object %08x\n", 
 				bank -> id,
 				(char *) bank->start-8,
 				bank -> start, 
-				bank -> length);
+				bank -> length,
+				bank -> object_ptr);
 		}
 	}
 	printf("\n");
@@ -707,7 +776,7 @@ void dump_anim()
 
 	Printf("\nDump anim channels\n");
 
-	for ( int n  = 0 ; n < channels -> _size();n++ )
+	for ( unsigned int n  = 0 ; n < channels -> _size();n++ )
 	{
 		item = channels -> item(n);
 
@@ -732,16 +801,17 @@ void dump_channels()
 
 	Printf("\nDump channels\n");
 
-	for ( int n  = 0 ; n < channels -> _size();n++ )
+	for (unsigned int n  = 0 ; n < channels -> _size();n++ )
 	{
 		item = channels -> item(n);
 
 		if (item)
 		{	
-			Printf("id: %ld, amal status: %ld amal script %s, anim status: %ld, anim script: %s\n",
+			Printf("id: %ld, amal status: %ld amal script %s, (%08lx) anim status: %ld, anim script: %s\n",
 				item -> id,
 				item -> amalStatus,
 				item -> amal_script ? "Yes" : "No",
+				item -> amalProg.prog_crc,
 				item -> animStatus,
 				item -> anim_script ? "Yes" : "No"
 				);
@@ -776,81 +846,6 @@ void dump_screens()
 	}
 };
 
-
-
-#ifdef __amigaos__
-#define IDCMP_COMMON IDCMP_MOUSEBUTTONS | IDCMP_INACTIVEWINDOW | IDCMP_ACTIVEWINDOW  | \
-	IDCMP_CHANGEWINDOW | IDCMP_MOUSEMOVE | IDCMP_REFRESHWINDOW | IDCMP_RAWKEY | \
-	IDCMP_EXTENDEDMOUSE | IDCMP_CLOSEWINDOW | IDCMP_NEWSIZE | IDCMP_INTUITICKS | IDCMP_MENUPICK | IDCMP_GADGETUP
-
-struct Window *debug_Window = NULL;;
-#endif
-
-void open_debug_window()
-{
-#ifdef __amigaos__
-	debug_Window = OpenWindowTags( NULL,
-				WA_Left,			820,
-				WA_Top,			20,
-				WA_InnerWidth,		800,
-				WA_InnerHeight,	800,
-				WA_SimpleRefresh,	TRUE,
-				WA_CloseGadget,	FALSE,
-				WA_DepthGadget,	TRUE,
-				WA_DragBar,		TRUE,
-				WA_Borderless,	FALSE,
-				WA_SizeGadget,	FALSE,
-				WA_SizeBBottom,	TRUE,
-				WA_NewLookMenus,	TRUE,
-				WA_Title, "Debug Window",
-				WA_Activate,        TRUE,
-				WA_Flags, WFLG_RMBTRAP| WFLG_REPORTMOUSE,
-				WA_IDCMP,           IDCMP_COMMON,
-			TAG_DONE);
-#endif
-}
-
-void close_debug_window()
-{
-#ifdef __amigaos__
-	if (debug_Window) CloseWindow(debug_Window);
-	debug_Window = NULL;
-#endif
-}
-
-void debug_draw_wave(struct wave *wave)
-{
-#ifdef __amigaos__
-	unsigned int n;
-	 char *data;
-	data = ( char *) &(wave -> sample.ptr);
-
-	open_debug_window();
-	for (n=0;n<wave -> sample.bytes;n++) 	WritePixelColor( debug_Window -> RPort, 50+n, 400 + data[n] , 0xFF0000FF); 
-	getchar();
-	close_debug_window();
-#endif
-}
-
-
-void debug_draw_hline(int x)
-{
-#ifdef __amigaos__
-	int y;
-	if (debug_Window)
-	{
-		for (y=-30;y<=30;y++)
-		{
-			WritePixelColor( debug_Window -> RPort, 50+x, 400+y, 0xFFFF0000); 
-		}
-	}
-	else
-	{
-		printf("debug gfx window not open\n");
-	}
-#endif 
-}
-
 void dump_collided()
 {
 	for (unsigned int n=0;n<collided.size();n++)
@@ -858,3 +853,105 @@ void dump_collided()
 		printf("collided id: %d\n",collided[n]);
 	}
 }
+
+char *stackErrorBuffer = NULL;
+
+int32 printStack(struct Hook *hook, struct Task *task, struct StackFrameMsg *frame)
+{
+	struct DebugSymbol *symbol = NULL;
+
+	switch (frame->State)
+	{
+		case STACK_FRAME_DECODED:
+
+				if (symbol = ObtainDebugSymbol(frame->MemoryAddress, NULL))
+				{
+					Printf("%s : %s\n", symbol -> Name, 
+						symbol->SourceFunctionName ? symbol->SourceFunctionName : "NULL");
+						ReleaseDebugSymbol(symbol);
+				}
+				else
+				{
+					Printf("(%p) -> %p\n", frame->StackPointer, frame->MemoryAddress);
+				}
+				break;
+
+		case STACK_FRAME_INVALID_BACKCHAIN_PTR:
+
+				Printf( "(%p) invalid backchain pointer\n",
+					frame->StackPointer);
+				break;
+
+		case STACK_FRAME_TRASHED_MEMORY_LOOP:
+
+				Printf( "(%p) trashed memory loop\n",
+					frame->StackPointer);
+				break;
+
+		case STACK_FRAME_BACKCHAIN_PTR_LOOP:
+
+				Printf( "(%p) backchain pointer loop\n",
+					frame->StackPointer);
+				break;
+
+		default:
+				Printf( "Unknown state=%lu\n", frame->State);
+	}
+
+	return 0;  // Continue tracing.
+}
+
+
+static int stack_trace_recored_count = 0;
+static struct StackFrameMsg *stack_trace_recored;
+
+int32 stack_trace_recored_fn(struct Hook *hook, struct Task *task, struct StackFrameMsg *frame)
+{
+	stack_trace_recored[ stack_trace_recored_count ] = *frame;
+	stack_trace_recored_count ++;
+
+	return 0;  // Continue tracing.
+}
+
+
+
+extern struct Task *main_task;
+
+void __real_stack_trace()	// only call this from a new process.
+{
+	Printf("Error Error ---- stack trace\n");
+
+	stack_trace_recored_count = 0;
+	stack_trace_recored = (struct StackFrameMsg *) malloc( sizeof(struct StackFrameMsg) * 1000 );
+
+	if (stack_trace_recored)
+	{
+		if (main_task != NULL)
+		{
+			struct Hook *hook = (struct Hook *) AllocSysObjectTags(ASOT_HOOK, ASOHOOK_Entry, printStack, TAG_END);
+
+			if (hook != NULL)
+			{
+				SuspendTask(main_task, 0);
+				uint32 result = StackTrace(main_task, hook);
+				RestartTask(main_task, 0);
+				
+				Printf("-- stack trace count %d\n",stack_trace_recored_count);
+
+				for (int i=0; i<stack_trace_recored_count;i++)
+				{
+					printStack( hook, main_task , &stack_trace_recored[ i ]);
+				}
+
+				Delay(50*20);
+
+				FreeSysObject(ASOT_HOOK, hook);
+			}
+		}
+
+		free(stack_trace_recored);
+		stack_trace_recored = NULL;
+	}
+}
+
+

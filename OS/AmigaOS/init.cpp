@@ -17,7 +17,7 @@
 #include <intuition/pointerclass.h>
 #include <proto/retroMode.h>
 #include <proto/kittyCompact.h>
-#include "ahi_dev.h"
+#include "kittyAudio.h"
 
 #include "joysticks.h"
 #include "amoskittens.h"
@@ -38,6 +38,8 @@ struct DataTypesIFace		*IDataTypes = NULL;
 
 extern struct Library		 	*DOSBase ;
 extern struct DOSIFace		*IDOS ;
+
+struct DebugIFace		*IDebug = NULL;
 
 struct Library 			*AHIBase = NULL;
 struct AHIIFace			*IAHI = NULL;
@@ -78,10 +80,13 @@ struct GraphicsIFace		*IGraphics = NULL;
 struct Library			*LayersBase = NULL;
 struct LayersIFace		*ILayers = NULL;
 
+struct Library			*kittyCompactBase = NULL;
+struct kittyCompactIFace	*IkittyCompact = NULL;
+
 APTR engine_mx = 0;
 APTR channel_mx[4] = { 0,0,0,0 };
 
-void remove_words(char *name,const char **list);
+bool remove_words(char *name,const char **list);
 
 UWORD *EmptyPointer = NULL;
 
@@ -135,19 +140,49 @@ const char *newsuffix  = ".library";
 void open_extension( const char *name, int id )
 {
 	int l;
-	char					*newName;
-	char					*ext = strdup(name);
+	bool new_format = false;
+	char					*newName = NULL;
 	struct Library			*extBase = NULL;
 	struct kittyCompactIFace	*Iext = NULL;
 
-	if (ext == NULL) goto cleanup;
-	remove_words( ext, prefixList );
+	if (strlen(name)>8)
+	{
+		printf("%s\n",(name + strlen(name) - 8));
+		if (strcmp((name + strlen(name) - 8),".library")==0) new_format = true;
+	}
 
-	l = strlen(newprefix) + strlen( ext ) + strlen( newsuffix) + 1;
-	newName = (char *) malloc(l);
+	if (new_format)
+	{
+		char *c;
+		newName = strdup( name );
+
+		for (c=newName;*c;c++)
+		{
+			if ((*c>='A')&&(*c<='Z')) *c = *c-'A'+'a';
+		}		
+	}
+	else
+	{
+		char	*ext = strdup(name);
+		if (ext == NULL) goto cleanup;
+
+		if (remove_words( ext, prefixList ))
+		{
+			l = strlen(newprefix) + strlen( ext ) + strlen( newsuffix) + 1;
+			newName = (char *) malloc(l);
+			if (newName == NULL)
+			{
+				free(ext);
+				goto cleanup;
+			}
+			sprintf(newName,"%s%s%s",newprefix,ext,newsuffix);
+		}
+		else newName = strdup( ext );
+		free(ext);
+	}
+
 	if (newName == NULL) goto cleanup;
 
-	sprintf(newName,"%s%s%s",newprefix,ext,newsuffix);
 	printf("%s\n",newName);
 
 	if ( open_lib( newName, 53L , "main", 1, &extBase, (struct Interface **) &Iext  ) )
@@ -173,7 +208,7 @@ void open_extension( const char *name, int id )
 
 cleanup:
 	if (newName) free(newName);
-	if (ext) free(ext);
+
 }
 
 
@@ -190,6 +225,9 @@ BOOL init()
 		kitty_extensions[i].lookup = NULL;
 	}
 
+	IDebug = (DebugIFace*) GetInterface( SysBase,"debug",1,TAG_END);
+	if ( IDebug == NULL ) return FALSE;
+
 	if ( ! open_lib( "asl.library", 0L , "main", 1, &AslBase, (struct Interface **) &IAsl  ) ) return FALSE;
 	if ( ! open_lib( "datatypes.library", 0L , "main", 1, &DataTypesBase, (struct Interface **) &IDataTypes  ) ) return FALSE;
 	if ( ! open_lib( "locale.library", 53 , "main", 1, &LocaleBase, (struct Interface **) &ILocale  ) ) return FALSE;
@@ -203,6 +241,7 @@ BOOL init()
 	if ( ! open_lib( "layers.library", 54L , "main", 1, &LayersBase, (struct Interface **) &ILayers  ) ) return FALSE;
 	if ( ! open_lib( "workbench.library", 53 , "main", 1, &WorkbenchBase, (struct Interface **) &IWorkbench ) ) return FALSE;
 	if ( ! open_lib( "icon.library", 53, "main", 1, &IconBase, (struct Interface **) &IIcon) ) return FALSE;
+	if ( ! open_lib( "kittycompact.library", 53, "main", 1, &kittyCompactBase, (struct Interface **) &IkittyCompact) ) return FALSE;
 
 	_locale = (struct Locale *) OpenLocale(NULL);
 
@@ -274,7 +313,7 @@ BOOL init()
 
 	if ( ! EmptyPointer ) return FALSE;
 
-	audio_start();
+	audioStart();
 
 	return TRUE;
 }
@@ -343,6 +382,8 @@ void closedown()
 
 	cleanup_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
+	if (IDebug) DropInterface((struct Interface*) IDebug); IDebug = 0;
+
 	if (IIcon) DropInterface((struct Interface*) IIcon); IIcon = 0;
 	if (IconBase) CloseLibrary(IconBase); IconBase = 0;
 
@@ -379,6 +420,9 @@ void closedown()
 	if (GraphicsBase) CloseLibrary(GraphicsBase); GraphicsBase = 0;
 	if (IGraphics) DropInterface((struct Interface*) IGraphics); IGraphics = 0;
 
+	if (kittyCompactBase) CloseLibrary(kittyCompactBase); kittyCompactBase = 0;
+	if (IkittyCompact) DropInterface((struct Interface*) IkittyCompact); IkittyCompact = 0;
+
 	cleanup_printf("%s:%d\n",__FUNCTION__,__LINE__);
 
 	if (engine_mx) 
@@ -399,12 +443,13 @@ void closedown()
 	}
 }
 
-void remove_words(char *name,const char **list)
+bool remove_words(char *name,const char **list)
 {
 	const char **i;
 	char *src;
 	char *dest = name;
 	bool found;
+	bool word_removed = false;
 	int sym;
 
 	for (src = name;*src;src++)
@@ -419,6 +464,7 @@ void remove_words(char *name,const char **list)
 				src += strlen(*i);
 				src--;
 				found = true;
+				word_removed = true;
 				continue;
 			}
 		}
@@ -438,4 +484,7 @@ void remove_words(char *name,const char **list)
 	{
 		sprintf(name,"cmd");
 	}
+	return word_removed;
 }
+
+

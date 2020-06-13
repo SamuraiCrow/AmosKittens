@@ -8,6 +8,7 @@
 #include <math.h>
 #include <signal.h>
 
+#include <string>
 #include "config.h"
 
 #ifdef __amigaos4__
@@ -56,12 +57,13 @@ extern void setError( int _code, char * _pos ) ;
 #include "spawn.h"
 #include "label.h"
 #include "amosstring.h"
+#include "kittyaudio.h"
+#include "load_config.h"
 
 //include "ext_music.h"
 
 bool running = true;
 bool interpreter_running = false;
-
 int sig_main_vbl = 0;
 int proc_stack_frame = 0;
 
@@ -81,6 +83,8 @@ struct stringData *var_param_str = NULL;
 int var_param_num;
 double var_param_decimal;
 
+int joy_keyboard_index = -1;
+
 char *_file_start_ = NULL;
 char *_file_pos_  = NULL;		// the problem of not knowing when stacked commands are executed.
 char *_file_end_ = NULL;
@@ -88,6 +92,8 @@ uint32_t _file_bank_size = 0;
 
 int procStackCount = 0;
 uint32_t tokenFileLength;
+
+struct fileContext *kittensFile;
 
 bool startup = false;
 
@@ -98,7 +104,7 @@ struct extension_lib	kitty_extensions[32];
 unsigned int regs[16];
 extern unsigned int var_count[2];
 
-unsigned short token_not_found = 0xFFFF;	// so we know its not a token, token 0 exists.
+unsigned short token_not_found = 0x0000;
 
 struct stackFrame procStcakFrame[PROC_STACK_SIZE];
 struct stackFrame *currentFrame = NULL;
@@ -124,6 +130,8 @@ struct kittyFile kittyFiles[10];
 extern void freeScreenBobs (int);
 extern void *newTextWindow ( struct retroScreen *, int );
 extern void freeAllTextWindows ( struct retroScreen * );
+extern void kittyText(struct retroScreen *screen, int x, int y,struct stringData *txt);
+
 //	void engine_lock (void);
 //	void engine_unlock( void );
 //	void *findBank (int);
@@ -162,17 +170,33 @@ void init_instent(struct KittyInstance *instance )
 	instance -> engine_mouse_x = 0;
 	instance -> engine_mouse_y = 0;
 
+	instance -> xgr = 0;
+	instance -> ygr = 0;
+	instance -> GrWritingMode = 0;
+	instance -> paintMode = 0;
+	instance -> current_pattern = 0;
+	instance -> volume=0x10000;
+	instance -> current_resource_bank = -2;
+
 	instance -> api.freeScreenBobs =freeScreenBobs;
 	instance -> api.newTextWindow =newTextWindow;
 	instance -> api.freeAllTextWindows =freeAllTextWindows;
-	instance -> api.engine_lock =engine_lock;
-	instance -> api.engine_unlock =engine_unlock;
+	instance -> api.engineLock =engine_lock;
+	instance -> api.engineUnlock =engine_unlock;
 	instance -> api.findBank =findBank;
 	instance -> api.freeBank =freeBank;
 	instance -> api.reserveAs =reserveAs;
 	instance -> api.setError =setError;
 	instance -> api.dumpStack = dump_stack;
 	instance -> api.setCmdTo = setCmdTo;
+	instance -> api.kittyText = kittyText;
+
+	instance -> api.audioLock = audioLock;
+	instance -> api.audioUnlock = audioUnlock;
+	instance -> api.audioDeviceFlush = audioDeviceFlush;
+	instance -> api.audioPlay = audioPlay;
+	instance -> api.audioPlayWave = audioPlayWave;
+	instance -> api.audioSetSampleLoop = audioSetSampleLoop;
 
 	bzero( instance -> extensions_context, sizeof(instance -> extensions_context) );
 
@@ -892,13 +916,6 @@ char *cmdFloat(nativeCommand *cmd,char *ptr)
 	return ptr;
 }
 
-char *includeNOP(nativeCommand *cmd,char *ptr)
-{
-	setError(22,ptr);
-	return ptr;
-}
-
-
 const char *noName = "<not found>";
 
 const char *TokenName( unsigned short token )
@@ -1207,10 +1224,31 @@ void get_procedures()
 	}
 }
 
+#include "joysticks.h"
+
+void dump_joysticks();
+
+void cfg_joystick( int j, const char *type )
+{
+	struct joystick *joy=joysticks + j ;
+
+	joy -> port = j;
+	joy -> type = joy_usb;
+	joy -> device_id = 0;
+
+	printf("joysticks[%d].type = %d\n", j, joy -> type);
+
+	if (strcasecmp( type, "keyboard") == 0)
+	{
+		joy -> type = joy_keyb;
+		joy_keyboard_index = j;
+		return;
+	}
+}
+
 int main(int args, char **arg)
 {
 	BOOL runtime = FALSE;
-	struct fileContext *file;
 	char amosid[17];
 	int n;
 
@@ -1308,17 +1346,41 @@ int main(int args, char **arg)
 			KittyBaseInfo.rgb[n] = (DefaultPalette[n].r << 4 & 0xF00) | (DefaultPalette[n].g & 0xF0) | (DefaultPalette[n].b >> 4);
 		}
 
-		__load_bank__( (char *) "AmosPro_System:APSystem/AMOSPro_Default_Resource.Abk",-2);
+		__load_bank__( (char *) "amospro_system:APSystem/AMOSPro_Default_Resource_org.Abk",-2);
+//		__load_bank__( (char *) "progdir:kittySystem/kittens_default_resource.Abk",-2);
 		__load_bank__( (char *) "progdir:kittySystem/mouse.abk",-3);
+
 
 		// set default values.
 		memset( kitty_extensions , 0, sizeof(struct extension_lib) *32 );
 
-		// init default values for fake extentions
-//		open_extension( "AMOSPRO_music.lib", 1 );
-		open_extension( "AMOSPRO_compact.lib", 2 );
-		open_extension( "AMOSPRO_turbo.lib", 12 );
-		open_extension( "AMOSPRO_Craft.lib", 18 );
+		load_config("progdir:kittySystem/config.yml");
+
+		{
+			char tmp[30];
+			std::string *value;
+
+			for (n = 0; n < 4; n++ )
+			{
+				sprintf( tmp, "%s_%d", "joysticks", n );
+				value = getConfigValue( tmp );
+
+				printf (" %d\n", value );
+
+				cfg_joystick( n , value ? value -> c_str() : "usb" );
+			
+			}
+			for (n=0;n<20;n++)
+			{
+				sprintf( tmp, "%s_%d", "extension", n );
+				value = getConfigValue( tmp );
+				if (value)
+				{
+					open_extension( value -> c_str(), n );
+				}
+			}
+		}
+
 
 		for(n=0;n<32;n++)
 		{
@@ -1340,27 +1402,27 @@ int main(int args, char **arg)
 
 		if (instance.video) start_engine();
 
-		file = newFile( filename );
+		kittensFile = newFile( filename );
 
-		if ((file)&&(instance.video)&&(init_error == false))
+		if (( ! token_not_found )&&(kittensFile)&&(instance.video)&&(init_error == false))
 		{
-			if (file -> start)
+			if (kittensFile -> start)
 			{
-				_file_start_ = (char *) file -> start ;
-				_file_end_ = (char *) file -> end;
+				_file_start_ = (char *) kittensFile -> start ;
+				_file_end_ = (char *) kittensFile -> end;
 
 				// snifff the tokens find labels, vars, functions and so on.
 
-				pass1_reader( (char *) file -> start , _file_end_ );
+				pass1_reader( (char *) kittensFile -> start , _file_end_ );
 
 				if (instance.kittyError.code == 0)
 				{
 					runtime = TRUE;
-					if (file ->bank) init_banks( (char *) file -> bank, file -> bankSize );
+					if (kittensFile ->bank) init_banks( (char *) kittensFile -> bank, kittensFile -> bankSize );
 
 					gfxDefault(NULL, NULL);
 #ifdef run_program_yes
-					code_reader( (char *) file -> start , file -> tokenLength );
+					code_reader( (char *) kittensFile -> start , kittensFile -> tokenLength );
 #endif
 				}
 
@@ -1370,7 +1432,7 @@ int main(int args, char **arg)
 				}
 			}
 
-			 free_file(file);
+			 free_file(kittensFile);
 
 //			if (kittyError.newError == true)
 			{
@@ -1379,7 +1441,7 @@ int main(int args, char **arg)
 		}
 		else
 		{
-			if (!file) printf("AMOS file not open/can't find it\n");
+			if (!kittensFile) printf("AMOS file not open/can't find it\n");
 			if (!instance.video) printf("technical problems\n");
 		}
 

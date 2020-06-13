@@ -11,7 +11,7 @@
 //#define Printf printf
 #endif
 
-#ifdef test_app
+#ifdef __amoskittens_amal_test__
 #include "debug_amal_test_app.h"
 #else
 #include "debug.h"
@@ -31,7 +31,7 @@
 #include <retromode_lib.h>
 #define Printf printf
 
-#ifdef test_app
+#ifdef __amoskittens_amal_test__
 #define engine_fd stdout
 #else
 extern FILE *engine_fd;
@@ -81,14 +81,15 @@ void *amalAllocBuffer( int size )
 
 struct amalNested amal_nested_command[ max_nested_commands ];
 
-
-
-#ifdef test_app
+#ifdef __amoskittens_amal_test__
 	int nested_count = 0;
 	int parenthesis_count;
 	int amreg[26];
 	void print_code( void **adr );
 	int parenthesis[40];
+
+	#define dump_channels()
+
 #else
 	extern int amreg[26];
 	extern int parenthesis[];
@@ -181,7 +182,7 @@ void dumpAmalProgStack( struct kittyChannel *channel )
 
 void pushBackAmalCmd( amal::Flags flags, void **code, struct kittyChannel *channel, void *(*cmd)  (struct kittyChannel *self, struct amalCallBack *cb)  )
 {
-#ifdef test_app
+#ifdef __amoskittens_amal_test__
 	const char *name;
 	name = getAmalProgStackName( cmd  );
 	printf("push_back %08x (%s)\n", cmd, name ? name : "<NULL>");
@@ -287,7 +288,7 @@ int animScriptLength( const char *str, const char *valid_chars )
 
 	printf("exited on '%c' - len %d\n",*c,l);
 
-#ifdef test_app
+#ifdef __amoskittens_amal_test__
 	printf("%s\n",str);
 	printf("%s: ",__FUNCTION__);
 	for (c = str; c<(str+l);c++) printf("%c",*c);
@@ -351,12 +352,12 @@ unsigned int stdAmalWriterScript (	struct kittyChannel *channel, struct amalTab 
 
 // check if size is ok, or need a new buffer.
 
-	if (data -> pos > amalProg -> elements - size )	// larger writer, takes max 6 elements.
+	if (amalProg -> used > amalProg -> elements - size )	// larger writer, takes max 6 elements.
 	{
 		reAllocAmalBuf(amalProg,size + 20);	// add another 20 elements if buffer is low.
 
 		// now that call array is new, need to reset it.
-		call_array = &amalProg -> call_array[data -> pos];
+		call_array = &amalProg -> call_array[amalProg -> used];
 	}
 
 // text arg length, 			(do not confuse with token arg length)
@@ -775,7 +776,7 @@ unsigned int amal_for_to ( struct kittyChannel *channel, struct amalTab *self,
 				struct amalWriterData *data,
 				unsigned int num)
 {
-		AmalPrintf("writing [code block] to %08x - for \n", (unsigned int) &call_array[0]);
+		AmalPrintf("writing [code block] to %010d - for \n", (unsigned int) &call_array[0]);
 		char *current_location = (char *) (&call_array[1]);
 		char *start_location = (char *) channel -> amalProg.call_array;
 
@@ -867,7 +868,7 @@ unsigned int stdAmalWriterReg (  struct kittyChannel *channel,struct amalTab *se
 				unsigned int )
 {
 	int num = *(data -> at_script + 1);
-	AmalPrintf("writing %08x to %010x  - %s\n",(unsigned int) amal_call_reg,(unsigned int) &call_array[0] - (unsigned int) channel -> amalProg.call_array, self -> name );
+	AmalPrintf("writing %08x to %010d  - %s\n",(unsigned int) amal_call_reg,(unsigned int) &call_array[0] - (unsigned int) channel -> amalProg.call_array, self -> name );
 	call_array[0] = amal_call_reg;
 	*((int *) &call_array[1]) = num;
 
@@ -987,6 +988,25 @@ struct amalTab amalCmds[] =
 	{"@flush_prog",amal::class_cmd_arg,stdAmalWriter,amal_flush_prog },
 	{NULL, amal::class_cmd_arg,NULL,NULL }
 };
+
+const char *amalAdr2Name( void *adr )
+{
+	struct amalTab *itm;
+
+	if (adr == NULL) return NULL;
+
+	for ( itm = amalCmds; itm -> name; itm ++ )
+	{
+		if ( ((void *) itm -> call) == adr) return itm -> name;
+	}
+
+	for ( itm = amalSymbols; itm -> name; itm ++ )
+	{
+		if ( ((void *) itm -> call) == adr) return itm -> name;
+	}
+
+	return NULL;
+}
 
 void print_code( void **adr )
 {
@@ -1142,6 +1162,8 @@ void allocAmalBuf( struct amalBuf *i, int e )
 {
 	i -> elements = e;
 	i -> size = sizeof(void *) * i -> elements;
+	i -> used = 0;
+	i -> prog_crc = 0;
 	i -> call_array = (void *(**) API_AMAL_CALL_ARGS) amalAllocBuffer(i -> size);
 }
 
@@ -1149,6 +1171,7 @@ void freeAmalBuf( struct amalBuf *i)
 {
 	i -> elements = 0;
 	i -> size = 0;
+	i -> prog_crc = 0;
 	if ( i -> call_array ) amalFreeBuffer( i -> call_array );
 	i -> call_array = NULL;
 }
@@ -1211,7 +1234,7 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 	// reset R0-R9 registers, must be reset etch time we compile a new amal script.
 	memset( (char *) channel -> reg, 0, sizeof(channel -> reg) );
 
-#ifdef test_app
+#ifdef __amoskittens_amal_test__
 // 1000 to avoid reallocs.
 // 20 to test reallocs.
 	allocAmalBuf( amalProg, 60 );
@@ -1219,7 +1242,6 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 	allocAmalBuf( amalProg, 60 );
 #endif
 
-	data.pos = 0;
 	autotest_start_ptr_offset = -1;
 
 	s=&script -> ptr;
@@ -1252,17 +1274,17 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 				switch (GET_LAST_AMAL_NEST)
 				{
 					case nested_if:
-						fix_condition_branch( channel, (unsigned int) &amalProg -> call_array[data.pos] - (unsigned int) channel -> amalProg.call_array );
+						fix_condition_branch( channel, (unsigned int) &amalProg -> call_array[amalProg -> used] - (unsigned int) channel -> amalProg.call_array );
 						write_cmd.call = amal_call_then;
-						data.pos += AmalWriterCondition( channel, &write_cmd , &amalProg -> call_array[data.pos], &data, nested_then);
+						amalProg -> used += AmalWriterCondition( channel, &write_cmd , &amalProg -> call_array[amalProg -> used], &data, nested_then);
 						amal_cmd_equal = NULL;
 						break;
 
 					case nested_then:
-						fix_condition_branch( channel, (unsigned int) &amalProg -> call_array[data.pos] - (unsigned int) channel -> amalProg.call_array );	// skip over else
+						fix_condition_branch( channel, (unsigned int) &amalProg -> call_array[amalProg -> used] - (unsigned int) channel -> amalProg.call_array );	// skip over else
 						write_cmd.call = amal_call_else;
 
-//						data.pos += AmalWriterCondition( channel, &write_cmd , &amalProg -> call_array[data.pos], &data, nested_else);
+//						amalProg -> used += AmalWriterCondition( channel, &write_cmd , &amalProg -> call_array[amalProg -> used], &data, nested_else);
 
 						nested_count--;
 
@@ -1271,7 +1293,7 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 				}
 			}
 
-			data.pos += found -> write( channel, found, &amalProg -> call_array[data.pos], &data, 0 );
+			amalProg -> used += found -> write( channel, found, &amalProg -> call_array[amalProg -> used], &data, 0 );
 			data.lastClass = found -> Class;
 			s += data.command_len + data.arg_len;
 		}
@@ -1293,7 +1315,7 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 			data.command_len =0;
 			data.arg_len = 0;
 
-			data.pos += found -> write( channel, found, &amalProg -> call_array[data.pos], &data, num );
+			amalProg -> used += found -> write( channel, found, &amalProg -> call_array[amalProg -> used], &data, num );
 			data.lastClass = found -> Class;
 		}
 		else if ((*s >= 'A')&&(*s<='Z'))	 	// have not found command, maybe its a label
@@ -1310,7 +1332,7 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 			if (*l==':')	// check if its vaild label.
 			{
 				struct AmalLabelRef label;
-				label.pos = data.pos;
+				label.pos = amalProg -> used;
 				label.name = strdup( txt );
 				found_labels.push_back( label );
 				s = l+1;
@@ -1319,7 +1341,7 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 			{
 				AmalPrintf("code bad at: '%s'\n",s);
 
-				amalProg -> call_array[data.pos] = 0;
+				amalProg -> call_array[amalProg -> used] = 0;
 				amal_error_pos = (ULONG) (s - &(channel -> amal_script -> ptr));
 				printf("%d\n",amal_error_pos);
 
@@ -1331,20 +1353,26 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 			AmalPrintf("script: %s\n",&(channel -> amal_script -> ptr));
 			AmalPrintf("code bad at: '%s'\n",s);
 
-			amalProg -> call_array[data.pos] = 0;
+			amalProg -> call_array[amalProg -> used] = 0;
 			amal_error_pos = (ULONG) (s - &(channel -> amal_script -> ptr));
 
 			return 107;
 		}
 
-		if (data.pos > amalProg -> elements - 6 )	// larger writer, takes max 6 elements.
+		if (amalProg -> used > amalProg -> elements - 6 )	// larger writer, takes max 6 elements.
 		{
 			reAllocAmalBuf(amalProg,20);	// add another 20 elements if buffer is low.
 		}
 	}
 
-	amalProg -> call_array[data.pos++] = amal_call_next_cmd;
-	amalProg -> call_array[data.pos] = 0;
+	amalProg -> call_array[amalProg -> used++] = amal_call_next_cmd;
+	amalProg -> call_array[amalProg -> used] = 0;
+
+	amalProg -> prog_crc = 0;
+	for (unsigned int i = 0; i < amalProg -> used; i++)
+	{
+		amalProg -> prog_crc ^= (unsigned int) amalProg -> call_array[i];
+	}
 
 	// setup default stack of 500.
 
@@ -1366,7 +1394,6 @@ int asc_to_amal_tokens( struct kittyChannel  *channel )		// return error code
 	}
 	else channel -> amalProg.amalAutotest =  NULL;
 
-	AmalPrintf("channel -> amalProgCounter = %08x\n",(unsigned int) channel -> amalProg.amalProgCounter);
 
 	return 0;
 }
@@ -1378,7 +1405,7 @@ void amal_run_one_cycle(struct kittyChannel  *channel, void *(**prog) API_AMAL_C
 
 	for (call = prog ;  *call ; call ++ )
 	{
-		AmalPrintf("offset %d status %08x\n", (unsigned int) call - (unsigned int) channel -> amalProg.call_array, channel -> amalStatus );
+		AmalPrintf("offset %d call %08x status %08x\n", (unsigned int) call - (unsigned int) channel -> amalProg.call_array,  *call, channel -> amalStatus );
 
 		ret = (*call) ( channel, (void **) call, 0 );
 		if (ret)
@@ -1481,12 +1508,36 @@ void dump_amal_labels()
 	}
 }
 
+void amalDiscompile( amalBuf *amalProg )
+{
+	unsigned int off;
+	void **ptr;
+	const char *name;
 
-#ifdef test_app
+	if (amalProg->call_array == NULL) return;
+
+	for (off = 0; off < amalProg -> used ; off++)
+	{
+		ptr =  (void **) &amalProg->call_array[ off ];
+		name = amalAdr2Name( *ptr );
+
+		if (name)
+		{
+			printf("%10d - %s\n", (unsigned int) ptr - (unsigned int)  amalProg -> call_array ,name);
+		}
+		else printf("%10d - %08x (%d)\n", (unsigned int) ptr - (unsigned int)  amalProg -> call_array ,*ptr,*ptr);
+	}
+	getchar();
+}
+
+
+
+#ifdef __amoskittens_amal_test__
+
+struct KittyInstance instance;
 
 unsigned int amiga_joystick_dir[4];
 unsigned int amiga_joystick_button[4];
-struct retroScreen *screens[8];
 
 int obj_x = 100, obj_y = 50, obj_image = 20;
 

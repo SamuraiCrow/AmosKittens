@@ -1,15 +1,12 @@
 This result of trying to run different .amos files, on Amos Kittens, there is stuff missing, the list is to keep track of problems with etch .amos program, so we can fix problems we have.
 
-Error: undefined procedure --> Normaly there is a missing token (mssing command), need to check again, too see..
-
-
 **Amal_Editor.AMOS**
 
 (works maybe, takes lot time to start in debug mode, it does not work in AmosPRO some programing error some where.)
 
 **Amal_Editor_Fixed.AMOS**
 
-(works maybe, takes lot time to start in debug mode)
+It does load, but does not render correct, after running the program, AmigaOS starts crashing…
 
 **Disc_Manager.AMOS**
 
@@ -35,8 +32,9 @@ Stops at "Screen Base" command, that is not implemented.
 
 **Resource_Bank_Maker.AMOS**
 
-Failes to open a dialog window, I tried to debug this one before.
+Interface script error, need to debug the script.
 
 **Sample_Bank_Maker.AMOS**
 
-Syntax error on line 1102
+ Crashes as soon as you try to load a sample, maybe something wrong on the stack.
+ The Amos program does use some 680x0 routines, I have no idea if they are compatible, or not.

@@ -191,13 +191,26 @@ void dump_local_vars()
 	}
 }
 
+struct stackFrame *find_stackframe(int proc)
+{
+	int n;
+	for (n=proc_stack_frame;n>0;n--)
+	{
+		if (procStcakFrame[n].id == proc)
+		{
+			return procStcakFrame + n;
+		}
+	}
+	return NULL;
+}
+
 void stack_frame_up(int varIndex)
 {
 	struct globalVar *proc = globalVars + varIndex;
 	struct stackFrame *lastFrame;
 
-	printf("stack frame up on name %s\n",proc -> varName );
-	printf("size %d\n",proc -> localIndexSize);
+	dprintf("stack frame up on name %s\n",proc -> varName );
+	dprintf("size %d\n",proc -> localIndexSize);
 
 	lastFrame = procStcakFrame +proc_stack_frame;
 
@@ -222,7 +235,7 @@ void stack_frame_up(int varIndex)
 
 void __stack_frame_down()	// so this where we should take care of local vars and so on.
 {
-	dump_local_vars();
+//	dump_local_vars();
 	free_local_vars();
 	proc_stack_frame--;	
 	currentFrame = procStcakFrame +proc_stack_frame;
@@ -471,6 +484,7 @@ BOOL setVarStringArray( struct kittyData *var, char *tokenBuffer )
 
 char *(*_do_set) ( struct glueCommands *data, int nextToken ) = _setVar;
 
+extern const char *type_names[];
 
 char *_setVar( struct glueCommands *data, int nextToken )
 {
@@ -480,6 +494,13 @@ char *_setVar( struct glueCommands *data, int nextToken )
 	proc_names_printf("%s:%d -- set %s var %d\n",__FUNCTION__,__LINE__, (data -> lastVar & 0x8000 ? "local" : ""),  (data -> lastVar & 0x7FFF) - 1);
 
 	var = getVar(data -> lastVar);
+
+	if (var == NULL)
+	{
+		printf("%s:%s:%d -- set %s var %d\n",__FILE__,__FUNCTION__,__LINE__);
+		setError(ERROR_OBJECT_NOT_FOUND,data -> tokenBuffer);
+		return NULL;
+	}
 
 	success = FALSE;
 
@@ -509,13 +530,12 @@ char *_setVar( struct glueCommands *data, int nextToken )
 
 	if (success == FALSE)
 	{
-		if ( kittyStack[instance.stack].type !=  (var -> type & 7))
+		if ( kittyStack[instance.stack].type !=  (var -> type & 15))
 		{
-			proc_names_printf("kittyStack[%d].type= %d, (globalVars[%08x].var.type & 7)=%d\n",
+			printf("kittyStack[%d].type= %s, (var -> type & 15)=%s\n",
 				instance.stack, 
-				kittyStack[instance.stack].type, 
-				data -> lastVar, 
-				var -> type & 7);
+				type_names[kittyStack[instance.stack].type & 15], 
+				type_names[var -> type & 15]);
 			setError(ERROR_Type_mismatch,data->tokenBuffer);
 		}
 
@@ -549,11 +569,9 @@ int parenthesis[MAX_PARENTHESIS_COUNT];
 char *nextArg(struct nativeCommand *cmd, char *tokenBuffer)
 {
 	flushCmdParaStack(0);
-	
 	if (do_input[instance.parenthesis_count]) do_input[instance.parenthesis_count]( cmd, tokenBuffer );	// read from keyboad or disk.
 	return tokenBuffer;
 }
-
 
 char *parenthesisStart(struct nativeCommand *cmd, char *tokenBuffer)
 {
@@ -1567,6 +1585,8 @@ char *cmdProcAndArgs(struct nativeCommand *cmd, char *tokenBuffer )
 	struct reference *ref = (struct reference *) (tokenBuffer);
 
 	stackCmdNormal( _procAndArgs, tokenBuffer );
+	setStackNum(0);
+
 	cmdTmp[instance.cmdStack-1].tokenBuffer2  = NULL;	// must be reset, is used
 	tokenMode = mode_logical;					// parmiters should be handled logicaly, not as store.
 
@@ -2664,6 +2684,12 @@ char *cmdPrgUnder( struct nativeCommand *cmd, char *tokenBuffer )
 {
 	setStackNum(1);
 	return tokenBuffer;
+}
+
+char *includeNOP(nativeCommand *cmd,char *ptr)
+{
+	setError(22,ptr);
+	return ptr;
 }
 
 

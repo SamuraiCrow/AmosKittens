@@ -28,6 +28,7 @@
 #include "commandsbanks.h"
 #include "kittyErrors.h"
 #include "engine.h"
+#include "amosString.h"
 
 #include "interfacelanguage.h"
 
@@ -37,8 +38,6 @@ extern std::vector<struct kittyBank> kittyBankList;
 extern char *(*_do_set) ( struct glueCommands *data, int nextToken ) ;
 
 std::vector<struct cmdcontext *> icmdcontexts;
-
-int current_resource_bank = 16;
 
 void _my_print_text(struct retroScreen *screen, char *text, int maxchars);
 
@@ -84,11 +83,11 @@ void init_amos_kittens_screen_resource_colors(struct retroScreen *screen)
 {
 	struct kittyBank *bank1;
 
-	bank1 = findBank(current_resource_bank);
+	bank1 = findBank(instance.current_resource_bank);
 
 	 if (__resource_bank_has_pictures( bank1 ) == false )
 	{
-		bank1 = findBank(-2);
+		bank1 = findBank(instance.current_screen);
 	}
 
 	if (bank1)
@@ -150,7 +149,9 @@ void 	erase_interface_context( struct cmdcontext *context )
 	{
 		if (icmdcontexts[n] == context) 
 		{
-			icmdcontexts.begin()+n;
+			delete icmdcontexts[n];
+			icmdcontexts[n] = NULL;
+			icmdcontexts.erase( icmdcontexts.begin()+n);
 			return;
 		}
 	}
@@ -168,31 +169,17 @@ char *_guiDialogRun( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 1:	guiChannel = getStackNum(__stack);
-
-				if (context = find_interface_context( guiChannel ))
-				{
-					execute_interface_script( context, -1 );
-				}
+				label = -1;
 				break;
 
 		case 2:	guiChannel = getStackNum(__stack-1);
 				label = getStackNum(__stack);
-
-				if (context = find_interface_context( guiChannel ))
-				{
-					execute_interface_script( context, label );
-				}
 				break;
 
 		case 4:	guiChannel = getStackNum(__stack-3);
 				label = getStackNum(__stack-2);
 				x = getStackNum(__stack-1);
 				y = getStackNum(__stack);
-
-				if (context = find_interface_context( guiChannel ))
-				{
-					execute_interface_script( context, label );
-				}
 				break;
 
 		default:
@@ -200,6 +187,22 @@ char *_guiDialogRun( struct glueCommands *data, int nextToken )
 	}
 
 	popStack(__stack - data->stack );
+
+	if (context = find_interface_context( guiChannel ))
+	{
+		//  need to reset context.
+
+		context -> xgcl = 0;
+		context -> ygcl = 0;
+		context -> xgc = 0;
+		context -> ygc = 0;
+		context -> selected_dialog = 0;
+		context -> dialog[0].x = 0;
+		context -> dialog[0].y = 0;
+
+		execute_interface_script( context, label );
+	}
+
 	setStackNum( context ? (context -> has_return_value ? context -> return_value : 0) : 0 );
 
 	return NULL;
@@ -216,6 +219,7 @@ char *_guiDialog( struct glueCommands *data, int nextToken )
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 	int args =__stack - data->stack +1 ;
 	int guiChannel = 0;
+	struct cmdcontext *context = NULL;
 
 	switch (args)
 	{
@@ -226,7 +230,13 @@ char *_guiDialog( struct glueCommands *data, int nextToken )
 	}
 
 	popStack(__stack - data->stack );
-	setStackNum( 0 );
+
+	if (context = find_interface_context( guiChannel ))
+	{
+		do_events_interface_script( context,  0xF, 1 );
+	}
+
+	setStackNum( context ? (context -> has_return_value ? context -> return_value : 0) : 0 );
 
 	return NULL;
 }
@@ -282,7 +292,6 @@ char *_guiDialogBox( struct glueCommands *data, int nextToken )
 					script = getStackString(__stack);
 					init_interface_context( &context, 0, script, 0, 0, 16, 0 );
 					execute_interface_script( &context, -1 );
-					cleanup_inerface_context( &context );
 				}
 				break;
 
@@ -298,7 +307,6 @@ char *_guiDialogBox( struct glueCommands *data, int nextToken )
 					if (var2s) isetvarstr( &context,1,var2s);
 
 					execute_interface_script( &context, -1 );
-					cleanup_inerface_context( &context );
 				}
 				break;
 
@@ -316,7 +324,6 @@ char *_guiDialogBox( struct glueCommands *data, int nextToken )
 					if (var2s) isetvarstr( &context,1,var2s);
 
 					execute_interface_script( &context, -1 );
-					cleanup_inerface_context( &context );
 				}
 				break;
 
@@ -386,7 +393,6 @@ char *_guiDialogClose( struct glueCommands *data, int nextToken )
 				retroPutBlock( screen , screen -> double_buffer_draw_frame, context -> saved_block, context -> dialog[0].x, context -> dialog[0].y, 0xFF );
 			}
 
-			cleanup_inerface_context( context );
 			erase_interface_context( context );
 		}
 	}
@@ -403,6 +409,69 @@ char *guiDialogClose(nativeCommand *cmd, char *tokenBuffer)
 	return tokenBuffer;
 }
 
+struct stringData *dialog_open_arg_script(struct kittyData *arg)
+{
+	switch(arg -> type)
+	{
+		case type_string:
+				return arg -> str;
+
+		case type_int:
+				{
+					struct resourcebank_header *header; 
+					struct kittyBank *bank;
+					int idx = arg -> integer.value-1;
+					int hunk,pos,num_of_scripts,script_size,offset_data;
+
+					bank = findBank(instance.current_resource_bank);
+					if (bank == NULL) return NULL;
+
+					header = (resourcebank_header*) bank->start;
+					if (header -> script_offset == 0) return NULL;
+
+					hunk = header -> script_offset ;
+					if ((hunk)&&(idx>=0))		// if index is correct and we have data
+					{
+				   		pos=hunk; 
+						num_of_scripts = getWord( bank->start, pos );
+
+						if (idx < num_of_scripts)
+						{
+							pos += idx * 4;		// move to offset.
+							offset_data = getLong( bank->start, pos );
+
+							if (offset_data)
+							{
+								printf("hunk is at offset: %08x\n",  hunk );
+								printf("Name should be at offset: %08x\n",  hunk + offset_data - 20 );
+								printf("Size should be at offset: %08x\n", hunk + offset_data );
+
+								pos = hunk + offset_data;
+								script_size = getWord( bank->start, pos );
+
+								printf("script name:\n[%.20s]\n", bank->start + hunk + offset_data - 20 );
+								printf("script:\n");
+								printf("%.*s\n", script_size, bank->start + pos );
+								getchar();
+								return toAmosString( (const char *) bank->start + pos , script_size );
+							}
+						}
+					}
+
+					// {num og scripts}.l
+					// {offsets from hunk to after name, offset is zero if no script}
+					// {
+					//	{name}.20
+					//	{size}.w
+					//	{script}.size
+					//	{\0}.b
+					// }									
+				}
+				break;
+	}
+	return NULL;
+}
+
 char *_guiDialogOpen( struct glueCommands *data, int nextToken )
 {
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
@@ -417,18 +486,18 @@ char *_guiDialogOpen( struct glueCommands *data, int nextToken )
 	switch (args)
 	{
 		case 2:	id = getStackNum(__stack-1);
-				script = getStackString(__stack);			// this can also be a number
+				script = dialog_open_arg_script( kittyStack + __stack);
 				break;
 
 		case 3:
 				id = getStackNum(__stack-2);
-				script = getStackString(__stack-1);		// this can also be a number
+				script = dialog_open_arg_script( kittyStack+__stack -1);
 				varSize = getStackNum(__stack);
 				break;
 
 		case 4:
 				id = getStackNum(__stack-3);
-				script = getStackString(__stack-2);		// this can also be a number 
+				script = dialog_open_arg_script( kittyStack+__stack -2);
 				varSize = getStackNum(__stack-1);
 				bufferSize = getStackNum(__stack);
 				break;
@@ -680,19 +749,41 @@ char *_guiRdialog( struct glueCommands *data, int nextToken )
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 	int args =__stack - data->stack +1 ;
 	int _channel_,_button_,_object_;
-	int ret = 0;
+
+	struct cmdcontext *context = NULL;
+	struct zone_base *zb = NULL;
 
 	switch (args)
 	{
 		case 2:	_channel_ = getStackNum(__stack-1);
 				_button_ = getStackNum(__stack);
-				setError(23,data->tokenBuffer);
+
+				if (context = find_interface_context(_channel_))
+				{
+					if (struct izone *iz = context -> findZone(_button_))
+					{
+						zb = (struct zone_button *) (iz ? iz -> custom : NULL);
+					}
+
+//					zb = (struct zone_base *) context -> zones[_button_].custom;
+				}
 				break;
 
 		case 3:	_channel_ = getStackNum(__stack-2);
 				_button_ = getStackNum(__stack-1);
 				_object_ = getStackNum(__stack);
-				setError(23,data->tokenBuffer);
+
+
+
+				if (context = find_interface_context(_channel_))
+				{
+					if (struct izone *iz = context -> findZone(_button_))
+					{
+						zb = (struct zone_button *) (iz ? iz -> custom : NULL);
+					}
+
+//					zb = (struct zone_base *) context -> zones[_button_].custom;
+				}
 				break;
 
 		default:
@@ -700,7 +791,7 @@ char *_guiRdialog( struct glueCommands *data, int nextToken )
 	}
 
 	popStack(__stack - data->stack );
-	setStackNum( ret );
+	setStackNum( zb ? zb -> event : 0 );
 	return NULL;
 }
 
@@ -749,25 +840,62 @@ char *_guiDialogUpdate( struct glueCommands *data, int nextToken )
 {
 	printf("%s:%d\n",__FUNCTION__,__LINE__);
 	int args =__stack - data->stack +1 ;
-
-	NYI(__FUNCTION__);
+	int _channel_, _zone_, _param1_,_param2_,_param3_;
+	struct cmdcontext *context = NULL;
 
 	switch (args)
 	{
 		case 2:	// Dialog Update channel,zone
+
+				_channel_ = getStackNum(__stack-1);
+				_zone_ = getStackNum(__stack);
+				popStack(__stack - data->stack );
+
 				break;
+
 		case 3:	// Dialog Update channel,zone,param1
+
+				_channel_ = getStackNum(__stack-2);
+				_zone_ = getStackNum(__stack-1);
+				_param1_ = getStackNum(__stack);
+				popStack(__stack - data->stack );
+
 				break;
+
 		case 4:	// Dialog Update channel,zone,param1,param2
+
+				_channel_ = getStackNum(__stack-3);
+				_zone_ = getStackNum(__stack-2);
+				_param1_ = getStackNum(__stack-1);
+				_param2_ = getStackNum(__stack);
+				popStack(__stack - data->stack );
+
 				break;
+
 		case 5:	// Dialog Update channel,zone,param1,param2,param3
+
+				_channel_ = getStackNum(__stack-4);
+				_zone_ = getStackNum(__stack-3);
+				_param1_ = getStackNum(__stack-2);
+				_param2_ = getStackNum(__stack-1);
+				_param3_ = getStackNum(__stack);
+				popStack(__stack - data->stack );
+
 				break;
+
 		default:
+				popStack(__stack - data->stack );
 				setError(22,data->tokenBuffer);
 	}
 
-	popStack(__stack - data->stack );
-	setStackNum( 0 );
+	if (context = find_interface_context(_channel_))
+	{
+		if (struct izone *iz = context -> findZone(_zone_))
+		{
+			struct zone_base *base = (struct zone_button *) (iz ? iz -> custom : NULL);
+			base -> update( base, context, args - 2, _param1_,_param2_,_param3_) ;
+		}
+	}
 
 	return NULL;
 }
