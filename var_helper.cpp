@@ -20,11 +20,12 @@
 
 int findVar( char *name, int type, int _proc );
 extern int findVarPublic( char *name, int type );
-extern int findProc( char *name );
+extern int findProcByName( char *name );
 extern char *dupRef( struct reference *ref );
 
-extern struct stackFrame procStcakFrame[PROC_STACK_SIZE];
 extern struct globalVar globalVars[1000];
+extern struct stackFrame *currentFrame;
+
 extern int var_count[2];
 extern std::vector<struct label> labels;
 extern std::vector<struct  globalVar *> procedures;
@@ -63,7 +64,7 @@ struct label *var_JumpToName(struct reference *ref)
 	char *name = dupRef(ref);
 	if (name) 
 	{
-		struct label *label = findLabel( name, procStcakFrame[proc_stack_frame].id );
+		struct label *label = findLabel( name, currentFrame -> id );
 		free(name);
 		return label;
 	}
@@ -77,7 +78,7 @@ int var_find_proc_ref(struct reference *ref)
 	char *name = dupRef(ref);
 	if (name) 
 	{
-		ret = findProc( name );
+		ret = findProcByName( name );
 		free(name);
 	}
 	return ret;
@@ -105,7 +106,7 @@ int findProcAndFix( struct globalVar *toFind )
 	}
 }
 
-int findProc( char *name )
+int findProcByName( char *name )
 {
 	unsigned int n;
 	struct globalVar *var;
@@ -119,6 +120,23 @@ int findProc( char *name )
 		if ( strcasecmp( var -> varName, name)==0) 
 		{
 			return (unsigned int) (var - globalVars) +1;
+		}
+	}
+	return 0;
+}
+
+struct globalVar *findProcPtrById( int proc )
+{
+	unsigned int n;
+	struct globalVar *var;
+
+	for (n=0;n<procedures.size();n++)
+	{
+		var = procedures[n];
+
+		if (  var -> proc == proc ) 
+		{
+			return var;
 		}
 	}
 	return 0;

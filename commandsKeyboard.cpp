@@ -38,13 +38,12 @@ extern std::vector<struct keyboard_buffer> keyboardBuffer;
 
 extern ULONG *codeset_page;
 extern struct globalVar globalVars[];
+
 int _scancode;
 int _keyshift;
-int keyState[256];
 
 extern int bobDoUpdate ;
 extern int bobUpdateNextWait ;
-
 
 extern bool next_print_line_feed;
 extern char *(*_do_set) ( struct glueCommands *data, int nextToken ) ;
@@ -108,7 +107,7 @@ char *scancodeToTxt( unsigned int scancode, int qualifier)
 
 // only for keyboard handling
 
-void handel_key( char *buf )
+void handel_key( const struct keyboard_buffer *current_key, char *buf_out )
 {
 	ULONG actual;
 	char buffer[20];
@@ -119,24 +118,24 @@ void handel_key( char *buf )
 	event.ie_Class		=	IECLASS_RAWKEY;
 	event.ie_SubClass	=	0;
 
-	if (current_key.Code)
+	if (current_key -> Code)
 	{
-		_scancode = current_key.Code;
+		_scancode = current_key -> Code;
 
-		event.ie_Code = current_key.Code;
-		event.ie_Qualifier = current_key.Qualifier;
+		event.ie_Code = current_key -> Code;
+		event.ie_Qualifier = current_key -> Qualifier;
 		actual = MapRawKey(&event, buffer, 20, 0);
 
 		if (actual)
 		{
-			buf[0] = buffer[0];
-			buf[1]=0;
+			buf_out[0] = buffer[0];
+			buf_out[1]=0;
 		}
 	}
 	else
 	{
-		buf[0] = keyboardBuffer[0].Char;
-		buf[1]=0;
+		buf_out[0] = keyboardBuffer[0].Char;
+		buf_out[1]=0;
 	}
 }
 
@@ -162,7 +161,7 @@ void atomic_get_char( struct stringData *str)
 			current_key = keyboardBuffer[0];
 			if (current_key.event == kitty_key_down )
 			{
-				handel_key( buf );
+				handel_key( &current_key, buf );
 				str -> size = buf[0] ? 1: 0;
 
 				gettimeofday(&key_press_time, NULL);
@@ -181,7 +180,7 @@ void atomic_get_char( struct stringData *str)
 				{
 					if (delta_time_ms(repeat_time,ctime) > keyboardSpeed  )
 					{
-						handel_key( buf );
+						handel_key( &current_key, buf );
 						str -> size = buf[0] ? 1: 0;
 
 						gettimeofday(&repeat_time, NULL);
@@ -289,7 +288,7 @@ void kitty_getline(string &input)
 					break;	
 			}
 
-		} while ( (done == false) && (engine_stopped==false) );
+		} while ( (done == false) && (instance.engine_stopped==false) );
 	}
 	else
 	{
@@ -439,7 +438,7 @@ char *_cmdKeyState( struct glueCommands *data,int nextToken )
 
 		if ((key>-1)&&(key<256))
 		{
-			ret = keyState[key];
+			ret = instance.engine_key_state[key];
 			success = true;
 		}
 	}

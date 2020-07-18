@@ -45,6 +45,7 @@ extern void setError( int _code, char * _pos ) ;
 #include "commandsErrors.h"
 #include "commandsScreens.h"
 #include "commandsBanks.h"
+#include "commandsBackgroundGraphics.h"
 
 #include "debug.h"
 #include "kittyErrors.h"
@@ -106,6 +107,7 @@ extern unsigned int var_count[2];
 
 unsigned short token_not_found = 0x0000;
 
+struct globalVar proc_main_data;
 struct stackFrame procStcakFrame[PROC_STACK_SIZE];
 struct stackFrame *currentFrame = NULL;
 
@@ -132,10 +134,6 @@ extern void *newTextWindow ( struct retroScreen *, int );
 extern void freeAllTextWindows ( struct retroScreen * );
 extern void kittyText(struct retroScreen *screen, int x, int y,struct stringData *txt);
 
-//	void engine_lock (void);
-//	void engine_unlock( void );
-//	void *findBank (int);
-//	void freeBank (int);
 extern struct kittyBank *reserveAs ( int, int ,int, const char *, char * );
 
 void setCmdTo( int option )
@@ -147,6 +145,8 @@ void setCmdTo( int option )
 			break;
 	}
 }
+
+extern void __wait_vbl();
 
 void init_instent(struct KittyInstance *instance )
 {
@@ -170,6 +170,14 @@ void init_instent(struct KittyInstance *instance )
 	instance -> engine_mouse_x = 0;
 	instance -> engine_mouse_y = 0;
 
+	instance -> engine_wait_key = false;
+	instance -> engine_key_repeat = false;
+	instance -> engine_key_down = false;
+	instance -> engine_stopped = false;
+	instance -> engine_mouse_hidden = false;
+	instance -> engine_pal_mode= true;
+	instance -> engine_back_color = 0;
+
 	instance -> xgr = 0;
 	instance -> ygr = 0;
 	instance -> GrWritingMode = 0;
@@ -181,8 +189,12 @@ void init_instent(struct KittyInstance *instance )
 	instance -> api.freeScreenBobs =freeScreenBobs;
 	instance -> api.newTextWindow =newTextWindow;
 	instance -> api.freeAllTextWindows =freeAllTextWindows;
+
 	instance -> api.engineLock =engine_lock;
 	instance -> api.engineUnlock =engine_unlock;
+	instance -> api.engineAddVblInterrupt =engine_add_vbl_Interrupt;
+	instance -> api.engineRemoveVblInterrupt =engine_remove_vbl_Interrupt;
+
 	instance -> api.findBank =findBank;
 	instance -> api.freeBank =freeBank;
 	instance -> api.reserveAs =reserveAs;
@@ -197,6 +209,10 @@ void init_instent(struct KittyInstance *instance )
 	instance -> api.audioPlay = audioPlay;
 	instance -> api.audioPlayWave = audioPlayWave;
 	instance -> api.audioSetSampleLoop = audioSetSampleLoop;
+	instance -> api.waitvbl = __wait_vbl;
+
+	instance -> api.findBlock_in_blocks = findBlock_in_blocks;
+	instance -> api.findBlock_in_cblocks = findBlock_in_cblocks;
 
 	bzero( instance -> extensions_context, sizeof(instance -> extensions_context) );
 
@@ -378,7 +394,7 @@ char *cmdRem(nativeCommand *cmd, char *ptr)
 
 				for (c=var_name;*c;c++) if (*c==' ') *c = 0;
 
-				if (show_var( ptr, var_name, procStcakFrame[ proc_stack_frame].id ) == false )
+				if (show_var( ptr, var_name, currentFrame -> id ) == false )
 				{
 					if (show_var( ptr, var_name, 0) == false )
 					{
@@ -1256,6 +1272,8 @@ int main(int args, char **arg)
 
 	procStcakFrame[0].localVarData = stackFrameData;	// this just temp... need to manage size, lett it grow..
 	procStcakFrame[0].localVarDataNext = stackFrameData;
+	currentFrame = procStcakFrame;
+
 
 #ifdef __amigaos__
 	struct Task *me;
@@ -1294,6 +1312,7 @@ int main(int args, char **arg)
 					break;
 #if defined(__amigaos4__)
 			case 0:
+			case 1:
 					filename = asl();
 					break;	
 #endif
@@ -1402,7 +1421,7 @@ int main(int args, char **arg)
 
 		if (instance.video) start_engine();
 
-		kittensFile = newFile( filename );
+		kittensFile = filename ? newFile( filename ) : NULL;
 
 		if (( ! token_not_found )&&(kittensFile)&&(instance.video)&&(init_error == false))
 		{

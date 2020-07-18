@@ -34,7 +34,7 @@
 extern int sig_main_vbl;
 extern bool running;			// 
 extern bool interpreter_running;	// interprenter is really running.
-extern int keyState[256];
+
 extern char *F1_keys[20];
 extern struct Menu *amiga_menu;
 
@@ -43,13 +43,6 @@ extern void BackFill_Func(struct RastPort *ArgRP, struct BackFillArgs *MyArgs);
 struct Process *EngineTask = NULL;
 struct Screen *fullscreen_screen = NULL;
 extern UWORD *EmptyPointer;
-
-bool engine_wait_key = false;
-bool engine_stopped = false;
-bool engine_key_repeat = false;
-bool engine_key_down = false;
-bool engine_mouse_hidden = false;
-bool engine_pal_mode= true;
 
 bool synchro_on = true;
 
@@ -66,8 +59,7 @@ extern ChannelTableClass *channels;
 std::vector<struct keyboard_buffer> keyboardBuffer;
 std::vector<struct amos_selected> amosSelected;
 std::vector<int> engineCmdQue;
-
-uint32_t	engine_back_color = 0x000000;
+std::vector<struct kittyVblInterrupt> kittyVblInterrupts;
 
 int autoView = 1;
 int bobDoUpdate = 0;			// when we are ready to update bobs.
@@ -336,7 +328,7 @@ bool start_engine()
 	EngineTask = spawn( main_engine, "Amos kittens graphics engine",engine_debug_output);
 
 	Wait(SIGF_CHILD);
-	return ((EngineTask) && (engine_stopped == false));
+	return ((EngineTask) && (instance.engine_stopped == false));
 }
 
 void set_default_colors( struct retroScreen *screen )
@@ -586,7 +578,7 @@ void engine_ShowMouse( ULONG enable )
 		}
 	}
 
-	engine_mouse_hidden = !enable;
+	instance.engine_mouse_hidden = !enable;
 }
 
 extern std::vector<struct amosMenuItem *> menuitems;
@@ -714,7 +706,7 @@ void handel_engine_keys(ULONG ccode)
 	switch (ccode)
 	{
 		case RAWKEY_F11:
-			engine_pal_mode = engine_pal_mode ? false : true;
+			instance.engine_pal_mode = instance.engine_pal_mode ? false : true;
 			break;					
 
 		case RAWKEY_F12:
@@ -852,7 +844,7 @@ void handel_window()
 								int wh;
 								int ih;
 
-								ih = engine_pal_mode ? instance.video -> height : instance.video -> height * 5 / 6;
+								ih = instance.engine_pal_mode ? instance.video -> height : instance.video -> height * 5 / 6;
 
 								if (fullscreen_screen)
 								{
@@ -919,7 +911,7 @@ void handel_window()
 								}
 							}
 
-							engine_wait_key = false;
+							instance.engine_wait_key = false;
 
 							if (menu_shortcut( Code ,  Qualifier)) break;
 
@@ -929,7 +921,7 @@ void handel_window()
 							{
 								int emu_code = Code &~ IECODE_UP_PREFIX;
 								if (emu_code==75) emu_code = 95;
-								keyState[ emu_code ] = (Code & IECODE_UP_PREFIX) ? 0 : -1;
+								instance.engine_key_state[ emu_code ] = (Code & IECODE_UP_PREFIX) ? 0 : -1;
 							}
 
 							if ((ccode >= RAWKEY_F1) && (ccode <= RAWKEY_F10))
@@ -1046,7 +1038,7 @@ void main_engine()
 	{
 		Printf("init engine done..\n");
 		
-		struct retroScreen *screen = NULL;
+
 
 		ULONG sigs;
 		ULONG joy_sig;
@@ -1055,7 +1047,7 @@ void main_engine()
 		
 		Signal( &main_task->pr_Task, SIGF_CHILD );
 
-		retroClearVideo(instance.video, engine_back_color);
+		retroClearVideo(instance.video, instance.engine_back_color);
 
 		init_usb_joysticks();
 
@@ -1144,35 +1136,10 @@ void main_engine()
 
 			if (autoView)
 			{
-				retroClearVideo( instance.video, engine_back_color );
+				retroClearVideo( instance.video, instance.engine_back_color );
 
-				for (n=0; n<8;n++)
-				{
-					screen = instance.screens[n];
-
-					if (screen)
-					{
-						retroFadeScreen_beta(screen);
-
-//						Printf("screen id: %ld, flags %08lx,%08lx\n",n, screen -> event_flags , engine_update_flags);
-//						dump_channels();
-//						dump_anim();
-
-						if (screen -> event_flags & engine_update_flags)
-						{
-							// dump_bobs_on_screen( n );
-							clearBobsOnScreen(screen);
-							drawBobsOnScreenExceptBob(screen,NULL);
-
-							if (screen -> Memory[1]) 	// has double buffer
-							{
-								swap_buffer( screen );
-							}
-
-						}
-						screen -> event_flags = 0;
-					}
-				}	// next
+					engine_draw_vbl_Interrupts();
+					engine_draw_bobs_and_do_vbl();
 
 				retroDrawVideo( instance.video );
 
@@ -1254,7 +1221,7 @@ void main_engine()
 	if (fullscreen_screen) CloseScreen(fullscreen_screen);
 	fullscreen_screen = NULL;
 
-	engine_stopped = true;
+	instance.engine_stopped = true;
 }
 
 void engine_lock()
@@ -1266,6 +1233,95 @@ void engine_unlock()
 {
 	MutexRelease(engine_mx);
 }
+
+bool engine_have_vbl_Interrupt( void (*fn) VBL_FUNC_ARGS )		// is not atomic.
+{
+	engine_lock();
+	unsigned int i;
+	for (i = 0; i < kittyVblInterrupts.size(); i++)
+	{
+		if (kittyVblInterrupts[i].fn == fn) 
+		{
+			engine_unlock();
+			return true;
+		}
+	}
+	engine_unlock();
+	return false;
+}
+
+void engine_add_vbl_Interrupt( void (*fn) VBL_FUNC_ARGS, void *custom )
+{
+	if (engine_have_vbl_Interrupt(fn) == false)
+	{
+		struct kittyVblInterrupt new_Interrupt;
+
+		engine_lock();
+		new_Interrupt.fn = fn;
+		new_Interrupt.custom = custom;
+		kittyVblInterrupts.push_back(new_Interrupt);
+		engine_unlock();
+	}
+}
+
+
+void engine_remove_vbl_Interrupt( void (*fn) VBL_FUNC_ARGS )
+{
+	unsigned int i;
+	engine_lock();
+	for (i = 0; i < kittyVblInterrupts.size(); i++)
+	{
+		if (kittyVblInterrupts[i].fn == fn)
+		{
+			kittyVblInterrupts.erase(kittyVblInterrupts.begin()+i);
+			break;
+		}
+	}
+	engine_unlock();
+}
+
+void engine_draw_vbl_Interrupts()
+{
+	unsigned int i;
+	for (i = 0; i < kittyVblInterrupts.size(); i++)
+	{
+		kittyVblInterrupts[i].fn( kittyVblInterrupts[i].custom );
+	}
+}
+
+void engine_draw_bobs_and_do_vbl()
+{
+	int n;
+	struct retroScreen *screen;
+
+	for (n=0; n<8;n++)
+	{
+		screen = instance.screens[n];
+
+		if (screen)
+		{
+			retroFadeScreen_beta(screen);
+
+//			Printf("screen id: %ld, flags %08lx,%08lx\n",n, screen -> event_flags , engine_update_flags);
+//			dump_channels();
+//			dump_anim();
+
+			if (screen -> event_flags & engine_update_flags)
+			{
+				// dump_bobs_on_screen( n );
+				clearBobsOnScreen(screen);
+				drawBobsOnScreenExceptBob(screen,NULL);
+
+				if (screen -> Memory[1]) 	// has double buffer
+				{
+					swap_buffer( screen );
+				}
+			}
+			screen -> event_flags = 0;
+		}
+	}	// next
+}
+
 
 char *asl()
 {

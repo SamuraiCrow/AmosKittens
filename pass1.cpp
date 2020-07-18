@@ -40,12 +40,13 @@ extern std::vector<struct lineAddr> linesAddress;
 extern std::vector<struct defFn> defFns;
 char *lastLineAddr;
 
+// we need to keep count, to make sure code is valid.
+
 int ifCount = 0;
 int endIfCount = 0;
 int currentLine = 0;
 int pass1_bracket_for;
 int pass1_token_count = 0;
-
 int nest_loop_count = 0;
 
 extern uint32_t _file_bank_size;
@@ -54,7 +55,8 @@ extern uint32_t _file_bank_size;
 extern uint32_t bank_crc;
 #endif
 
-unsigned short last_tokens[MAX_PARENTHESIS_COUNT];
+unsigned short last_tokens[MAX_PARENTHESIS_COUNT];		// used for nested loops, etc.
+unsigned short pass1_prev_token =0;	// not for nested loops. (can't be used sub passes)
 
 enum
 {
@@ -436,7 +438,47 @@ struct globalVar * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 	return NULL;
 }
 
-static struct globalVar *current_proc = NULL;
+extern struct globalVar proc_main_data;
+static struct globalVar *current_proc = &proc_main_data;
+
+
+void pass1_sign( char * ptr )
+{
+//	printf("prev %04x this %04x",pass1_prev_token ,*((unsigned short *) (ptr -2) ));
+
+	switch ( pass1_prev_token )	// should be signes
+	{
+		case 0x0074:	//	"("
+		case 0x005C:	//	","
+		case 0x0094:	//	To
+				printf("moded\n");
+				*((unsigned short *) (ptr - 2)) = 0xFFCA+sizeof(void *);		// mod the token, so signes token.
+				return;	// nothing more to do....
+
+		default:				// not sure if its signes or subtract
+
+				switch ( pass1_prev_token )		// exclude list	(for signes)
+				{
+					case 0x0006:	//	"vars"
+					case 0x001E:	//	"bin"
+					case 0x0036:	//	"hex"
+					case 0x003E:	//	"numbers"
+					case 0x0046:	//	"float"
+					case 0x123E:	//	"True"
+					case 0x1248:	//	"False"
+					case 0x0026:	//	"Strings"
+							return;	// nothing more to do....
+					default:
+							if (pass1_token_count <= 2)
+							{
+								printf("moded\n");
+								*((unsigned short *) (ptr -2)) = 0xFFCA+sizeof(void *);		// mod the token, so signes token.
+							}
+							return;
+				}
+				break;
+	}
+}
 
 char *pass1_procedure( char *ptr )
 {
@@ -788,7 +830,7 @@ void pass1_proc_end( char *ptr )
 	nested_count --;
 	pass1_inside_proc = false;
 
-	current_proc = NULL;
+	current_proc = &proc_main_data;
 }
 
 void pass1_bracket_end( char *ptr )
@@ -864,7 +906,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							ret += ReferenceByteLength(ptr);
 							break;
 
-				case 0x0054:	pass1_token_count = 0;
+				case 0x0054:	pass1_token_count = 0;		// next command 
 							break;
 
 				case 0x00b0:	procCount ++;
@@ -1070,16 +1112,14 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 
 				case 0x0404:	// Data
 
-							if (current_proc)
-							{
-								if (current_proc -> procDataPointer == NULL) current_proc -> procDataPointer = ptr + 2;
-							}
-							else 	if (procStcakFrame[0].dataPointer == NULL) procStcakFrame[0].dataPointer = ptr + 2;
-
+							if (current_proc -> procDataPointer == NULL) current_proc -> procDataPointer = ptr + 2;
 							addNest( nested_data );
 
 							break;
-
+				
+				case 0xFFCA:	// negative sign... check if is used for signes.
+							pass1_sign( ptr );
+							break;
 			}
 
 			ret += cmd -> size;
@@ -1152,6 +1192,8 @@ void pass1_reader( char *start, char *file_end )
 	unsigned int n;
 
 	lastLineAddr = start;
+	
+	pass1_prev_token = 0x0;
 	token = *((short *) start);
 	ptr = start +2;
 
@@ -1160,6 +1202,8 @@ void pass1_reader( char *start, char *file_end )
 		if (ptr == NULL) break;
 
 		last_tokens[instance.parenthesis_count] = token;
+
+		pass1_prev_token = token;
 		token = *((short *) ptr);
 		ptr += 2;	// next token.
 	}

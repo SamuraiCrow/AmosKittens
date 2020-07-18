@@ -51,6 +51,7 @@ static struct timeval timer_before, timer_after;
 
 extern std::vector<struct label> labels;
 extern std::vector<int> engineCmdQue;
+extern struct globalVar proc_main_data;
 
 extern struct kittyData *getVar(uint16_t ref);
 
@@ -2024,18 +2025,34 @@ char *_cmdRestore( struct glueCommands *data, int nextToken )
 	char *ptr = NULL;
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
-	struct stringData *name = getStackString(instance.stack);
-	if (name)	
+	switch (kittyStack[instance_stack].type)
 	{
-		struct label *label = findLabel( &name -> ptr, procStcakFrame[proc_stack_frame].id );
-		ptr = label ? label -> tokenLocation : NULL;
+		case type_string:
+			{
+				struct stringData *name = kittyStack[instance_stack].str;
+				if (name)	
+				{
+					struct label *label = findLabel( &name -> ptr, currentFrame -> id );
+					ptr = label ? label -> tokenLocation : NULL;
+				}
+			}
+			break;
+		case type_int:
+			{
+				char tmp[ 30 ];
+				sprintf( tmp, "%d", kittyStack[instance_stack].integer.value );
+				struct label *label = findLabel( tmp, currentFrame -> id );
+				ptr = label ? label -> tokenLocation : NULL;
+			}
+			break;
 	}
+
 	popStack( instance.stack - data->stack  );
 
 	if (ptr)
 	{
 		ptr = FinderTokenInBuffer( ptr-2, 0x0404 , -1, -1, _file_end_ );
-		procStcakFrame[proc_stack_frame].dataPointer = ptr;
+		currentFrame -> dataPointer = ptr;
 	}
 	else
 	{
@@ -2050,36 +2067,54 @@ char *cmdRestore(struct nativeCommand *cmd, char *tokenBuffer )
 	unsigned short next_token = NEXT_TOKEN(tokenBuffer);
 	proc_names_printf("%s:%d\n", __FUNCTION__,__LINE__);
 
-	if ((next_token == 0x0006 ) || (next_token == 0x0018))
+	switch (next_token)
 	{
-		struct reference *ref = (struct reference *) (tokenBuffer + 2);
+		case 0x0006:	// var
+		case 0x0018:	// label
+				{
+					struct reference *ref = (struct reference *) (tokenBuffer + 2);
 
-		if (ref -> ref)
-		{
-			char *name;
-			int idx = ref->ref-1;
-			switch (globalVars[idx].var.type & 7 )
-			{
-				case type_int:
-				case type_proc:
-						if (name = dupRef( ref ))
+					if (ref -> ref)
+					{
+						char *name;
+						int idx = ref->ref-1;
+						switch (globalVars[idx].var.type & 7 )
 						{
-							struct label *label = findLabel(name, procStcakFrame[proc_stack_frame].id);
-							char *ptr = label -> tokenLocation;
-							free(name);
+							case type_int:
+							case type_proc:
+								if (name = dupRef( ref ))
+								{
+									struct label *label = findLabel(name, procStcakFrame[proc_stack_frame].id);
+									char *ptr = label -> tokenLocation;
+									free(name);
 
-							if (ptr) 
-							{
-								ptr = FinderTokenInBuffer( ptr-2, 0x0404 , -1, -1, _file_end_ );
-								procStcakFrame[proc_stack_frame].dataPointer = ptr;
-							}
-							else 	setError( 40, tokenBuffer );
+									if (ptr) 
+									{
+										ptr = FinderTokenInBuffer( ptr-2, 0x0404 , -1, -1, _file_end_ );
+										currentFrame -> dataPointer = ptr;
+									}
+									else 	setError( 40, tokenBuffer );
+								}
+								return tokenBuffer + 2 + sizeof(struct reference) + ref -> length;
 						}
-						return tokenBuffer + 2 + sizeof(struct reference) + ref -> length;
-			}
+						printf("type: %d\n",globalVars[idx].var.type & 7);
+					}
+				}
+				break;
 
-			printf("type: %d\n",globalVars[idx].var.type & 7);
-		}
+		case 0x0000:	// new line.
+		case 0x0054:	// next command 
+
+				if (proc_stack_frame)
+				{
+					struct globalVar *this_proc = findProcPtrById( currentFrame -> id );
+					currentFrame ->  dataPointer = this_proc -> procDataPointer;
+				}
+				else
+				{
+					currentFrame ->  dataPointer = proc_main_data.procDataPointer;
+				}
+				return tokenBuffer;
 	}
 
 	// if we are here, then we did not use name of var as label name.

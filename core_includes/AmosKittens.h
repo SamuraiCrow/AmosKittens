@@ -665,6 +665,8 @@ enum
 //       the API allows extensions to access routines from the outside
 // --------------------------------------------------------------------------------------------
 
+#define VBL_FUNC_ARGS ( void *custom )
+
 struct kittyApi
 {
 //	-- runtime --
@@ -679,6 +681,8 @@ struct kittyApi
 
 	void (*engineLock) (void);
 	void (*engineUnlock) (void);
+	void (*engineAddVblInterrupt) ( void (*fn) VBL_FUNC_ARGS, void *custom );
+	void (*engineRemoveVblInterrupt) ( void (*fn) VBL_FUNC_ARGS );
 
 //	-- debug --
 
@@ -708,6 +712,16 @@ struct kittyApi
 	bool (*audioPlay) (uint8_t * data,int len, int channel, int frequency);
 	void (*audioDeviceFlush) (int voices);
 	void (*audioSetSampleLoop) ( ULONG voices, bool value );
+
+//	-- system --
+
+	void (*waitvbl) ();
+
+//	-- blocks --
+
+	struct retroBlock *(*findBlock_in_blocks) ( int id );
+	struct retroBlock *(*findBlock_in_cblocks) ( int id );
+
 };
 
 // --------------------------------------------------------------------------------------------
@@ -743,13 +757,21 @@ struct KittyInstance
 	int engine_mouse_key ;
 	int engine_mouse_x ;
 	int engine_mouse_y ;
+	bool engine_wait_key;
+	bool engine_key_repeat;
+	bool engine_key_down;
+	bool engine_stopped;
+	bool engine_mouse_hidden;
+	bool engine_pal_mode;
+	uint32_t engine_back_color;
+	int engine_key_state[256];
 	int xgr;
 	int ygr;
 	int GrWritingMode;
 	int paintMode;
-	struct kittyApi api;
 	bool audio_3k3_lowpass;
 	LONG volume;
+	struct kittyApi api;
 };
 
 #if defined(__amoskittens__)
