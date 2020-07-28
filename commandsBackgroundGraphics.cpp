@@ -95,7 +95,7 @@ char *_bgPasteIcon( struct glueCommands *data, int nextToken )
 						default:	retroPasteIcon( screen, 0, instance.icons,x,y,image-1);
 								if (screen -> Memory[1]) retroPasteIcon( screen, 1,  instance.icons,x,y,image-1);
 								break;
-					}		
+					}
 				}
 				break;
 			break;
@@ -144,7 +144,7 @@ char *_bgGetIcon( struct glueCommands *data, int nextToken )
 							retroGetSprite(screen,instance.icons,image-1,x0,y0,x1,y1);
 						}
 
-						bank1 = findBank(2);
+						bank1 = findBankById(2);
 
 						if (!bank1) 
 						{
@@ -423,17 +423,14 @@ char *_bgPutBlock( struct glueCommands *data, int nextToken )
 		screen = instance.screens[ instance.current_screen ];
 		if (screen)
 		{
-			if (block) 
+			switch (screen -> autoback)
 			{
-				switch (screen -> autoback)
-				{
-					case 0:	retroPutBlock(screen, screen -> double_buffer_draw_frame, block, x,y, 255);
-							break;
-					default:	retroPutBlock(screen, 0, block, x,y, 255);
-							if (screen -> Memory[1]) retroPutBlock(screen, 1, block, x,y, 255);
-							break;
-				}	
-			}
+				case 0:	retroPutBlock(screen, screen -> double_buffer_draw_frame, block, x,y, 255);
+						break;
+				default:	retroPutBlock(screen, 0, block, x,y, 255);
+						if (screen -> Memory[1]) retroPutBlock(screen, 1, block, x,y, 255);
+						break;
+			}	
 		}
 	}
 

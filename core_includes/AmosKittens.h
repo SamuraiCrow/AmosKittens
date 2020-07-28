@@ -612,10 +612,6 @@ struct kittyLib
 	cmdTmp[__cmdStack].parenthesis_count =instance_parenthesis_count; \
 	__cmdStack++; \
 
-
-extern struct zone *zones;
-extern int zones_allocated;
-
 extern int currentLine;
 
 extern bool equal_symbol;
@@ -694,9 +690,13 @@ struct kittyApi
 
 //	-- banks --
 
-	struct kittyBank *(*findBank) (int);
+	struct kittyBank *(*findBankById) (int);
+	struct kittyBank *(*findBankByIndex) (int);
+	struct kittyBank *(*firstBank)();
+	int (*getBankListSize)();
 	struct kittyBank *(*reserveAs) ( int, int ,int, const char *, char * );
 	void (*freeBank) (int);
+	void *(*getBankObject) (int id);
 
 //	--  text --
 
@@ -722,6 +722,24 @@ struct kittyApi
 	struct retroBlock *(*findBlock_in_blocks) ( int id );
 	struct retroBlock *(*findBlock_in_cblocks) ( int id );
 
+//	-- bobs --
+
+	struct retroSpriteObject *(*getBob) (unsigned int id);
+
+//	-- sprite --
+
+	int (*XSprite_formula) (int x);
+	int (*YSprite_formula) (int y);
+	int (*from_XSprite_formula) (int x);
+	int (*from_YSprite_formula) (int y);
+
+//	-- zones --
+
+	int (*find_zone_in_any_screen_hard) ( int hx, int hy );
+	int (*find_zone_in_any_screen_pixel) ( int hx, int hy );
+	int (*find_zone_in_only_screen_hard) ( int screen, int hx, int hy );
+	int (*find_zone_in_only_screen_pixel) ( int screen, int hx, int hy );
+
 };
 
 // --------------------------------------------------------------------------------------------
@@ -745,6 +763,8 @@ struct KittyInstance
 	struct kittyData *kittyStack;
 	struct glueCommands *cmdTmp;
 	struct errorAt kittyError;
+	struct zone *zones ;
+	int zones_allocated ;
 	int current_screen;
 	int current_extension;
 	int current_pattern;

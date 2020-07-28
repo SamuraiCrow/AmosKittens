@@ -22,7 +22,7 @@ works, (don't like bullet fonts)
 
 **Get_Time.AMOS**
 
-Pass1 error: No THEN in a structured test
+works
 
 **GMC_to_AMOS.AMOS**
 
@@ -60,12 +60,13 @@ missing token: 0894 - command: Menu Movable
 
 **RAMOS1_3_Install.AMOS**
 
-got out of index error on jmp$() array, with -1 index.
-on line 90, new syntax error on line 176 at Return command
+Error: illlegal function call
+at line number: 261 
+(Looks like it does not know it should flush gosub at end of procedure.)
 
 **Scrolling_text_demo.AMOS**
 
-cooper effect looks like is at the wrong location, but it looks like it works.
+works.
 
 **Sonix.AMOS**
 
@@ -73,11 +74,11 @@ work, but there is DSI error, due to mystery mem corruption.
 
 **Sound_tracker2_1.AMOS**
 
-works,
+works.
 
 **Sprite_Plotter.AMOS**
 
-works (just make sure you pick vaild sprite, no error handling in this example.)
+works (just make sure you pick a vaild sprite, no error handling in this example.)
 
 **Squash_A_Bob.AMOS**
 

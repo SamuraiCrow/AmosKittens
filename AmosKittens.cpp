@@ -46,6 +46,9 @@ extern void setError( int _code, char * _pos ) ;
 #include "commandsScreens.h"
 #include "commandsBanks.h"
 #include "commandsBackgroundGraphics.h"
+#include "commandsBlitterObject.h"
+#include "commandsObjectControl.h"
+#include "amal_object_sprite.h"
 
 #include "debug.h"
 #include "kittyErrors.h"
@@ -185,6 +188,8 @@ void init_instent(struct KittyInstance *instance )
 	instance -> current_pattern = 0;
 	instance -> volume=0x10000;
 	instance -> current_resource_bank = -2;
+	instance -> zones = NULL;
+	instance -> zones_allocated = 0;
 
 	instance -> api.freeScreenBobs =freeScreenBobs;
 	instance -> api.newTextWindow =newTextWindow;
@@ -195,7 +200,11 @@ void init_instent(struct KittyInstance *instance )
 	instance -> api.engineAddVblInterrupt =engine_add_vbl_Interrupt;
 	instance -> api.engineRemoveVblInterrupt =engine_remove_vbl_Interrupt;
 
-	instance -> api.findBank =findBank;
+	instance -> api.firstBank =firstBank;
+	instance -> api.findBankById =findBankById;
+	instance -> api.findBankByIndex =findBankByIndex;
+	instance -> api.getBankListSize =getBankListSize;
+	instance -> api.getBankObject = getBankObject;
 	instance -> api.freeBank =freeBank;
 	instance -> api.reserveAs =reserveAs;
 	instance -> api.setError =setError;
@@ -214,14 +223,23 @@ void init_instent(struct KittyInstance *instance )
 	instance -> api.findBlock_in_blocks = findBlock_in_blocks;
 	instance -> api.findBlock_in_cblocks = findBlock_in_cblocks;
 
+	instance -> api.getBob = getBob;
+
+	instance -> api.find_zone_in_any_screen_hard = find_zone_in_any_screen_hard;
+	instance -> api.find_zone_in_any_screen_pixel = find_zone_in_any_screen_pixel;
+	instance -> api.find_zone_in_only_screen_hard = find_zone_in_only_screen_hard;
+	instance -> api.find_zone_in_only_screen_pixel = find_zone_in_only_screen_pixel;
+
+	instance -> api.XSprite_formula = XSprite_formula;
+	instance -> api.YSprite_formula = YSprite_formula;
+	instance -> api.from_XSprite_formula = from_XSprite_formula;
+	instance -> api.from_YSprite_formula = from_YSprite_formula;
+
 	bzero( instance -> extensions_context, sizeof(instance -> extensions_context) );
 
 }
 
 struct retroSprite *patterns = NULL;
-
-struct zone *zones = NULL;
-int zones_allocated = 0;
 
 int globalVarsSize = sizeof(globalVars)/sizeof(struct globalVar);
 
@@ -715,15 +733,7 @@ char *cmdLabelOnLine(nativeCommand *cmd, char *ptr)
 	return ptr + ref -> length ;
 }
 
-struct kittyData *getVar(uint16_t ref)
-{
-	if (ref & 0x8000)
-	{
-		return currentFrame -> localVarData + ((ref & 0x7FFF) -1);
-	}
 
-	return &globalVars[ref-1].var;
-}
 
 char *cmdVar(nativeCommand *cmd, char *ptr)
 {
@@ -1272,6 +1282,8 @@ int main(int args, char **arg)
 
 	procStcakFrame[0].localVarData = stackFrameData;	// this just temp... need to manage size, lett it grow..
 	procStcakFrame[0].localVarDataNext = stackFrameData;
+
+
 	currentFrame = procStcakFrame;
 
 
@@ -1433,6 +1445,8 @@ int main(int args, char **arg)
 				// snifff the tokens find labels, vars, functions and so on.
 
 				pass1_reader( (char *) kittensFile -> start , _file_end_ );
+
+				currentFrame -> dataPointer  = proc_main_data.procDataPointer;
 
 				if (instance.kittyError.code == 0)
 				{
