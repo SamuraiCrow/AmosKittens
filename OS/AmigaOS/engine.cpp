@@ -29,8 +29,6 @@
 
 #include "common_screen.h"
 
-#include <proto/asl.h>
-
 extern int sig_main_vbl;
 extern bool running;			// 
 extern bool interpreter_running;	// interprenter is really running.
@@ -324,7 +322,6 @@ bool start_engine()
 	BPTR engine_debug_output = NULL;
 #endif
 
-	main_task = (struct Process *) FindTask(NULL);
 	EngineTask = spawn( main_engine, "Amos kittens graphics engine",engine_debug_output);
 
 	Wait(SIGF_CHILD);
@@ -630,20 +627,50 @@ bool menu_shortcut( ULONG Code ,  ULONG Qualifier)
 
 void open_fullscreen(ULONG ModeID)
 {
+	struct DimensionInfo dim;
+	struct Rectangle   *r;
+
+	GetDisplayInfoData( NULL, &dim, sizeof(dim), DTAG_DIMS, ModeID );
+
+	r = &dim.Nominal;
+
 	fullscreen_screen = OpenScreenTags ( NULL,
 			SA_DisplayID,  ModeID,
 			SA_Type, PUBLICSCREEN,
 			SA_PubName, "kittens Screen",
 			SA_Title, "Kittens Screen",
 			SA_ShowTitle, FALSE,
+			SA_Width, r-> MaxX - r-> MinX +1,
+			SA_Height, r -> MaxY - r -> MinY +1,
 			SA_Quiet, 	TRUE,
 			SA_LikeWorkbench, TRUE,
 		TAG_DONE);
 }
 
+/*
+double monitor_aspect(ULONG ModeID)
+{
+	struct DimensionInfo dim;
+	struct Rectangle   *r;
+	int width,height;
+
+	GetDisplayInfoData( NULL, &dim, sizeof(dim), DTAG_DIMS, ModeID );
+
+	r = &dim.Nominal;
+	width =  r-> MaxX - r-> MinX +1;
+	height =  r -> MaxY - r -> MinY +1;
+	return (double) width / (double) height;
+}
+*/
+
+double instance_aspect()
+{
+	return (double) instance.video -> width / (double) instance.video -> height ;
+}
+
 void enable_fullscreen()
 {
-	double window_aspect;
+	double aspect;
 	ULONG ModeID = 0x0;
 	int max_w,max_h;
 
@@ -660,14 +687,17 @@ void enable_fullscreen()
 
 	close_engine_window();
 
-	window_aspect = (double) window_save_state.window_width / (double) window_save_state.window_height;
+//	aspect = (double) window_save_state.window_width / (double) window_save_state.window_height;
 
 	struct Screen *screen = LockPubScreen(NULL);
 	if (screen)
 	{
 		if (ModeID == 0x0) ModeID = GetVPModeID(&screen->ViewPort);
+
+		aspect = instance_aspect();
+
 		window_save_state.window_height = screen -> Height;
-		window_save_state.window_width = window_aspect * (double) window_save_state.window_height;
+		window_save_state.window_width = aspect * (double) window_save_state.window_height;
 		UnlockPubScreen(NULL,screen);
 	}
 
@@ -1323,33 +1353,5 @@ void engine_draw_bobs_and_do_vbl()
 }
 
 
-char *asl()
-{
-	struct FileRequester	 *filereq;
-	char *ret = NULL;
-	char c;
-	int l;
 
-	if (filereq = (struct FileRequester	 *) AllocAslRequest( ASL_FileRequest, TAG_DONE ))
-	{
-		if (AslRequestTags( (void *) filereq, ASLFR_DrawersOnly, FALSE,	TAG_DONE ))
-		{
-			if ((filereq -> fr_File)&&(filereq -> fr_Drawer))
-			{
-				if (l = strlen(filereq -> fr_Drawer))
-				{
-					c = filereq -> fr_Drawer[l-1];
-					if (ret = (char *) malloc( strlen(filereq -> fr_Drawer) + strlen(filereq -> fr_File) +2 ))
-					{
-						sprintf( ret, ((c == '/') || (c==':')) ? "%s%s" : "%s/%s",  filereq -> fr_Drawer, filereq -> fr_File ) ;
-					}
-				}
-				else ret = strdup(filereq -> fr_File);
-			}
-		}
-		 FreeAslRequest( filereq );
-	}
-
-	return ret;
-}
 

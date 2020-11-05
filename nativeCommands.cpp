@@ -7,10 +7,11 @@
 #include <proto/dos.h>
 #include <libraries/retroMode.h>
 #include <proto/retroMode.h>
-
-extern char *asl();
 #endif
 
+// size of prev pointer, + size of token length
+
+#define next_token_off (sizeof(void *)+sizeof(void *))
 
 #include "AmosKittens.h"
 
@@ -138,7 +139,7 @@ struct nativeCommand nativeCommands[]=
 	{0x0404,"data", 2, cmdData },		
 	{0x040E,"read",0,cmdRead },
 	{0x0418,"Restore", 0, cmdRestore },
-	{0x0418+sizeof(void *),"RestoreNoArgs", 0, cmdRestoreNoArgs },
+	{0x0418+next_token_off,"RestoreNoArgs", 0, cmdRestoreNoArgs },
 	{0x0426, "Break Off", 0, cmdBreakOff },
 	{0x0436, "Break On", 0, cmdBreakOn },
 	{0x0444, "Inc",0,mathInc },
@@ -668,6 +669,7 @@ struct nativeCommand nativeCommands[]=
 	{0x26C8,"Erase Temp",0,bankEraseTemp },
 	{0x26D8,"Erase All", 0, bankEraseAll },
 	{0x26E8,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$)
+	{0x26FA,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$,value)
 	{0x2704,"Dialog Box",0,guiDialogBox },		// d=Dialog box(a$,value,b$)
 	{0x2710,"Dialog Box",0,guiDialogBox },		// d=Dialog Box(a$,value,b$,n,n)
 	{0x2720,"Dialog Open",0,guiDialogOpen },	// d=Dialog Open n,a$
@@ -731,6 +733,9 @@ struct nativeCommand nativeCommands[]=
 	{0x2B58,"Screen Mode",0,gfxScreenMode },
 	{0x2B72,"Kill Editor",0,cmdKillEditor },
 	{0x2BAE,"Get Bob Palette",0,hsGetSpritePalette },
+
+	{0xFF4C-next_token_off,"<signed>",0,signedData },	// Kittens tokens Only (not Amos Pro), replace $FFCA, when its: "(-123) or command -123 or command 123,-234
+
 	{0xFF4C,"or",0, orData },
 	{0xFF3E,"xor",0,xorData },
 	{0xFF58,"and",0, andData },
@@ -744,7 +749,6 @@ struct nativeCommand nativeCommands[]=
 	{0xFFB6,">",0, moreData },
 	{0xFFC0,"+",0, addData },
 	{0xFFCA,"-", 0, subData },
-	{0xFFCA+sizeof(void *),"<signed>",0,signedData },	// Amos Tokens Only, replace $FFCA, when its: "(-123) or command -123 or command 123,-234
 	{0xFFD4,"mod",0,modData },
 	{0xFFE2,"*", 0, mulData },
 	{0xFFEC,"/", 0, divData },

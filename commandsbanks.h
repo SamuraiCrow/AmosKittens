@@ -8,55 +8,10 @@
 
 #include "amosKittens.h"
 
-#define bank_type_work_or_data 0
-#define bank_type_icons 2
-#define bank_type_sprite 3
-
 void init_banks( char *data , int size);
-
-enum
-{
-	type_ChipWork,	// 0
-	type_FastWork,	// 1
-	type_Icons,		// 2
-	type_Sprites,		// 3
-	type_Music,		// 4
-	type_Amal,		// 5
-	type_Samples,		// 6
-	type_Menu,		// 7
-	type_ChipData,	// 8
-	type_FastData,	// 9
-	type_Code,		// 10
-	type_num_of_banks
-};
-
-struct resourcebank_header
-{
-	uint16_t chunks;
-	uint32_t img_offset;
-	uint32_t var_offset;		 // 001A
-	uint32_t script_offset;	 // 002E
-	uint32_t gadget_offset;	 // 0000
-} PACKED;
-
-// resource strings starts with size, text.
-// and ends when size is 0x00FF, last int16 not counted in block_string_size.
-
-// next block starts with 00004 --> this might be number of scripts.
-// 00026	-- this numbers looks like incremted offsets.
-// 00046
-// 00066
-// 00000	--> this changes to 0086, when I have 4 scripts.
 
 
 //------------------------------------------------------------------------------
-
-void freeBank( int banknr );
-struct kittyBank *firstBank(); 
-struct kittyBank *findBankById( int bankNr );
-struct kittyBank *findBankByIndex( int index );
-int getBankListSize();
-struct kittyBank *reserveAs( int type, int bankNr, int length, const char *name, char *mem );
 
 extern char *bankReserveAsWork(nativeCommand *cmd, char *ptr);
 extern char *bankReserveAsChipWork(nativeCommand *cmd, char *ptr);
@@ -83,7 +38,7 @@ extern char *bankBsend(nativeCommand *cmd, char *ptr);
 
 
 extern void __load_bank__(struct stringData *name, int bankNr );
-extern void __load_bank__(char *name, int bankNr );
+extern void __load_bank__(const char *name, int bankNr );
 
 extern struct stringData *getResourceStr(int id);
 extern void *getBankObject(int id);

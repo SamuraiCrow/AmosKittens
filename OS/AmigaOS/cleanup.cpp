@@ -187,7 +187,7 @@ void clean_up_vars()
 void clean_up_stack()
 {
 	popStack( instance_stack );
-	printf("after clean up stack is: %d\n", instance_stack);
+	cleanup_printf("after clean up stack is: %d\n", instance_stack);
 	setStackNone();
 }
 
@@ -196,11 +196,11 @@ void clean_up_files()
 	int n;
 	for (n=0;n<10;n++)
 	{
-		if (kittyFiles[n].fd) fclose(kittyFiles[n].fd);
-		if (kittyFiles[n].fields) free(kittyFiles[n].fields);
+		if (instance.files[n].fd) fclose(instance.files[n].fd);
+		if (instance.files[n].fields) free(instance.files[n].fields);
 
-		kittyFiles[n].fd = NULL;
-		kittyFiles[n].fields = NULL;
+		instance.files[n].fd = NULL;
+		instance.files[n].fields = NULL;
 	}
 }
 
@@ -254,7 +254,7 @@ void clean_up_user_banks()
 
 void clean_up_special()
 {
-	dprintf("clean up libs\n");
+	cleanup_printf("clean up libs\n");
 
 	clean_up_libs();
 
@@ -262,15 +262,15 @@ void clean_up_special()
 
 	clean_up_devices();
 
-	dprintf("clean up defFns\n");
+	cleanup_printf("clean up defFns\n");
 
 	clean_up_defFns();
 
-	dprintf("clean up menus\n");
+	cleanup_printf("clean up menus\n");
 
 	clean_up_menus();
 
-	dprintf("clean up channels!!\n");
+	cleanup_printf("clean up channels!!\n");
 
 	if (channels) 
 	{
@@ -286,15 +286,15 @@ void clean_up_special()
 			cursor_block = NULL;
 		}
 
-		dprintf("clean up bobs!!\n");
+		cleanup_printf("clean up bobs!!\n");
 
 		engine_lock();
 
-		printf("bobs %d\n", bobs.size());
+		cleanup_printf("bobs %d\n", bobs.size());
 
 		while ( bobs.size() )
 		{
-			printf("bob[0] is %08x\n",bobs[0]);
+			cleanup_printf("bob[0] is %08x\n",bobs[0]);
 			if (bobs[0])
 			{
 				retroFreeSpriteObject( bobs[0],TRUE);		// TRUE = only data
@@ -304,11 +304,11 @@ void clean_up_special()
 		engine_unlock();
 	}
 
-	dprintf("clean up banks!!\n");
+	cleanup_printf("clean up banks!!\n");
 
 	clean_up_banks();
 
-	dprintf("clean up contextDir\n");
+	cleanup_printf("clean up contextDir\n");
 
 	if (contextDir)
 	{
@@ -316,7 +316,7 @@ void clean_up_special()
 		contextDir = NULL;
 	}
 
-	dprintf("clean up dir first pattern\n");
+	cleanup_printf("clean up dir first pattern\n");
 
 	if (dir_first_pattern)
 	{
@@ -324,12 +324,14 @@ void clean_up_special()
 		dir_first_pattern = NULL;
 	}
 
-	dprintf("clean up zones\n");
+	cleanup_printf("clean up zones\n");
 
 	if (instance.zones)
 	{
 		freeStruct(instance.zones);
 		instance.zones = NULL;
 	}
+
+	cleanup_printf("end of %s:%s()\n",__FILE__,__FUNCTION__);
 }
 

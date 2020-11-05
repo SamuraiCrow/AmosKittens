@@ -45,6 +45,8 @@ char *executeOnToken(char *ptr, unsigned short token)
 	struct nativeCommand *cmd;
 	char *ret;
 
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 	// we are at end of line, we need to find the next data command.
 
 	switch (token)
@@ -52,7 +54,6 @@ char *executeOnToken(char *ptr, unsigned short token)
 		case token_goto:
 		case token_gosub:	
 		case token_proc:
-					printf("PROC, GOSUB OR GOTO\n");
 					is_token_cmd = token;
 					return ptr;
 		case 0x0000:
@@ -87,6 +88,8 @@ static char *collect_data(char *ptr)
 	setStackNum(0);
 	ptr+=2;
 
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+
 	while ( (ptr = executeOnToken(  ptr,  token )) && (is_token_cmd == 0) )
 	{
 		token = *((short *) ptr );
@@ -103,6 +106,7 @@ char *execute_on( int num, char *tokenBuffer, char *returnTokenBuffer, unsigned 
 char *cmdOn(struct nativeCommand *cmd, char *tokenBuffer )
 {
 	unsigned int flags;
+
 	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 
 	is_token_cmd = 0;

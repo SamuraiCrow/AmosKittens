@@ -16,9 +16,10 @@
 #include <proto/dos.h>
 #include <libraries/retroMode.h>
 #include <proto/retroMode.h>
+#include <workbench/startup.h>
 #include <amosKittens.h>
 
-extern char *asl();
+extern char *asl( const char *pattern );
 #endif
 
 #ifdef __linux__
@@ -63,6 +64,8 @@ extern void setError( int _code, char * _pos ) ;
 #include "amosstring.h"
 #include "kittyaudio.h"
 #include "load_config.h"
+#include "var_helper.h"
+#include "bank_helper.h"
 
 //include "ext_music.h"
 
@@ -93,6 +96,8 @@ char *_file_start_ = NULL;
 char *_file_pos_  = NULL;		// the problem of not knowing when stacked commands are executed.
 char *_file_end_ = NULL;
 uint32_t _file_bank_size = 0;
+
+char *progname = NULL;
 
 int procStackCount = 0;
 uint32_t tokenFileLength;
@@ -307,10 +312,23 @@ bool alloc_video()
 
 	if (instance.video)
 	{
+		uint16_t *rgb;
+
 		KittyBaseVideoInfo.videoWidth = instance.video -> width;
 		KittyBaseVideoInfo.videoHeight = instance.video -> height;
 		KittyBaseVideoInfo.display_x = 128;
 		KittyBaseVideoInfo.display_y = 50;
+
+		rgb = KittyBaseVideoInfo.rgb;
+
+		rgb[0] = 0x000;
+		rgb[1] = 0x06F;
+		rgb[2] = 0x077;
+		rgb[3] = 0xEEE;
+		rgb[4] = 0xF00;
+		rgb[5] = 0x0DD;
+		rgb[6] = 0x0AA;
+		rgb[7] = 0xFF3;
 	}
 
 	KittyBaseInfo.video = &KittyBaseVideoInfo;
@@ -697,8 +715,6 @@ char *do_var_index_alloc( glueCommands *cmd, int nextToken)
 
 	popStack(__stack - cmd -> stack);
 
-	printf("cmd stack loc %d, satck is %d\n",cmd -> stack, __stack);
-
 	return NULL;
 }
 
@@ -1057,7 +1073,7 @@ bool validate_fast_lookup()
 
 		if (*((uint16_t *) (fast_lookup + token + sizeof(void *))) != (uint16_t) cmd -> size)
 		{
-			printf("token %d is corrupt, size is wrong (is %d should be %d)\n", 
+			printf("token %04x is corrupt, size is wrong (is %d should be %d)\n", 
 					token,
 					*((uint16_t *) (fast_lookup + token + sizeof(void *))),
 					cmd -> size);
@@ -1094,10 +1110,13 @@ char *executeToken( char *ptr, unsigned short token )
 
 	token_not_found = token;
 	setError(23, ptr);
+
+	getLineFromPointer( ptr);
+
 	printf("Addr %08x, token not found %04X at line %d\n", 
 				(unsigned int) ptr, 
 				(unsigned int) token_not_found, 
-				getLineFromPointer( ptr));
+				lineFromPtr.line	);
 
 	return NULL;
 }
@@ -1241,15 +1260,6 @@ ULONG exceptCode ( struct ExecBase *SysBase, ULONG signals, ULONG exceptData)
 
 extern struct retroRGB DefaultPalette[256];
 
-void get_procedures()
-{
-	unsigned int n;
-	for (n=0;n<var_count[0];n++)
-	{
-		if (globalVars[n].var.type == type_proc)	procedures.push_back( globalVars +n );
-	}
-}
-
 #include "joysticks.h"
 
 void dump_joysticks();
@@ -1262,7 +1272,7 @@ void cfg_joystick( int j, const char *type )
 	joy -> type = joy_usb;
 	joy -> device_id = 0;
 
-	printf("joysticks[%d].type = %d\n", j, joy -> type);
+//	printf("joysticks[%d].type = %d\n", j, joy -> type);
 
 	if (strcasecmp( type, "keyboard") == 0)
 	{
@@ -1271,6 +1281,36 @@ void cfg_joystick( int j, const char *type )
 		return;
 	}
 }
+
+BPTR wbstartup_olddir = NULL;
+
+char *wbargs(struct WBStartup *argmsg)
+{
+	struct WBArg *arg;
+
+	arg = argmsg -> sm_ArgList;
+	progname = arg -> wa_Name;
+
+	if (argmsg -> sm_NumArgs>1)	// check if we have args
+	{
+		arg = argmsg -> sm_ArgList +1;	// only read the first arg.
+		wbstartup_olddir = SetCurrentDir( arg -> wa_Lock );
+		return strdup(arg -> wa_Name);
+	}
+	else
+	{
+		return asl("#?.amos");
+	}
+
+	return NULL;
+}
+
+void wbargclose()
+{
+	if (wbstartup_olddir)	SetCurrentDir(wbstartup_olddir);
+	wbstartup_olddir = NULL;
+}
+
 
 int main(int args, char **arg)
 {
@@ -1282,10 +1322,7 @@ int main(int args, char **arg)
 
 	procStcakFrame[0].localVarData = stackFrameData;	// this just temp... need to manage size, lett it grow..
 	procStcakFrame[0].localVarDataNext = stackFrameData;
-
-
 	currentFrame = procStcakFrame;
-
 
 #ifdef __amigaos__
 	struct Task *me;
@@ -1320,18 +1357,23 @@ int main(int args, char **arg)
 
 		switch (args)
 		{
-			case 2:	filename = strdup(arg[1]);
+			case 2:	progname  = arg[0];
+					filename = strdup(arg[1]);
 					break;
+
 #if defined(__amigaos4__)
-			case 0:
-			case 1:
-					filename = asl();
+
+			case 0:	filename = wbargs( (struct WBStartup *) arg );
+					break;
+
+			case 1:	progname  = arg[0];
+					filename = asl("#?.amos");
 					break;	
 #endif
 		}
 	}
 
-	amosid[16] = 0;	// /0 string.
+	amosid[16] = 0;	// 0 string.
 
 #ifdef enable_fast_execution_yes
 
@@ -1346,9 +1388,7 @@ int main(int args, char **arg)
 #endif
 
 	onError = onErrorBreak;
-
 	memset(globalVars,0,sizeof(struct globalVar) * VAR_BUFFERS);
-
 
 #ifdef __amigaos4__
 	sig_main_vbl = AllocSignal(-1);
@@ -1362,10 +1402,14 @@ int main(int args, char **arg)
 
 	channels = new ChannelTableClass();
 
+	audioStart();
+
 	if ( (startup) && (channels) )
 	{
 		bool init_error = false;
+		std::string *value;
 
+		load_config("progdir:kittySystem/config.yml");
 		alloc_video();
 
 #ifdef __amigaos4__
@@ -1377,31 +1421,26 @@ int main(int args, char **arg)
 			KittyBaseInfo.rgb[n] = (DefaultPalette[n].r << 4 & 0xF00) | (DefaultPalette[n].g & 0xF0) | (DefaultPalette[n].b >> 4);
 		}
 
-		__load_bank__( (char *) "amospro_system:APSystem/AMOSPro_Default_Resource_org.Abk",-2);
-//		__load_bank__( (char *) "progdir:kittySystem/kittens_default_resource.Abk",-2);
-		__load_bank__( (char *) "progdir:kittySystem/mouse.abk",-3);
+		value = getConfigValue( "resource_8" );	// default resource
+		if (value)	__load_bank__( value -> c_str() ,-2);
 
+		value = getConfigValue( "assets_mouse" );	// get mouse abk
+		if (value)	__load_bank__( value -> c_str() ,-3);
 
 		// set default values.
 		memset( kitty_extensions , 0, sizeof(struct extension_lib) *32 );
 
-		load_config("progdir:kittySystem/config.yml");
-
 		{
 			char tmp[30];
-			std::string *value;
 
 			for (n = 0; n < 4; n++ )
 			{
 				sprintf( tmp, "%s_%d", "joysticks", n );
 				value = getConfigValue( tmp );
-
-				printf (" %d\n", value );
-
 				cfg_joystick( n , value ? value -> c_str() : "usb" );
 			
 			}
-			for (n=0;n<20;n++)
+			for (n=0;n<32;n++)
 			{
 				sprintf( tmp, "%s_%d", "extension", n );
 				value = getConfigValue( tmp );
@@ -1410,6 +1449,9 @@ int main(int args, char **arg)
 					open_extension( value -> c_str(), n );
 				}
 			}
+
+			value = getConfigValue( "default_load_truecolors_as" );
+			if (value) add_str_var("_cat_load_iff_opt$",value -> c_str());			
 		}
 
 
@@ -1417,8 +1459,8 @@ int main(int args, char **arg)
 		{
 			if (kitty_extensions[n].lookup)
 			{
-				printf("make crc for extension %d - %08x\n",n,kitty_extensions[n].lookup );
-				 kitty_extensions[n].crc = mem_crc( kitty_extensions[n].lookup, 0xFFFF ) ;
+				extension_printf("make crc for extension %d - %08x\n",n,kitty_extensions[n].lookup );
+				kitty_extensions[n].crc = mem_crc( kitty_extensions[n].lookup, 0xFFFF ) ;
 			}
 		}
 
@@ -1454,6 +1496,7 @@ int main(int args, char **arg)
 					if (kittensFile ->bank) init_banks( (char *) kittensFile -> bank, kittensFile -> bankSize );
 
 					gfxDefault(NULL, NULL);
+					get_procedures();
 #ifdef run_program_yes
 					code_reader( (char *) kittensFile -> start , kittensFile -> tokenLength );
 #endif
@@ -1467,10 +1510,12 @@ int main(int args, char **arg)
 
 			 free_file(kittensFile);
 
-//			if (kittyError.newError == true)
-			{
-				dump_end_of_program();
-			}
+
+#ifdef enable_end_of_program_debug_yes
+			dump_end_of_program();
+#else
+			if (instance.kittyError.newError == true)	dump_end_of_program();
+#endif
 		}
 		else
 		{
@@ -1504,6 +1549,7 @@ int main(int args, char **arg)
 	clean_up_stack();
 	clean_up_files();
 	clean_up_special();	// we add other stuff to this one.
+	wbargclose();
 	closedown();
 
 	if (sig_main_vbl) 
@@ -1521,7 +1567,7 @@ int main(int args, char **arg)
 	{
 		SetExcept( oldSigExcept,oldSigExcept | SIGBREAKF_CTRL_C );
 		me -> tc_ExceptCode = oldException;
-		Printf("Old exception handler restored\n");
+		cleanup_printf("Old exception handler restored\n");
 	}
 #endif
 

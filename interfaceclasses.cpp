@@ -28,12 +28,14 @@ extern void button_render(zone_button *base);
 extern void hslider_render(zone_hslider *base);
 extern void vslider_render(zone_vslider *base);
 extern void hypertext_render(zone_hypertext *base);
+extern void activelist_render(zone_activelist *base);
 
 extern void hslider_mouse_event(zone_hslider *base,struct cmdcontext *context, int mx, int my, int zid);
 extern void vslider_mouse_event(zone_vslider *base,struct cmdcontext *context, int mx, int my, int zid);
 extern void button_mouse_event(zone_button *base,struct cmdcontext *context, int mx, int my, int zid);
 extern void edit_mouse_event(zone_edit *base,struct cmdcontext *context, int mx, int my, int zid);
 extern void hypertext_mouse_event(zone_hypertext *base,struct cmdcontext *context, int mx, int my, int zid);
+extern void activelist_mouse_event(zone_activelist *base,struct cmdcontext *context, int mx, int my, int zid);
 
 
 zone_base::zone_base()
@@ -41,8 +43,9 @@ zone_base::zone_base()
 //	printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
 //	getchar();
 
-	pos = 0;
-	value = 0;
+	bzero( &pos, sizeof( struct ivar));
+	bzero( &value, sizeof( struct ivar));
+
 	script_action = NULL;
 	update = NULL;
 	mouse_event = NULL;
@@ -51,14 +54,14 @@ zone_base::zone_base()
 
 void il_slider_update (struct zone_vslider *base, struct cmdcontext *context, int args, int arg1,int arg2,int arg3)
 {
-	if (args>0) base -> value = arg1;
+	if (args>0) base -> value.num = arg1;
 	if (args>1) base -> total = arg2;
 	base -> render( (struct zone_base *) base);
 }
 
 void il_button_update (struct zone_button *base, struct cmdcontext *context, int args, int arg1,int arg2,int arg3)
 {
-	if (args>0) base -> value = arg1;
+	if (args>0) base -> value.num = arg1;
 	base -> render( (struct zone_base *) base);
 }
 
@@ -67,13 +70,22 @@ void il_hypertext_update (struct zone_hypertext *base, struct cmdcontext *contex
 	printf("args: %d arg1: %d, arg2: %d, arg3 %d\n",args , arg1,arg2,arg3);
 	getchar();
 
-	if (args>0) base -> pos = arg1;
+	if (args>0) base -> pos.num = arg1;
 	base -> render( (struct zone_base *) base);
 }
 
 void il_edit_update (struct zone_hypertext *base, struct cmdcontext *context, int args, int arg1,int arg2,int arg3)
 {
-	if (args>0) base -> value = arg1;
+	if (args>0) base -> value.num = arg1;
+	base -> render( (struct zone_base *) base);
+}
+
+void il_activelist_update (struct zone_hypertext *base, struct cmdcontext *context, int args, int arg1,int arg2,int arg3)
+{
+	printf("args: %d arg1: %d, arg2: %d, arg3 %d\n",args , arg1,arg2,arg3);
+	getchar();
+
+	if (args>=0) base -> pos.num = arg1;
 	base -> render( (struct zone_base *) base);
 }
 
@@ -96,6 +108,8 @@ zone_button::zone_button()
 	update = I_FUNC_UPDATE	il_button_update;
 	render = I_FUNC_RENDER	button_render;
 	mouse_event = I_FUNC_MOUSE_EVENT button_mouse_event;
+
+	bzero( params, sizeof(ivar) * 9 );
 }
 
 zone_hypertext::zone_hypertext()
@@ -110,5 +124,18 @@ zone_edit::zone_edit()
 	update =I_FUNC_UPDATE		il_edit_update;
 	render = I_FUNC_RENDER	edit_render;
 	mouse_event = I_FUNC_MOUSE_EVENT edit_mouse_event;
+}
+
+zone_activelist::zone_activelist()
+{
+	update =I_FUNC_UPDATE		il_activelist_update;
+	render = I_FUNC_RENDER	activelist_render;
+	mouse_event = I_FUNC_MOUSE_EVENT activelist_mouse_event;
+}
+
+void iblock::set(bool (*_start_fn)(cmdcontext*, cmdinterface*), void (*_end_fn)(cmdcontext*))
+{
+	start_fn = _start_fn;
+	end_fn = _end_fn;
 }
 

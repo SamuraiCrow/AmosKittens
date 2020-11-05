@@ -18,13 +18,15 @@ inc = -I./ -I../../ -Isdk:include/amoskittens
 
 objects_dir = objs_interface/
 
-dummy = tests/dummy/text.cpp
+dummy = tests/dummy/text.cpp 
 
 main_objects = ${dummy} os/amigaos/stuff.cpp \
 			interfacelanguage.cpp \
 			AmosString.cpp \
 			screen_helper.cpp \
-			interfaceclasses.cpp
+			interfaceclasses.cpp \
+			bank_helper.cpp \
+			load_config.cpp
 
 main_SRCS = tests/interfaceTest.cpp
 
@@ -38,10 +40,10 @@ all:	  show $(programs) $(objects_in_dir)
 show:
 	@echo $(objects_in_dir)
 
-${objects_dir}%.o:		%.cpp	debug.h 
+${objects_dir}%.o:		%.cpp	debug.h  debug_interfacelanguage.h
 	g++ $(warnings) -c -O2 $(inc) ${opt} -D__USE_INLINE__  $(@:${objects_dir}%.o=%.cpp) -o $@
 
-tests/interfaceTest.exe:  tests/interfaceTest.cpp ${objects_in_dir} AmalCompiler.h
+tests/interfaceTest.exe: debug_interfacelanguage.h  tests/interfaceTest.cpp ${objects_in_dir} AmalCompiler.h
 	g++ $(warnings) -O2 $(inc) -D__USE_INLINE__ $(@:.exe=.cpp) ${objects_in_dir} ${opt} -o $@
 
 clean:

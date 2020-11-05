@@ -40,6 +40,11 @@ extern std::vector<struct lineAddr> linesAddress;
 extern std::vector<struct defFn> defFns;
 char *lastLineAddr;
 
+
+// size of prev pointer, + size of token length
+
+#define next_token_off (sizeof(void *)+sizeof(void *))
+
 // we need to keep count, to make sure code is valid.
 
 int ifCount = 0;
@@ -118,30 +123,6 @@ struct nested *find_nest_loop()
 char *FinderTokenInBuffer( char *ptr, unsigned short token , unsigned short token_eof1, unsigned short token_eof2, char *_eof_ );
 
 
-// find Public variables not defined as global
-
-int findVarPublic( char *name, int type )
-{
-	unsigned int n;
-
-	pass1_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-
-	for (n=0;n<var_count[0];n++)
-	{
-		if (globalVars[n].varName == NULL) return 0;
-
-		if ((strcasecmp( globalVars[n].varName, name)==0)
-			&& (globalVars[n].var.type == type)
-			&& (globalVars[n].proc == 0)
-			&& (globalVars[n].isGlobal == FALSE))
-		{
-			return n+1;
-		}
-	}
-	return 0;
-}
-
-
 int findVar( char *name, bool is_first_token, int type, int _proc )
 {
 	unsigned int n;
@@ -197,39 +178,9 @@ int findVar( char *name, bool is_first_token, int type, int _proc )
 	return 0;
 }
 
-struct globalVar *add_var_from_ref( struct reference *ref, char **tmp, int type )
-{
-	struct globalVar *_new = NULL;
+// this function does allocate memory, it uses static list.
 
-	if ( var_count[0] < VAR_BUFFERS )
-	{
-		var_count[0] ++;
 
-		ref -> ref = var_count[procStackCount ? 1: 0];
-
-		if (type == type_proc)
-		{
-			ref -> flags = (ref->flags&3) | type;
-		}
-		else
-		{
-			ref -> flags = type;
-		}
-
-		_new = &globalVars[var_count[0]-1];
-		_new -> varName = *tmp;	// tmp is alloced and used here.
-		_new -> var.type = type;
-		_new -> localIndex = var_count[procStackCount];
-
-		if (type != type_proc) if (procStackCount) var_count[1]++;
-
-		if (_new -> var.type == type_string) _new -> var.str = toAmosString("",0);
-
-		*tmp = NULL;
-	}
-
-	return _new;
-}
 
 char *FinderTokenInBuffer( char *ptr, unsigned short token , unsigned short token_eof1, unsigned short token_eof2, char *_eof_ );
 
@@ -338,6 +289,8 @@ uint32_t getTrueVarType( char *varname, uint32_t type )
 	return type;
 }
 
+ // this function does allocate memory, it uses a static list as return value.
+
 struct globalVar * pass1var(char *ptr, bool first_token, bool is_proc_call, bool is_procedure )
 {
 	char *tmp;
@@ -359,12 +312,12 @@ struct globalVar * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 			// <EOL> <VAR> <NEXT CMD>
 			// <EOL> <VAR> <BRACKET START>
 
-			if ((next_token == 0x0000) || (next_token == 0x0054) || (next_token == 0x0084))
+			if ((next_token == 0x0000) || (next_token == 0x0054) || (next_token == 0x0084)||(is_proc_call))
 			{
 #ifdef show_pass1_procedure_fixes_yes
 				printf("this looks alot like a procedure call\n");
 #endif
-				pass1CallProcedures.push_back(ref);
+				pass1CallProcedures.push_back(ref);		// this token will get ref number set correct,
 				is_proc_call = true;
 			}
 		}
@@ -420,7 +373,7 @@ struct globalVar * pass1var(char *ptr, bool first_token, bool is_proc_call, bool
 					return _new;
 				}
 			}
-			else
+			else 	if (is_proc_call == false)
 			{
 				if (struct globalVar *_new = add_var_from_ref( ref, &tmp, type ))
 				{
@@ -450,7 +403,7 @@ void pass1_restore( char *ptr )
 		case 0x0000:	// new line.
 		case 0x0054:	// next command 
 				printf("moded to restore command with no args\n");
-				*((unsigned short *) (ptr - 2)) = 0x0418+sizeof(void *);
+				*((unsigned short *) (ptr - 2)) = 0x0418+next_token_off;
 	}
 }
 
@@ -480,8 +433,11 @@ void pass1_sign( char * ptr )
 		case 0x0074:	// "("
 		case 0x005C:	// ","
 		case 0x0094:	// To
-				printf("moded\n");
-				*((unsigned short *) (ptr - 2)) = 0xFFCA+sizeof(void *);		// mod the token, so signes token.
+
+#ifdef show_pass1_modified_code_yes
+				printf("Modified to negative signed\n");
+#endif
+				*((unsigned short *) (ptr - 2)) = 0xFF4C-next_token_off;		// mod the token, so signes token.
 				return;	// nothing more to do....
 
 		default:				// not sure if its signes or subtract
@@ -500,8 +456,10 @@ void pass1_sign( char * ptr )
 					default:
 							if (pass1_token_count <= 2)
 							{
-								printf("moded\n");
-								*((unsigned short *) (ptr -2)) = 0xFFCA+sizeof(void *);		// mod the token, so signes token.
+#ifdef show_pass1_modified_code_yes
+								printf("Modified to negative signed\n");
+#endif
+								*((unsigned short *) (ptr -2)) = 0xFF4C-next_token_off;		// mod the token, so signes token.
 							}
 							return;
 				}
@@ -931,7 +889,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 				case 0x0386:	pass1_token_count = 0;
 							break;
 
-				case 0x0006:	pass1var( ptr, (pass1_token_count == 1), false, false );
+				case 0x0006:	pass1var( ptr, (pass1_token_count == 1), false, false );	// is not proc call, is not procedure
 							ret += ReferenceByteLength(ptr);
 							break;
 
@@ -951,7 +909,7 @@ char *nextToken_pass1( char *ptr, unsigned short token )
 							ret += ReferenceByteLength(ptr);
 							break;
 
-				case 0x0012:	pass1var( ptr, true, true, false );
+				case 0x0012:	pass1var( ptr, true, true, false );		// is first token, is proc call, is not procedure.
 							ret += ReferenceByteLength(ptr);
 							break;
 
@@ -1181,11 +1139,7 @@ char *token_reader_pass1( char *start, char *ptr, unsigned short lastToken, unsi
 	}
 #endif 
 
-	if ( ptr  >= file_end ) 
-	{
-		printf(" ptr is over file end %08x\n", file_end);
-		return NULL;
-	}
+	if ( ptr  >= file_end ) 	return NULL;
 
 	return ptr;
 }
@@ -1259,9 +1213,7 @@ void pass1_reader( char *start, char *file_end )
 		}
 	}
 
-//ifdef show_pass1_procedure_fixes_yes
-	printf("number of procedure calls %d\n", pass1CallProcedures.size() );
-//endif
+	dprintf("number of procedure calls %d\n", pass1CallProcedures.size() );
 
 #ifdef enable_bank_crc_yes
 	if (bank_crc != mem_crc( _file_end_ , _file_bank_size ))
@@ -1275,11 +1227,9 @@ void pass1_reader( char *start, char *file_end )
 	{
 		if ( findRefAndFixProcCall(pass1CallProcedures[n])  )
 		{
-//ifdef show_pass1_procedure_fixes_yes
-
-			
+#ifdef show_pass1_procedure_fixes_yes
 			printf("fixed at: %08x ref is %d\n", pass1CallProcedures[n], pass1CallProcedures[n] -> ref - 1 );
-//endif
+#endif
 		}
 		else
 		{

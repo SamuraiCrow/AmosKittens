@@ -33,7 +33,8 @@
 #include "channel.h"
 #include "amal_object.h"
 #include "amosstring.h"
-#include "commandsBanks.h"
+#include "bank_helper.h"
+#include "AmalBank.h"
 
 extern char *(*_do_set) ( struct glueCommands *data, int nextToken );
 extern char *_setVar( struct glueCommands *data, int nextToken );

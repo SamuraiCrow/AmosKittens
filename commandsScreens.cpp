@@ -14,6 +14,12 @@
 #include <proto/retroMode.h>
 #include <proto/datatypes.h>
 #include <datatypes/pictureclass.h>
+#include "var_helper.h"
+
+// undo stupid changes in the SDK.
+
+#define xAspect bmh_XAspect
+#define yAspect bmh_YAspect
 #endif
 
 #ifdef __linux__
@@ -77,6 +83,59 @@ unsigned int retroModeToAmosMode(unsigned int rMode)
 	if (rMode & retroInterlaced) retMode |= true_laced;
 
 	return retMode;
+}
+
+#define monitor_id_mask 0xFFFF1000
+
+struct mode_table 
+{
+	unsigned int key;
+	unsigned xdpi;
+	unsigned ydpi;
+};
+
+
+void AmigaModeToRetro(  unsigned int modeid, ULONG *retMode, float *aspect )
+{
+	unsigned int monitor_id = modeid & monitor_id_mask;
+	unsigned int id = modeid & ~monitor_id_mask;
+	*retMode = 0;
+	float xdpi = 40;
+	float ydpi = 40;
+
+
+	if ((monitor_id == PAL_MONITOR_ID) || (monitor_id == NTSC_MONITOR_ID) || (monitor_id == 0x0000 ))
+	{
+		if (id & 0x800)	*retMode |= retroHam6;
+
+		id &= ~0x800;	// remove ham bit..
+		id &= ~0x080;	// remove half bright
+
+		if ( (modeid & 0x0004) || (modeid & 0x0400) )	// Interlaced or double productivity frequency
+		{
+			*retMode |= retroInterlaced;
+			ydpi = 20;
+			printf("Interlaced\n");
+		}
+
+		if (modeid & 0x8000)
+		{
+			*retMode |= retroHires;
+			xdpi = 20;
+			printf("hires\n");
+		}
+		else
+		{
+			*retMode |= retroLowres;
+			printf("lowres\n");
+		}
+	}
+	else
+	{
+		*retMode = retroHires | retroInterlaced;
+	}
+
+	*aspect = (1.0f / xdpi) / (1.0f / ydpi);
 }
 
 
@@ -149,6 +208,7 @@ char *_gfxScreenOpen( struct glueCommands *data, int nextToken )
 			colors = getStackNum(__stack-1 );
 			mode = amosModeToRetro(getStackNum(__stack ));
 
+			if (colors == 0x40000 ) mode |= retroHam8;
 			if (colors == 4096) mode |= retroHam6 ;
 			if (colors == -6) mode |= retroHam6 ;
 			if (colors == -8) mode |= retroHam8 ;
@@ -637,9 +697,12 @@ char *_gfxScreenToFront( struct glueCommands *data, int nextToken )
 
 		if ((screen_num>-1)&&(screen_num<8))
 		{
-			retroScreenToFront(instance.screens[screen_num]);
-			instance.video -> refreshAllScanlines = TRUE;
-			success = true;
+			if (instance.screens[screen_num])
+			{
+				retroScreenToFront(instance.screens[screen_num]);
+				instance.video -> refreshAllScanlines = TRUE;
+				success = true;
+			}
 		}
 	}
 
@@ -647,6 +710,13 @@ char *_gfxScreenToFront( struct glueCommands *data, int nextToken )
 
 	popStack(__stack - data->stack );
 	return NULL;
+}
+
+char *gfxScreenToFront(struct nativeCommand *cmd, char *tokenBuffer)
+{
+	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
+	stackCmdParm( _gfxScreenToFront, tokenBuffer );
+	return tokenBuffer;
 }
 
 char *_gfxScreenToBack( struct glueCommands *data, int nextToken )
@@ -668,9 +738,12 @@ char *_gfxScreenToBack( struct glueCommands *data, int nextToken )
 
 		if ((screen_num>-1)&&(screen_num<8))
 		{
-			retroScreenToBack(instance.screens[screen_num]);
-			instance.video -> refreshAllScanlines = TRUE;
-			success = true;
+			if (instance.screens[screen_num])
+			{
+				retroScreenToBack(instance.screens[screen_num]);
+				instance.video -> refreshAllScanlines = TRUE;
+				success = true;
+			}
 		}
 	}
 
@@ -678,13 +751,6 @@ char *_gfxScreenToBack( struct glueCommands *data, int nextToken )
 
 	popStack(__stack - data->stack );
 	return NULL;
-}
-
-char *gfxScreenToFront(struct nativeCommand *cmd, char *tokenBuffer)
-{
-	proc_names_printf("%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__);
-	stackCmdParm( _gfxScreenToFront, tokenBuffer );
-	return tokenBuffer;
 }
 
 char *gfxScreenToBack(struct nativeCommand *cmd, char *tokenBuffer)
@@ -930,46 +996,14 @@ void dmode( const char *name, uint64_t mode )
 	}
 }
 
-unsigned int AmigaModeToRetro( unsigned int modeid )
-{
-	unsigned int mode = 0;
-	unsigned int encoding = modeid & (0x800 | 0x1000 | 0x8000);
-
-	switch (encoding)
-	{
-		case 0x0800:
-				mode |= retroHam6;
-				break;
-
-		case 0x8800:					// this is set in HAM8 file I'm testing.
-				mode |= retroHam8;
-				break;
-		case 0x1000:					// this was set in anim8 file I'm testing.
-				mode |= retroHam6;
-				break;
-	}
-
-	if (modeid & (0x0100 | 0x0008 | 0x0004)) 
-	{
-		mode |= retroInterlaced;
-		printf("Interlaced\n");
-	}
-
-	if (modeid & 0x8000)
-	{
-		mode |= retroHires;
-		printf("hires\n");
-	}
-	else
-	{
-		mode |= retroLowres;
-		printf("lowres\n");
-	}
-
-	return mode;
-}
 
 extern char *get_name(char *path,char *name);		// found in include.cpp file
+
+enum
+{
+	opt_grayscale = 0,
+	opt_floyd
+};
 
 void LoadIff( const char *org_name,  int sn )
 {
@@ -979,6 +1013,7 @@ void LoadIff( const char *org_name,  int sn )
 	struct ColorRegister *cr;
 	ULONG modeid = 0; 
 	ULONG colors;
+	ULONG depth;
 	ULONG bformat;
 	ULONG mode;
 	char *name;
@@ -1007,19 +1042,45 @@ void LoadIff( const char *org_name,  int sn )
 
 		bformat = GetBitMapAttr(dt_bitmap,BMA_PIXELFORMAT);
 
-		printf("colors %d\n",colors);
-		printf("mode id %08x\n",modeid);
-		printf("bformat %d\n",bformat);
-		printf("%d,%d\n",bm_header -> bmh_Width,bm_header -> bmh_Height);
+		depth = GetBitMapAttr(dt_bitmap,BMA_DEPTH);
+
+		dprintf("colors %d\n",colors);
+		dprintf("depth: %d\n",depth);
+		dprintf("mode id %08x\n",modeid);
+		dprintf("bformat %d\n",bformat);
+		dprintf("%d,%d\n",bm_header -> bmh_Width,bm_header -> bmh_Height);
 	
 		if (modeid != (ULONG) ~0)
 		{
+			int xAspect = bm_header -> xAspect -  bm_header -> xAspect % 10;	
+			int yAspect =  bm_header -> yAspect - bm_header -> yAspect % 10;
+
+			float expected_aspect;
+			float image_aspect;
+
+			image_aspect = xAspect ?  ( 1.0f / (float) xAspect) / (1.0f / (float) yAspect) : 0.0f;
+
 			switch (bformat)
 			{
 				case PIXF_NONE:
 				case PIXF_CLUT:
-					mode = AmigaModeToRetro (modeid);
-					break;		
+					AmigaModeToRetro (modeid , &mode, &expected_aspect);
+
+					if (mode & retroHam6)
+					{
+						// upgrade to ham8...
+						if (depth == 8) mode = mode & ~retroHam6 | retroHam8;
+					}
+
+					if (image_aspect) if (image_aspect != expected_aspect)
+					{
+						if ((modeid == 0x8000)&&(image_aspect==1.0f))
+						{
+							mode = retroLowres;
+							break;
+						}
+					}
+					break;	
 				default:
 					mode = (bm_header -> bmh_Width>=640) ? retroHires : retroLowres;
 					mode |= (bm_header -> bmh_Height>256) ? retroInterlaced : 0;
@@ -1034,37 +1095,34 @@ void LoadIff( const char *org_name,  int sn )
 
 		if (new_screen)
 		{
-			printf("its a new screen\n");
-
 			if (instance.screens[sn])
 			{
 				printf("we are closing the old screen\n");
 				 __kitten_screen_close( sn, &instance.screens[sn] );
 			}
 
-			printf("we are opening a new screen on %d\n",sn);
-
 			instance.screens[sn] = retroOpenScreen(bm_header -> bmh_Width,bm_header -> bmh_Height, mode);
 		}
 		else sn = instance.current_screen;
 
-		printf("screen id: %d\n", sn);
-
 		if (instance.screens[sn])
 		{
 			unsigned int c;
+			int load_opt = opt_grayscale;
+
 			struct RastPort rp;
 			int x,y;
 			InitRastPort(&rp);
 
-			printf("yes it looks like we can do whit, screen is open\n");
+			struct kittyData *var = findPublicVarByName( "_cat_load_iff_opt$", type_string );
+
+			if (str_var_is(var, "floyd") == 0 ) load_opt = opt_floyd;
+			if (str_var_is(var, "grayscale") == 0 ) load_opt = opt_grayscale;
 
 			retroBAR( instance.screens[sn], 0, 0,0, instance.screens[sn] -> realWidth,instance.screens[sn]->realHeight, instance.screens[sn] -> paper );
 
 			if (new_screen)
 			{
-				printf("this new screen so we need to more stuff\n");
-
 				init_amos_kittens_screen_default_text_window(instance.screens[sn], 256);
 				retroApplyScreen( instance.screens[sn], instance.video, 0, 0, instance.screens[sn] -> realWidth,instance.screens[sn]->realHeight );
 				set_default_colors( instance.screens[sn] );
@@ -1086,9 +1144,16 @@ void LoadIff( const char *org_name,  int sn )
 				{
 					colors = 256;
 
-					grayScalePalette( instance.screens[sn], colors );
+					switch (load_opt)
+					{
+						case opt_grayscale:
+							grayScalePalette( instance.screens[sn], colors );
+							break;
 
-					get_most_used_colors( &rp, instance.screens[sn]->realHeight,  instance.screens[sn]->realWidth, instance.screens[sn]);
+						case opt_floyd:
+							get_most_used_colors( &rp, instance.screens[sn]->realHeight,  instance.screens[sn]->realWidth, instance.screens[sn]);
+							break;
+					}
 				}
 			}
 
@@ -1102,13 +1167,20 @@ void LoadIff( const char *org_name,  int sn )
 					}
 				}
 			}
-			else
+			else	// true color image...
 			{
-//				floyd( &rp, instance.screens[sn]->realWidth,  instance.screens[sn]-> realHeight , instance.screens[sn] );
-
-				for (y=0;y<instance.screens[sn]->realHeight;y++)
+				switch (load_opt)
 				{
-					argbToGrayScale( &rp, y, instance.screens[sn] );
+					case opt_grayscale:
+						for (y=0;y<instance.screens[sn]->realHeight;y++)
+						{
+							argbToGrayScale( &rp, y, instance.screens[sn] );
+						}
+						break;
+
+					case opt_floyd:
+						floyd( &rp, instance.screens[sn]->realWidth,  instance.screens[sn]-> realHeight , instance.screens[sn] );
+						break;
 				}
 			}
 		}
@@ -1179,6 +1251,7 @@ void SaveIff( char *name, const int n )
 	struct BitMap *dt_bitmap;
 	struct ColorRegister *cr;
 	struct RastPort rp;
+	int maxColor = 0;
 
 	printf("we try to create a datatype\n");
 
@@ -1189,6 +1262,7 @@ void SaveIff( char *name, const int n )
 
 	if (dt_bitmap)
 	{
+		int col = 0;
 		int x,y;
 		dto = (struct DataType *) NewDTObject( NULL, 
 				DTA_SourceType, DTST_RAM,
@@ -1203,8 +1277,10 @@ void SaveIff( char *name, const int n )
 		for (y=0;y<instance.screens[n]-> realHeight;y++)
 		for (x=0;x<instance.screens[n] -> realWidth;x++)
 		{
-			SetAPen(&rp, retroPoint(instance.screens[n],x,y));
+			col = retroPoint(instance.screens[n],x,y);
+			SetAPen(&rp, col );
 			WritePixel(&rp,x,y);
+			maxColor = col > maxColor ? col : maxColor;
 		}
 	}
 
@@ -1230,9 +1306,12 @@ void SaveIff( char *name, const int n )
 		{
 			bm_header -> bmh_Width = instance.screens[n] -> realWidth;
 			bm_header -> bmh_Height = instance.screens[n]-> realHeight;
-			bm_header -> bmh_Depth = 8;
-			bm_header -> bmh_XAspect = 22;
-			bm_header -> bmh_YAspect = 22;
+
+			bm_header -> bmh_Depth = 1;
+			while ( (1 << bm_header -> bmh_Depth) < maxColor ) bm_header -> bmh_Depth <<= 1;
+
+			bm_header -> xAspect = (instance.screens[n]->videomode & retroHires) ? 11 : 22;
+			bm_header -> yAspect = (instance.screens[n]->videomode & retroInterlaced) ? 11 : 22;
 		}
 
 		SaveDTObject( (Object*) dto, NULL,NULL, name, FALSE, TAG_END );

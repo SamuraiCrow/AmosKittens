@@ -15,17 +15,14 @@
 
 //--------- other options ------------
 
-#define enable_interface_debug_no
+#define enable_interface_debug_yes
 #define show_error_at_file_no
 #define show_debug_amal_no
 #define show_array_no
 #define show_dump_vars_undefined_no
 #define enable_limit_mouse_no
-#define enable_engine_debug_output_no
+#define enable_engine_debug_output_yes
 #define enable_audio_debug_output_no
-#define enable_end_of_program_debug_no
-#define enable_config_debug_no
-#define enable_extension_debug_no
 
 // --------- debug options include ---------
 
@@ -36,7 +33,6 @@
 #define show_pass1_tokens_no
 #define show_pass1_procedure_fixes_no
 #define show_pass1_end_of_file_no
-#define show_pass1_modified_code_no
 
 // ------------- CRC options ------------------ (keep this to no, unless you need to find a memory corruption bug)
 
@@ -47,7 +43,7 @@
 // ------------ optimizer ----------------------
 
 #define run_program_yes
-#define enable_fast_execution_yes		// Some debug option do not work when this is enabled.
+#define enable_fast_execution_no		// Some debug option do not work when this is enabled.
 
 //------------- end of options -----------------
 
@@ -118,19 +114,6 @@ uint32_t mem_crc( char *mem, uint32_t size );
 #else
 #define pass1_printf(fmt,...)
 #endif
-
-#ifdef enable_config_debug_yes
-#define config_printf printf
-#else
-#define config_printf(fmt,...)
-#endif
-
-#ifdef enable_extension_debug_yes
-#define extension_printf printf
-#else
-#define extension_printf(fmt,...)
-#endif
-
 
 #ifdef show_debug_amal_yes
 	#ifdef __amigaos4__

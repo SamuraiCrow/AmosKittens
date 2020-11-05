@@ -25,13 +25,13 @@ struct ibutton
 struct zone_base
 {
 	int x0,y0,x1,y1,w,h;
-	union 
-	{
-		int pos;
-		int value;
-	};
+
+	struct ivar value;
+	struct ivar pos;
+
 	int event;	// is reset on dialog command, used read by rdialog command.
 
+	struct ivar params[9];		// index 0 to 8 == P1 to P9
 	char *script_action;
 
 	void (*update) (struct zone_base *base, struct cmdcontext *context, int args, int arg1,int arg2,int arg3);
@@ -90,13 +90,24 @@ struct zone_hypertext : zone_base
 	int pen;
 };
 
+
+struct zone_activelist : zone_base
+{
+	zone_activelist();
+	struct stringArrayData *array;
+	int paper;
+	int pen;
+	int flag;
+};
+
 enum 
 {
 	iz_none,
 	iz_button,
 	iz_hslider,
 	iz_vslider,
-	iz_hypertext
+	iz_hypertext,
+	iz_activelist
 };
 
 struct izone
@@ -115,6 +126,17 @@ struct userDefined
 	const char *action;
 };
 
+struct iblock
+{
+	bool (*start_fn)( struct cmdcontext *context, struct cmdinterface *self );
+	void (*end_fn)( struct cmdcontext *context);
+
+	void set(
+			bool (*start_fn)( struct cmdcontext *, struct cmdinterface * ),
+			void (*end_fn)( struct cmdcontext *)
+		 );
+};
+
 class cmdcontext
 {
 	public:
@@ -124,6 +146,11 @@ class cmdcontext
 		struct userDefined *findUserDefined( const char *name );
 		void dumpUserDefined();
 		void resetZoneEvents();
+		void dumpZones();
+		
+		void flushZones();
+		void flushVars();
+		void flushUserDefined();
 
 		cmdcontext();
 		~cmdcontext();
@@ -139,7 +166,14 @@ class cmdcontext
 		int lstackp;
 		struct ivar stack[20];
 		struct ivar *vars;
-		int param[9];		// index 0 to 8 == P1 to P9
+
+		struct ivar params[9];			// index 0 to 8 == P1 to P9
+		struct ivar *current_params;		// points to the current params
+
+		struct ivar *params_backup[10];
+		int ui_stackp;
+		struct ivar	defaultZoneValue;
+			
 		char *labels[512];
 		int programStackCount;
 		char *programStack[10];
@@ -152,12 +186,13 @@ class cmdcontext
 		int error;
 		char *at;
 		int l;
-		int ink0;
-		int ink1;
-		int ink3;
 		int image_offset;
 		int block_level;
-		void (**block_fn)( struct cmdcontext *context, struct cmdinterface *self );
+
+		// if true increment block counter, if false block was skipped, end block not expected.
+
+		struct iblock *iblocks;
+
 		int max_vars;
 		int last_zone;
 		int xgcl;
@@ -170,6 +205,7 @@ class cmdcontext
 		bool exit_run;
 		std::vector<struct userDefined> userDefineds;
 		struct userDefined *ui_current;
+		int pass_store;
 };
 
 struct cmdinterface
